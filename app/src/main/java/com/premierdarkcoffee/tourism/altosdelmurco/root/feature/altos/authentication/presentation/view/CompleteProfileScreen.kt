@@ -1,30 +1,54 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view
 
 import android.app.DatePickerDialog
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Badge
+import androidx.compose.material.icons.rounded.Cake
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Email
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Phone
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel.CompleteProfileViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -32,148 +56,284 @@ import java.util.Locale
 @Composable
 fun CompleteProfileScreen(
     state: SessionState.NeedsProfileCompletion,
+    onProfileCompleted: (ClientProfile) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    val dateFormatter = SimpleDateFormat("MMM d, yyyy", Locale.US)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "EC"))
 
-    LaunchedEffect(state.user.uid) {
+    LaunchedEffect(
+        state.user.uid,
+        state.existingProfile?.updatedAt,
+        state.existingProfile?.isProfileComplete,
+    ) {
         viewModel.initialize(
             user = state.user,
             existingProfile = state.existingProfile,
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Top,
-    ) {
-        Text(
-            text = "Completa tu perfil",
-            style = MaterialTheme.typography.headlineMedium,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = "Necesitamos tus datos básicos para pedidos, reservas y beneficios.",
-            style = MaterialTheme.typography.bodyLarge,
-        )
-
-        Spacer(modifier = Modifier.height(24.dp))
-
-        OutlinedTextField(
-            value = uiState.email,
-            onValueChange = {},
-            label = { Text("Correo") },
-            readOnly = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.fullName,
-            onValueChange = viewModel::onFullNameChanged,
-            label = { Text("Nombre completo") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.nationalId,
-            onValueChange = viewModel::onNationalIdChanged,
-            label = { Text("Cédula") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        OutlinedTextField(
-            value = uiState.phoneNumber,
-            onValueChange = viewModel::onPhoneNumberChanged,
-            label = { Text("WhatsApp") },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        Button(
-            onClick = {
-                val current = Calendar.getInstance().apply { time = uiState.birthday }
-                DatePickerDialog(
-                    context,
-                    { _, year, month, dayOfMonth ->
-                        val picked = Calendar.getInstance().apply {
-                            set(year, month, dayOfMonth, 0, 0, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }
-                        viewModel.onBirthdayChanged(picked.time)
-                    },
-                    current.get(Calendar.YEAR),
-                    current.get(Calendar.MONTH),
-                    current.get(Calendar.DAY_OF_MONTH),
-                ).show()
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text("Fecha de nacimiento: ${dateFormatter.format(uiState.birthday)}")
+    LaunchedEffect(viewModel) {
+        viewModel.profileCompleted.collect { profile ->
+            onProfileCompleted(profile)
         }
+    }
 
-        Spacer(modifier = Modifier.height(12.dp))
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        bottomBar = {
+            Surface(shadowElevation = 8.dp) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(16.dp),
+                ) {
+                    Button(
+                        onClick = viewModel::saveProfile,
+                        enabled = uiState.canSubmit && !uiState.isSaving,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp),
+                    ) {
+                        if (uiState.isSaving) {
+                            CircularProgressIndicator()
+                        } else {
+                            Text(
+                                text = "Guardar y entrar",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .verticalScroll(rememberScrollState())
+                .padding(innerPadding)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            HeaderCard(
+                title = "Completa tu perfil",
+                subtitle = "Cuando guardes correctamente, la app debe entrar al shell principal sin quedarse atrapada aquí.",
+            )
 
-        OutlinedTextField(
-            value = uiState.address,
-            onValueChange = viewModel::onAddressChanged,
-            label = { Text("Dirección") },
-            modifier = Modifier.fillMaxWidth(),
-        )
+            if (uiState.isSaving) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                )
+            }
 
-        Spacer(modifier = Modifier.height(12.dp))
+            InfoCard(
+                icon = Icons.Rounded.CheckCircle,
+                title = "Cuenta vinculada",
+                subtitle = "Tu cuenta de Google ya está autenticada. Solo faltan tus datos para pedidos, reservas y beneficios.",
+            )
 
-        OutlinedTextField(
-            value = uiState.emergencyContactName,
-            onValueChange = viewModel::onEmergencyContactNameChanged,
-            label = { Text("Contacto de emergencia") },
-            modifier = Modifier.fillMaxWidth(),
-        )
+            FormCard(title = "Datos principales") {
+                LabeledField(icon = Icons.Rounded.Person, title = "Nombre completo") {
+                    OutlinedTextField(
+                        value = uiState.fullName,
+                        onValueChange = viewModel::onFullNameChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Nombre") },
+                    )
+                }
 
-        Spacer(modifier = Modifier.height(12.dp))
+                LabeledField(icon = Icons.Rounded.Email, title = "Correo") {
+                    OutlinedTextField(
+                        value = uiState.email,
+                        onValueChange = viewModel::onEmailChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Correo") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    )
+                }
 
-        OutlinedTextField(
-            value = uiState.emergencyContactPhone,
-            onValueChange = viewModel::onEmergencyContactPhoneChanged,
-            label = { Text("Teléfono de emergencia") },
-            modifier = Modifier.fillMaxWidth(),
-        )
+                LabeledField(icon = Icons.Rounded.Badge, title = "Cédula") {
+                    OutlinedTextField(
+                        value = uiState.nationalId,
+                        onValueChange = viewModel::onNationalIdChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Cédula") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
 
-        uiState.errorMessage?.let { message ->
-            Spacer(modifier = Modifier.height(16.dp))
+                LabeledField(icon = Icons.Rounded.Phone, title = "WhatsApp") {
+                    OutlinedTextField(
+                        value = uiState.phoneNumber,
+                        onValueChange = viewModel::onPhoneNumberChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("WhatsApp") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    )
+                }
+
+                LabeledField(icon = Icons.Rounded.Cake, title = "Fecha de nacimiento") {
+                    TextButton(
+                        onClick = {
+                            val current = Calendar.getInstance().apply { time = uiState.birthday }
+                            DatePickerDialog(
+                                context,
+                                { _, year, month, dayOfMonth ->
+                                    val picked = Calendar.getInstance().apply {
+                                        set(year, month, dayOfMonth, 0, 0, 0)
+                                        set(Calendar.MILLISECOND, 0)
+                                    }
+                                    viewModel.onBirthdayChanged(picked.time)
+                                },
+                                current.get(Calendar.YEAR),
+                                current.get(Calendar.MONTH),
+                                current.get(Calendar.DAY_OF_MONTH),
+                            ).show()
+                        },
+                    ) {
+                        Text("Seleccionar fecha: ${dateFormatter.format(uiState.birthday)}")
+                    }
+                }
+
+                LabeledField(icon = Icons.Rounded.Home, title = "Dirección") {
+                    OutlinedTextField(
+                        value = uiState.address,
+                        onValueChange = viewModel::onAddressChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Dirección") },
+                        minLines = 2,
+                    )
+                }
+            }
+
+            FormCard(title = "Seguridad y contacto") {
+                LabeledField(icon = Icons.Rounded.Shield, title = "Contacto de emergencia") {
+                    OutlinedTextField(
+                        value = uiState.emergencyContactName,
+                        onValueChange = viewModel::onEmergencyContactNameChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Nombre del contacto") },
+                    )
+                }
+
+                LabeledField(icon = Icons.Rounded.Phone, title = "Teléfono de emergencia") {
+                    OutlinedTextField(
+                        value = uiState.emergencyContactPhone,
+                        onValueChange = viewModel::onEmergencyContactPhoneChanged,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Teléfono del contacto") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    )
+                }
+            }
+
+            uiState.errorMessage?.let { message ->
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                    ),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "No se pudo continuar",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(80.dp))
+        }
+    }
+}
+
+@Composable
+private fun HeaderCard(title: String, subtitle: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Column(modifier = Modifier.padding(20.dp)) {
             Text(
-                text = message,
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodyMedium,
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(20.dp))
+@Composable
+private fun InfoCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    subtitle: String,
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
-        Button(
-            onClick = viewModel::saveProfile,
-            enabled = uiState.canSubmit && !uiState.isSaving,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            if (uiState.isSaving) {
-                CircularProgressIndicator()
-            } else {
-                Text("Guardar perfil")
+@Composable
+private fun FormCard(title: String, content: @Composable () -> Unit) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(14.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun LabeledField(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    content: @Composable () -> Unit,
+) {
+    Column {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                content()
             }
         }
+        Spacer(modifier = Modifier.height(14.dp))
+        Divider()
+        Spacer(modifier = Modifier.height(14.dp))
     }
 }

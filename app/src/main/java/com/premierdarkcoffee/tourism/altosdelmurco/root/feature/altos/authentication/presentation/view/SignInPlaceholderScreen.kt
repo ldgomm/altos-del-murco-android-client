@@ -28,7 +28,7 @@ fun SignInPlaceholderScreen(
         AltosPlaceholderCard(
             title = "Módulo 2 pendiente",
             body = "Aquí conectaremos Firebase Auth y Sign in with Apple para Android. " +
-                "En release, el shell se detiene aquí hasta que el módulo real reemplace este placeholder.",
+                    "En release, el shell se detiene aquí hasta que el módulo real reemplace este placeholder.",
         )
     }
 }

@@ -12,7 +12,7 @@ import javax.inject.Singleton
 
 @Singleton
 class FirestoreClientProfileRepository @Inject constructor(
-    private val firestore: FirebaseFirestore,
+    val firestore: FirebaseFirestore,
 ) : ClientProfileRepositoriable {
 
     private val collection = firestore.collection(FirestoreCollections.CLIENTS)
@@ -29,9 +29,7 @@ class FirestoreClientProfileRepository @Inject constructor(
     }
 
     override suspend fun saveProfile(profile: ClientProfile) {
-        collection
-            .document(profile.id)
-            .set(ClientProfileDocument(profile), SetOptions.merge())
+        collection.document(profile.id).set(ClientProfileDocument(profile), SetOptions.merge())
             .awaitResult()
     }
 

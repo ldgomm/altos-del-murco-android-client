@@ -3,36 +3,52 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.NoCredentialException
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Agriculture
+import androidx.compose.material.icons.rounded.Login
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
-import com.premierdarkcoffee.tourism.altosdelmurco.R
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel.AuthenticationViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.clientId
 import kotlinx.coroutines.launch
@@ -59,76 +75,138 @@ fun AuthenticationScreen(
         )
     }
 
-    Surface(modifier = modifier.fillMaxSize()) {
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(16.dp),
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(
-                text = "Bienvenido a Altos del Murco",
-                style = MaterialTheme.typography.headlineMedium,
-            )
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.secondary,
+                                ),
+                            ),
+                        )
+                        .padding(24.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .background(Color.White.copy(alpha = 0.18f), CircleShape)
+                                .padding(14.dp),
+                        ) {
+                            androidx.compose.material3.Icon(
+                                imageVector = Icons.Rounded.Agriculture,
+                                contentDescription = null,
+                                tint = Color.White,
+                            )
+                        }
 
-            Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Bienvenido a Altos del Murco",
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White,
+                        )
 
-            Text(
-                text = "Inicia sesión con tu cuenta de Google para continuar con pedidos, reservas y tu perfil.",
-                style = MaterialTheme.typography.bodyLarge,
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-                    val currentActivity = activity ?: return@Button
-                    scope.launch {
-                        runGoogleSignIn(
-                            activity = currentActivity,
-                            filterByAuthorizedAccounts = false,
-                            autoSelect = false,
-                            onToken = viewModel::onGoogleIdTokenReceived,
-                            onNoCredential = viewModel::finishAuthorizedAccountsAttempt,
-                            onError = viewModel::onSignInError,
+                        Text(
+                            text = "Entra con Google para continuar con pedidos, reservas y tu perfil.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Color.White.copy(alpha = 0.92f),
                         )
                     }
-                },
-                enabled = activity != null && !uiState.isSubmitting,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                if (uiState.isSubmitting) {
-                    CircularProgressIndicator()
-                } else {
-                    Text("Continuar con Google")
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            OutlinedButton(
-                onClick = viewModel::clearError,
-                enabled = uiState.errorMessage != null,
+            Card(
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             ) {
-                Text("Limpiar mensaje")
-            }
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        text = "Acceso rápido",
+                        style = MaterialTheme.typography.titleLarge,
+                    )
 
-            if (uiState.isTryingAuthorizedAccounts && !uiState.isSubmitting) {
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(
-                    text = "Buscando una cuenta ya autorizada...",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+                    Text(
+                        text = if (uiState.isTryingAuthorizedAccounts && !uiState.isSubmitting) {
+                            "Buscando una cuenta ya autorizada..."
+                        } else {
+                            "Usa tu cuenta de Google para mantener sincronizados tus beneficios y reservas."
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
 
-            uiState.errorMessage?.let { message ->
-                Spacer(modifier = Modifier.height(20.dp))
-                Text(
-                    text = message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                    Button(
+                        onClick = {
+                            val currentActivity = activity ?: return@Button
+                            scope.launch {
+                                runGoogleSignIn(
+                                    activity = currentActivity,
+                                    filterByAuthorizedAccounts = false,
+                                    autoSelect = false,
+                                    onToken = viewModel::onGoogleIdTokenReceived,
+                                    onNoCredential = viewModel::finishAuthorizedAccountsAttempt,
+                                    onError = viewModel::onSignInError,
+                                )
+                            }
+                        },
+                        enabled = activity != null && !uiState.isSubmitting,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                        ),
+                        contentPadding = PaddingValues(vertical = 16.dp),
+                    ) {
+                        if (uiState.isSubmitting) {
+                            CircularProgressIndicator(
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                strokeWidth = 2.5.dp,
+                            )
+                        } else {
+                            androidx.compose.material3.Icon(
+                                imageVector = Icons.Rounded.Login,
+                                contentDescription = null,
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Text(
+                            text = if (uiState.isSubmitting) "Iniciando sesión..." else "Continuar con Google",
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                    }
+
+                    uiState.errorMessage?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         }
     }
@@ -158,7 +236,8 @@ private suspend fun runGoogleSignIn(
         val result = credentialManager.getCredential(activity, request)
         val credential = result.credential
 
-        if (credential is CustomCredential &&
+        if (
+            credential is CustomCredential &&
             credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
         ) {
             val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
@@ -166,17 +245,19 @@ private suspend fun runGoogleSignIn(
             return
         }
 
-        onError("Unsupported credential returned by Credential Manager.")
+        onError("Credential Manager devolvió una credencial no compatible.")
     } catch (_: GetCredentialCancellationException) {
+        onNoCredential()
+    } catch (_: NoCredentialException) {
         onNoCredential()
     } catch (error: GetCredentialException) {
         if (filterByAuthorizedAccounts) {
             onNoCredential()
         } else {
-            onError(error.message ?: "Google sign-in failed.")
+            onError(error.message ?: "No se pudo iniciar sesión con Google.")
         }
     } catch (error: Exception) {
-        onError(error.message ?: "Google sign-in failed.")
+        onError(error.message ?: "No se pudo iniciar sesión con Google.")
     }
 }
 

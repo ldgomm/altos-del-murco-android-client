@@ -58,7 +58,11 @@ class AccountActionsViewModel @Inject constructor(
                 )
                 sessionRepository.refresh()
             }.onFailure { error ->
-                _uiState.update { it.copy(errorMessage = error.message ?: "Could not delete account.") }
+                _uiState.update {
+                    it.copy(
+                        errorMessage = error.message ?: "Could not delete account."
+                    )
+                }
             }
             _uiState.update { it.copy(isBusy = false) }
         }

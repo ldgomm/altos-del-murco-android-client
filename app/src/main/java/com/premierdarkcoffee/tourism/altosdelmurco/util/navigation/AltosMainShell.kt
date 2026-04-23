@@ -108,7 +108,7 @@ fun AltosMainShell(
                 HomeScreen()
             }
             composable(TopLevelDestination.RESTAURANT.route) {
-                RestaurantScreen()
+                RestaurantScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.ADVENTURE.route) {
                 AdventureScreen()

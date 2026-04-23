@@ -29,7 +29,7 @@ fun CompleteProfilePlaceholderScreen(
         AltosPlaceholderCard(
             title = "Perfil pendiente",
             body = "El usuario $userId necesita completar el perfil. " +
-                "La persistencia real del perfil se implementará en el Módulo 2.",
+                    "La persistencia real del perfil se implementará en el Módulo 2.",
         )
     }
 }
