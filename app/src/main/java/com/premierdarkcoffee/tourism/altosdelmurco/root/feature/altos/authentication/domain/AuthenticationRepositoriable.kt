@@ -3,17 +3,12 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 interface AuthenticationRepositoriable {
     fun currentUser(): AuthenticatedUser?
 
-    suspend fun signInWithApple(
-        idToken: String,
-        rawNonce: String,
-        fullName: String?,
-        email: String?,
-        appleUserIdentifier: String,
+    suspend fun signInWithGoogle(
+        googleIdToken: String,
     ): AuthenticatedUser
 
     suspend fun reauthenticateCurrentUser(
-        idToken: String,
-        rawNonce: String,
+        googleIdToken: String,
     )
 
     suspend fun deleteCurrentUser()

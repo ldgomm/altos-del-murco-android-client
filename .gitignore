@@ -70,3 +70,4 @@ out/
 /app/src/main/AndroidManifest.xml
 /keys.properties
 /app/release/app-release.aab
+/app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/constant/ClientId.kt

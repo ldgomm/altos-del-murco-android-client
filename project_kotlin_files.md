@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
+            FirebaseApp.initializeApp(this)
             AltosApp()
         }
     }
@@ -324,11 +325,11 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure
 
 
 data class AdventureActivityDefaultsDto(
-    val durationMinutes: Int,
-    val peopleCount: Int,
-    val vehicleCount: Int,
-    val offRoadRiderCount: Int,
-    val nights: Int,
+    val durationMinutes: Int = 0,
+    val peopleCount: Int = 0,
+    val vehicleCount: Int = 0,
+    val offRoadRiderCount: Int = 0,
+    val nights: Int = 0,
 ) {
     fun toDomain(): AdventureActivityDefaults = AdventureActivityDefaults(
         durationMinutes = durationMinutes,
@@ -340,26 +341,25 @@ data class AdventureActivityDefaultsDto(
 }
 
 data class AdventureActivityCatalogDto(
-    val id: String,
-    val title: String,
-    val systemImage: String,
-    val shortDescription: String,
-    val fullDescription: String,
-    val includes: List<String>,
-    val durationOptions: List<Int>,
-    val pricingMode: String,
-    val basePrice: Double,
-    val discountAmount: Double,
-    val currency: String,
-    val defaults: AdventureActivityDefaultsDto,
-    val isActive: Boolean,
-    val sortOrder: Int,
-    val updatedAt: Timestamp,
+    val id: String = "",
+    val title: String = "",
+    val systemImage: String = "",
+    val shortDescription: String = "",
+    val fullDescription: String = "",
+    val includes: List<String> = emptyList(),
+    val durationOptions: List<Int> = emptyList(),
+    val pricingMode: String = "",
+    val basePrice: Double = 0.0,
+    val discountAmount: Double = 0.0,
+    val currency: String = "USD",
+    val defaults: AdventureActivityDefaultsDto = AdventureActivityDefaultsDto(),
+    val isActive: Boolean = false,
+    val sortOrder: Int = 0,
+    val updatedAt: Timestamp = Timestamp.now(),
 ) {
     fun toDomain(): AdventureActivityCatalogItem? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(id, ignoreCase = true)
-        } ?: return null
+        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(id, ignoreCase = true) }
+            ?: return null
         val parsedPricingMode = AdventurePricingMode.entries.firstOrNull {
             it.name.equals(pricingMode, ignoreCase = true)
         } ?: return null
@@ -386,17 +386,16 @@ data class AdventureActivityCatalogDto(
 }
 
 data class AdventureFeaturedPackageItemDto(
-    val activity: String,
-    val durationMinutes: Int,
-    val peopleCount: Int,
-    val vehicleCount: Int,
-    val offRoadRiderCount: Int,
-    val nights: Int,
+    val activity: String = "",
+    val durationMinutes: Int = 0,
+    val peopleCount: Int = 0,
+    val vehicleCount: Int = 0,
+    val offRoadRiderCount: Int = 0,
+    val nights: Int = 0,
 ) {
     fun toDomain(): AdventureReservationItemDraft? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(activity, ignoreCase = true)
-        } ?: return null
+        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(activity, ignoreCase = true) }
+            ?: return null
         return AdventureReservationItemDraft(
             activity = activityType,
             durationMinutes = durationMinutes,
@@ -409,8 +408,8 @@ data class AdventureFeaturedPackageItemDto(
 }
 
 data class AdventureFeaturedPackageFoodItemDto(
-    val menuItemId: String,
-    val quantity: Int,
+    val menuItemId: String = "",
+    val quantity: Int = 1,
 ) {
     fun toDomain(): AdventureFeaturedPackageFoodItem? {
         val cleanId = menuItemId.trim()
@@ -423,16 +422,16 @@ data class AdventureFeaturedPackageFoodItemDto(
 }
 
 data class AdventureFeaturedPackageDto(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val badge: String?,
-    val isActive: Boolean,
-    val sortOrder: Int,
-    val packageDiscountAmount: Double,
-    val items: List<AdventureFeaturedPackageItemDto>,
+    val id: String = "",
+    val title: String = "",
+    val subtitle: String = "",
+    val badge: String? = null,
+    val isActive: Boolean = false,
+    val sortOrder: Int = 0,
+    val packageDiscountAmount: Double = 0.0,
+    val items: List<AdventureFeaturedPackageItemDto> = emptyList(),
     val foodItems: List<AdventureFeaturedPackageFoodItemDto> = emptyList(),
-    val updatedAt: Timestamp,
+    val updatedAt: Timestamp = Timestamp.now(),
 ) {
     fun toDomain(): AdventureFeaturedPackage? {
         val mappedItems = items.mapNotNull { it.toDomain() }
@@ -452,6 +451,121 @@ data class AdventureFeaturedPackageDto(
             items = mappedItems,
             foodItems = mappedFoodItems,
             updatedAt = updatedAt.toDate(),
+        )
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class AdventureRepositoryModule {
+
+    @Binds
+    abstract fun bindAdventureCatalogRepository(
+        repository: FirebaseAdventureCatalogRepository,
+    ): AdventureCatalogRepository
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/FirebaseAdventureCatalogRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
+
+
+@Singleton
+class FirebaseAdventureCatalogRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : AdventureCatalogRepository {
+
+    override suspend fun fetchCatalog(): AdventureCatalogSnapshot {
+        val activitiesSnapshot =
+            firestore.collection(FirestoreCollections.ADVENTURE_ACTIVITIES).get().awaitResult()
+        val packagesSnapshot =
+            firestore.collection(FirestoreCollections.ADVENTURE_FEATURED_PACKAGES).get()
+                .awaitResult()
+        return makeCatalogSnapshot(activitiesSnapshot, packagesSnapshot)
+    }
+
+    override fun observeCatalog(): Flow<AdventureCatalogSnapshot> = callbackFlow {
+        var latestActivities: com.google.firebase.firestore.QuerySnapshot? = null
+        var latestPackages: com.google.firebase.firestore.QuerySnapshot? = null
+
+        fun emitIfReady() {
+            val activities = latestActivities
+            val packages = latestPackages
+            if (activities != null && packages != null) {
+                trySend(makeCatalogSnapshot(activities, packages)).isSuccess
+            }
+        }
+
+        val activitiesRegistration: ListenerRegistration = firestore
+            .collection(FirestoreCollections.ADVENTURE_ACTIVITIES)
+            .addSnapshotListener { snapshot, error ->
+                when {
+                    error != null -> close(error)
+                    snapshot != null -> {
+                        latestActivities = snapshot
+                        emitIfReady()
+                    }
+                }
+            }
+
+        val packagesRegistration: ListenerRegistration = firestore
+            .collection(FirestoreCollections.ADVENTURE_FEATURED_PACKAGES)
+            .addSnapshotListener { snapshot, error ->
+                when {
+                    error != null -> close(error)
+                    snapshot != null -> {
+                        latestPackages = snapshot
+                        emitIfReady()
+                    }
+                }
+            }
+
+        awaitClose {
+            activitiesRegistration.remove()
+            packagesRegistration.remove()
+        }
+    }
+
+    private fun makeCatalogSnapshot(
+        activitiesSnapshot: com.google.firebase.firestore.QuerySnapshot,
+        packagesSnapshot: com.google.firebase.firestore.QuerySnapshot,
+    ): AdventureCatalogSnapshot {
+        val activities = activitiesSnapshot.documents.mapNotNull { doc ->
+            doc.toObject(AdventureActivityCatalogDto::class.java)?.toDomain()
+        }
+
+        val activitiesByType = activities.associateBy { it.activityType }
+
+        val packages: List<AdventureFeaturedPackage> =
+            packagesSnapshot.documents.mapNotNull { doc ->
+                val dto =
+                    doc.toObject(AdventureFeaturedPackageDto::class.java) ?: return@mapNotNull null
+                if (!dto.isActive) return@mapNotNull null
+                val packageModel = dto.toDomain() ?: return@mapNotNull null
+                val allItemsActive =
+                    packageModel.items.all { item -> activitiesByType[item.activity]?.isActive == true }
+                if (!allItemsActive) return@mapNotNull null
+                packageModel
+            }
+
+        return AdventureCatalogSnapshot(
+            activities = activities.sortedWith(compareBy({ it.sortOrder }, { it.title })),
+            featuredPackages = packages.sortedWith(compareBy({ it.sortOrder }, { it.title })),
         )
     }
 }
@@ -558,6 +672,21 @@ data class AdventureCatalogSnapshot(
             featuredPackages = emptyList(),
         )
     }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureCatalogRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
+
+
+interface AdventureCatalogRepository {
+    suspend fun fetchCatalog(): AdventureCatalogSnapshot
+    fun observeCatalog(): Flow<AdventureCatalogSnapshot>
 }
 
 ```
@@ -1012,6 +1141,31 @@ abstract class AuthModule {
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/AuthRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class AuthRepositoryModule {
+
+    @Binds
+    abstract fun bindAuthenticationRepository(
+        repository: FirebaseAuthenticationRepository,
+    ): AuthenticationRepositoriable
+
+    @Binds
+    abstract fun bindClientProfileRepository(
+        repository: FirestoreClientProfileRepository,
+    ): ClientProfileRepositoriable
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/DeveloperBypassSessionRepository.kt
 
 ```kotlin
@@ -1032,6 +1186,185 @@ class DeveloperBypassSessionRepository @Inject constructor() : SessionRepository
             flowOf(SessionState.Unauthenticated)
         }
     }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/FirebaseAuthenticationRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
+
+
+@Singleton
+class FirebaseAuthenticationRepository @Inject constructor(
+    private val auth: FirebaseAuth,
+) : AuthenticationRepositoriable {
+
+    override fun currentUser(): AuthenticatedUser? {
+        val user = auth.currentUser ?: return null
+        val appleProviderUid = user.providerData.firstOrNull { it.providerId == "apple.com" }?.uid.orEmpty()
+        return AuthenticatedUser(
+            uid = user.uid,
+            email = user.email.orEmpty(),
+            displayName = user.displayName.orEmpty(),
+            appleUserIdentifier = appleProviderUid,
+        )
+    }
+
+    override suspend fun signInWithApple(
+        idToken: String,
+        rawNonce: String,
+        fullName: String?,
+        email: String?,
+        appleUserIdentifier: String,
+    ): AuthenticatedUser {
+        val credential = OAuthProvider
+            .newCredentialBuilder("apple.com")
+            .setIdTokenWithRawNonce(idToken, rawNonce)
+            .build()
+
+        val authResult = auth.signInWithCredential(credential).awaitResult()
+        val firebaseUser = requireNotNull(authResult.user) { "Firebase auth returned a null user after Apple sign in." }
+
+        val finalDisplayName = fullName?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: firebaseUser.displayName.orEmpty()
+        val finalEmail = email?.trim().takeUnless { it.isNullOrEmpty() }
+            ?: firebaseUser.email.orEmpty()
+        val providerUid = firebaseUser.providerData.firstOrNull { it.providerId == "apple.com" }?.uid
+        val finalAppleIdentifier = providerUid?.takeIf { it.isNotBlank() } ?: appleUserIdentifier
+
+        return AuthenticatedUser(
+            uid = firebaseUser.uid,
+            email = finalEmail,
+            displayName = finalDisplayName,
+            appleUserIdentifier = finalAppleIdentifier,
+        )
+    }
+
+    override suspend fun reauthenticateCurrentUser(
+        idToken: String,
+        rawNonce: String,
+    ) {
+        val user = requireNotNull(auth.currentUser) { "No authenticated user found." }
+        val credential = OAuthProvider
+            .newCredentialBuilder("apple.com")
+            .setIdTokenWithRawNonce(idToken, rawNonce)
+            .build()
+        user.reauthenticate(credential).awaitResult()
+    }
+
+    override suspend fun deleteCurrentUser() {
+        val user = requireNotNull(auth.currentUser) { "No authenticated user to delete." }
+        user.delete().awaitResult()
+    }
+
+    override fun signOut() {
+        auth.signOut()
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/FirestoreClientProfileRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
+
+
+@Singleton
+class FirestoreClientProfileRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : ClientProfileRepositoriable {
+
+    private val collection = firestore.collection(FirestoreCollections.CLIENTS)
+
+    override suspend fun fetchProfile(uid: String): ClientProfile? {
+        val cleanUid = uid.trim()
+        if (cleanUid.isEmpty()) return null
+
+        val snapshot = collection.document(cleanUid).get().awaitResult()
+        if (!snapshot.exists()) return null
+
+        val document = snapshot.toObject(ClientProfileDocument::class.java) ?: return null
+        return document.toDomain()
+    }
+
+    override suspend fun saveProfile(profile: ClientProfile) {
+        collection.document(profile.id).set(ClientProfileDocument(profile)).awaitResult()
+    }
+
+    override suspend fun deleteProfile(uid: String) {
+        val cleanUid = uid.trim()
+        if (cleanUid.isEmpty()) return
+        collection.document(cleanUid).delete().awaitResult()
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/domain/AuthenticatedUser.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain
+
+data class AuthenticatedUser(
+    val uid: String,
+    val email: String,
+    val displayName: String,
+    val appleUserIdentifier: String,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/domain/AuthenticationRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain
+
+interface AuthenticationRepositoriable {
+    fun currentUser(): AuthenticatedUser?
+
+    suspend fun signInWithApple(
+        idToken: String,
+        rawNonce: String,
+        fullName: String?,
+        email: String?,
+        appleUserIdentifier: String,
+    ): AuthenticatedUser
+
+    suspend fun reauthenticateCurrentUser(
+        idToken: String,
+        rawNonce: String,
+    )
+
+    suspend fun deleteCurrentUser()
+
+    fun signOut()
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/domain/ClientProfileRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain
+
+
+interface ClientProfileRepositoriable {
+    suspend fun fetchProfile(uid: String): ClientProfile?
+    suspend fun saveProfile(profile: ClientProfile)
+    suspend fun deleteProfile(uid: String)
 }
 
 ```
@@ -1254,6 +1587,110 @@ fun HomeScreen(
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/data/NoOpLoyaltyRewardsRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.data
+
+
+@Singleton
+class NoOpLoyaltyRewardsRepository @Inject constructor() : LoyaltyRewardsRepository {
+
+    override suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot {
+        return RewardWalletSnapshot.empty(nationalId.trim())
+    }
+
+    override suspend fun previewRestaurantRewards(
+        nationalId: String,
+        items: List<OrderItem>,
+    ): RewardComputationResult {
+        return RewardComputationResult.empty(RewardWalletSnapshot.empty(nationalId.trim()))
+    }
+
+    override suspend fun previewAdventureRewards(
+        nationalId: String,
+        activityItems: List<AdventureReservationItemDraft>,
+        foodItems: List<ReservationFoodItemDraft>,
+        catalog: AdventureCatalogSnapshot,
+    ): RewardComputationResult {
+        return RewardComputationResult.empty(RewardWalletSnapshot.empty(nationalId.trim()))
+    }
+
+    override suspend fun reserveRewards(
+        nationalId: String,
+        referenceType: LoyaltyRewardReferenceType,
+        referenceId: String,
+        appliedRewards: List<AppliedReward>,
+    ) = Unit
+
+    override suspend fun consumeRewards(nationalId: String, referenceId: String) = Unit
+
+    override suspend fun releaseRewards(nationalId: String, referenceId: String) = Unit
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/data/ProfileRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.data
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class ProfileRepositoryModule {
+
+    @Binds
+    abstract fun bindLoyaltyRewardsRepository(
+        repository: NoOpLoyaltyRewardsRepository,
+    ): LoyaltyRewardsRepository
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/AppliedRewardDto.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+data class AppliedRewardDto(
+    val id: String = "",
+    val templateId: String = "",
+    val title: String = "",
+    val amount: Double = 0.0,
+    val note: String = "",
+    val affectedMenuItemIds: List<String> = emptyList(),
+    val affectedActivityIds: List<String> = emptyList(),
+) {
+    constructor(domain: AppliedReward) : this(
+        id = domain.id,
+        templateId = domain.templateId,
+        title = domain.title,
+        amount = domain.amount,
+        note = domain.note,
+        affectedMenuItemIds = domain.affectedMenuItemIds,
+        affectedActivityIds = domain.affectedActivityIds,
+    )
+
+    fun toDomain(): AppliedReward = AppliedReward(
+        id = id,
+        templateId = templateId,
+        title = title,
+        amount = amount,
+        note = note,
+        affectedMenuItemIds = affectedMenuItemIds,
+        affectedActivityIds = affectedActivityIds,
+    )
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ClientProfile.kt
 
 ```kotlin
@@ -1290,22 +1727,22 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 
 
 data class ClientProfileDocument(
-    val id: String,
-    val email: String,
-    val appleUserIdentifier: String,
-    val fullName: String,
-    val nationalId: String,
-    val phoneNumber: String,
-    val birthday: Date,
-    val address: String,
-    val emergencyContactName: String,
-    val emergencyContactPhone: String,
-    val isProfileComplete: Boolean,
-    val createdAt: Date,
-    val updatedAt: Date,
-    val profileCompletedAt: Date?,
-    val profileImageURL: String?,
-    val profileImagePath: String?,
+    val id: String = "",
+    val email: String = "",
+    val appleUserIdentifier: String = "",
+    val fullName: String = "",
+    val nationalId: String = "",
+    val phoneNumber: String = "",
+    val birthday: Date = Date(),
+    val address: String = "",
+    val emergencyContactName: String = "",
+    val emergencyContactPhone: String = "",
+    val isProfileComplete: Boolean = false,
+    val createdAt: Date = Date(),
+    val updatedAt: Date = Date(),
+    val profileCompletedAt: Date? = null,
+    val profileImageURL: String? = null,
+    val profileImagePath: String? = null,
 ) {
     constructor(profile: ClientProfile) : this(
         id = profile.id,
@@ -1794,6 +2231,49 @@ data class LoyaltyWalletDocument(
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/LoyaltyRewardsRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+
+interface LoyaltyRewardsRepository {
+    suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot
+
+    suspend fun previewRestaurantRewards(
+        nationalId: String,
+        items: List<OrderItem>,
+    ): RewardComputationResult
+
+    suspend fun previewAdventureRewards(
+        nationalId: String,
+        activityItems: List<AdventureReservationItemDraft>,
+        foodItems: List<ReservationFoodItemDraft>,
+        catalog: AdventureCatalogSnapshot,
+    ): RewardComputationResult
+
+    suspend fun reserveRewards(
+        nationalId: String,
+        referenceType: LoyaltyRewardReferenceType,
+        referenceId: String,
+        appliedRewards: List<AppliedReward>,
+    )
+
+    suspend fun consumeRewards(
+        nationalId: String,
+        referenceId: String,
+    )
+
+    suspend fun releaseRewards(
+        nationalId: String,
+        referenceId: String,
+    )
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ProfileStats.kt
 
 ```kotlin
@@ -2049,7 +2529,7 @@ interface CartDao {
 
     @Transaction
     @Query("SELECT * FROM cart_drafts WHERE id = :draftId")
-    fun observeCart(draftId: String = CartDraftEntity.Companion.DEFAULT_ID): Flow<CartDraftWithItems?>
+    fun observeCart(draftId: String = CartDraftEntity.DEFAULT_ID): Flow<CartDraftWithItems?>
 
     @Upsert
     suspend fun upsertDraft(draft: CartDraftEntity)
@@ -2058,13 +2538,23 @@ interface CartDao {
     suspend fun upsertItems(items: List<CartItemEntity>)
 
     @Query("DELETE FROM cart_items WHERE draftId = :draftId")
-    suspend fun deleteItemsForDraft(draftId: String = CartDraftEntity.Companion.DEFAULT_ID)
+    suspend fun deleteItemsForDraft(draftId: String = CartDraftEntity.DEFAULT_ID)
 
-    @Query("DELETE FROM cart_items")
-    suspend fun clearItems()
+    @Query("DELETE FROM cart_drafts WHERE id = :draftId")
+    suspend fun deleteDraft(draftId: String = CartDraftEntity.DEFAULT_ID)
 
-    @Query("DELETE FROM cart_drafts")
-    suspend fun clearDrafts()
+    @Transaction
+    suspend fun replaceDraft(draft: CartDraftEntity, items: List<CartItemEntity>) {
+        deleteItemsForDraft(draft.id)
+        upsertDraft(draft)
+        if (items.isNotEmpty()) upsertItems(items)
+    }
+
+    @Transaction
+    suspend fun clearAll(draftId: String = CartDraftEntity.DEFAULT_ID) {
+        deleteItemsForDraft(draftId)
+        deleteDraft(draftId)
+    }
 }
 
 ```
@@ -2080,6 +2570,11 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 @Entity(tableName = "cart_drafts")
 data class CartDraftEntity(
     @PrimaryKey val id: String = DEFAULT_ID,
+    val nationalId: String?,
+    val clientName: String,
+    val tableNumber: String,
+    val revision: Int?,
+    val lastConfirmedRevision: Int?,
     val createdAtMillis: Long,
     val updatedAtMillis: Long,
 ) {
@@ -2133,11 +2628,445 @@ data class CartItemEntity(
     @PrimaryKey val id: String,
     val draftId: String = CartDraftEntity.DEFAULT_ID,
     val menuItemId: String,
+    val categoryId: String,
+    val categoryTitle: String,
     val name: String,
+    val description: String,
+    val notes: String?,
+    val ingredients: List<String>,
     val quantity: Int,
     val unitPrice: Double,
-    val notes: String?,
+    val offerPrice: Double?,
+    val imageURL: String?,
+    val isAvailable: Boolean,
+    val remainingQuantity: Int,
+    val isFeatured: Boolean,
+    val sortOrder: Int,
+    val itemNotes: String?,
 )
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/local/CartDraftMappers.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local
+
+
+internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
+    id = id,
+    nationalId = nationalId,
+    clientName = clientName,
+    tableNumber = tableNumber,
+    revision = revision,
+    lastConfirmedRevision = lastConfirmedRevision,
+    createdAtMillis = createdAt.time,
+    updatedAtMillis = updatedAt.time,
+)
+
+internal fun CartItem.toEntity(draftId: String): CartItemEntity = CartItemEntity(
+    id = id,
+    draftId = draftId,
+    menuItemId = menuItem.id,
+    categoryId = menuItem.categoryId,
+    categoryTitle = menuItem.categoryTitle,
+    name = menuItem.name,
+    description = menuItem.description,
+    notes = menuItem.notes,
+    ingredients = menuItem.ingredients,
+    quantity = quantity,
+    unitPrice = unitPrice,
+    offerPrice = menuItem.offerPrice,
+    imageURL = menuItem.imageURL,
+    isAvailable = menuItem.isAvailable,
+    remainingQuantity = menuItem.remainingQuantity,
+    isFeatured = menuItem.isFeatured,
+    sortOrder = menuItem.sortOrder,
+    itemNotes = notes,
+)
+
+internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
+    id = draft.id,
+    nationalId = draft.nationalId,
+    clientName = draft.clientName,
+    tableNumber = draft.tableNumber,
+    createdAt = Date(draft.createdAtMillis),
+    updatedAt = Date(draft.updatedAtMillis),
+    items = items.map { item ->
+        CartItem(
+            id = item.id,
+            menuItem = MenuItem(
+                id = item.menuItemId,
+                categoryId = item.categoryId,
+                categoryTitle = item.categoryTitle,
+                name = item.name,
+                description = item.description,
+                notes = item.notes,
+                ingredients = item.ingredients,
+                price = item.unitPrice,
+                offerPrice = item.offerPrice,
+                imageURL = item.imageURL,
+                isAvailable = item.isAvailable,
+                remainingQuantity = item.remainingQuantity,
+                isFeatured = item.isFeatured,
+                sortOrder = item.sortOrder,
+            ),
+            quantity = item.quantity,
+            notes = item.itemNotes,
+        )
+    },
+    revision = draft.revision,
+    lastConfirmedRevision = draft.lastConfirmedRevision,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/local/RoomCartDraftRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local
+
+
+@Singleton
+class RoomCartDraftRepository @Inject constructor(
+    private val cartDao: CartDao,
+) : CartDraftRepository {
+
+    override fun observeDraft(): Flow<OrderDraft> = cartDao.observeCart().map { stored ->
+        stored?.toDomain() ?: OrderDraft()
+    }
+
+    override suspend fun saveDraft(draft: OrderDraft) {
+        cartDao.replaceDraft(
+            draft = draft.toEntity(),
+            items = draft.items.map { it.toEntity(draft.id) },
+        )
+    }
+
+    override suspend fun clear() {
+        cartDao.clearAll()
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/remote/FirebaseMenuRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
+
+
+@Singleton
+class FirebaseMenuRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : MenuRepository {
+
+    override fun observeMenu(): Flow<List<MenuSection>> = callbackFlow {
+        val registration: ListenerRegistration = firestore
+            .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+            .orderBy("categoryTitle")
+            .orderBy("sortOrder")
+            .addSnapshotListener { snapshot, error ->
+                when {
+                    error != null -> close(error)
+                    snapshot == null -> trySend(emptyList()).isSuccess
+                    else -> {
+                        val items = snapshot.documents.mapNotNull { doc ->
+                            doc.toObject(MenuItemDto::class.java)?.toDomain()
+                        }
+                        trySend(groupIntoSections(items)).isSuccess
+                    }
+                }
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    private fun groupIntoSections(items: List<MenuItem>): List<MenuSection> {
+        return items
+            .groupBy { it.categoryId }
+            .mapNotNull { (categoryId, categoryItems) ->
+                val first = categoryItems.firstOrNull() ?: return@mapNotNull null
+                MenuSection(
+                    id = categoryId,
+                    category = MenuCategory(
+                        id = categoryId,
+                        title = first.categoryTitle,
+                    ),
+                    items = categoryItems.sortedBy { it.sortOrder },
+                )
+            }
+            .sortedBy { it.category.title }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/remote/FirebaseOrdersRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
+
+
+@Singleton
+class FirebaseOrdersRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepository,
+) : OrdersRepository {
+
+    override suspend fun submit(order: Order) {
+        val quantitiesByMenuItemId = order.items
+            .groupBy { it.menuItemId }
+            .mapValues { (_, items) -> items.sumOf { it.quantity } }
+            .filterValues { it > 0 }
+
+        val menuItemsToProcess: List<Pair<DocumentReference, Int>> =
+            quantitiesByMenuItemId.map { (menuItemId, totalQuantity) ->
+                firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+                    .document(menuItemId) to totalQuantity
+            }
+
+        firestore.runTransaction { transaction ->
+            val loadedItems = menuItemsToProcess.map { (ref, totalQuantity) ->
+                val snapshot = transaction.get(ref)
+                val dto =
+                    requireNotNull(snapshot.toObject(MenuItemDto::class.java)) { "Missing menu item ${ref.id}." }
+                Triple(ref, dto, totalQuantity)
+            }
+
+            loadedItems.forEach { (ref, dto, totalQuantity) ->
+                require(dto.isAvailable) { "${dto.name} no está disponible." }
+                require(dto.remainingQuantity >= totalQuantity) { "Ya no hay suficiente stock de ${dto.name}." }
+
+                val newRemainingQuantity = dto.remainingQuantity - totalQuantity
+                transaction.update(
+                    ref,
+                    mapOf(
+                        "remainingQuantity" to newRemainingQuantity,
+                        "isAvailable" to (newRemainingQuantity > 0),
+                        "updatedAt" to Timestamp.now(),
+                    ),
+                )
+            }
+
+            val orderRef =
+                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            transaction.set(orderRef, OrderDto(order))
+            null
+        }.awaitResult()
+
+        val nationalId = order.nationalId?.trim().orEmpty()
+        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
+            loyaltyRewardsRepository.reserveRewards(
+                nationalId = nationalId,
+                referenceType = LoyaltyRewardReferenceType.ORDER,
+                referenceId = order.id,
+                appliedRewards = order.appliedRewards,
+            )
+        }
+    }
+
+    override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
+        val cleanNationalId = nationalId.trim()
+        if (cleanNationalId.isEmpty()) {
+            trySend(emptyList()).isSuccess
+            close()
+            return@callbackFlow
+        }
+
+        val registration: ListenerRegistration = firestore
+            .collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .orderBy("createdAt")
+            .addSnapshotListener { snapshot, error ->
+                when {
+                    error != null -> close(error)
+                    snapshot == null -> trySend(emptyList()).isSuccess
+                    else -> {
+                        val orders = snapshot.documents.mapNotNull { doc ->
+                            doc.toObject(OrderDto::class.java)?.toDomain()
+                        }.sortedByDescending { it.createdAt.time }
+                        trySend(orders).isSuccess
+                    }
+                }
+            }
+
+        awaitClose { registration.remove() }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/remote/MenuItemDto.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
+
+
+data class MenuItemDto(
+    val id: String = "",
+    val categoryId: String = "",
+    val categoryTitle: String = "",
+    val name: String = "",
+    val description: String = "",
+    val notes: String? = null,
+    val ingredients: List<String> = emptyList(),
+    val price: Double = 0.0,
+    val offerPrice: Double? = null,
+    val imageURL: String? = null,
+    val isAvailable: Boolean = true,
+    val remainingQuantity: Int = 0,
+    val isFeatured: Boolean = false,
+    val sortOrder: Int = 0,
+    val createdAt: Timestamp? = null,
+    val updatedAt: Timestamp? = null,
+) {
+    fun toDomain(): MenuItem = MenuItem(
+        id = id,
+        categoryId = categoryId,
+        categoryTitle = categoryTitle,
+        name = name,
+        description = description,
+        notes = notes,
+        ingredients = ingredients,
+        price = price,
+        offerPrice = offerPrice,
+        imageURL = imageURL,
+        isAvailable = isAvailable,
+        remainingQuantity = remainingQuantity.coerceAtLeast(0),
+        isFeatured = isFeatured,
+        sortOrder = sortOrder,
+    )
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/remote/OrderDto.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
+
+
+data class OrderDto(
+    val id: String = "",
+    val nationalId: String? = null,
+    val clientName: String = "",
+    val tableNumber: String = "",
+    val createdAt: Timestamp = Timestamp.now(),
+    val updatedAt: Timestamp? = null,
+    val items: List<OrderItemDto> = emptyList(),
+    val subtotal: Double = 0.0,
+    val loyaltyDiscountAmount: Double? = null,
+    val appliedRewards: List<AppliedRewardDto>? = null,
+    val totalAmount: Double = 0.0,
+    val status: String? = null,
+    val revision: Int? = null,
+    val lastConfirmedRevision: Int? = null,
+) {
+    constructor(domain: Order) : this(
+        id = domain.id,
+        nationalId = domain.nationalId,
+        clientName = domain.clientName,
+        tableNumber = domain.tableNumber,
+        createdAt = Timestamp(domain.createdAt),
+        updatedAt = Timestamp(domain.updatedAt),
+        items = domain.items.map(::OrderItemDto),
+        subtotal = domain.subtotal,
+        loyaltyDiscountAmount = domain.loyaltyDiscountAmount,
+        appliedRewards = domain.appliedRewards.map(::AppliedRewardDto),
+        totalAmount = domain.totalAmount,
+        status = domain.status.name.lowercase(),
+        revision = domain.revision,
+        lastConfirmedRevision = domain.lastConfirmedRevision,
+    )
+
+    fun toDomain(): Order = Order(
+        id = id,
+        nationalId = nationalId,
+        clientName = clientName,
+        tableNumber = tableNumber,
+        createdAt = createdAt.toDate(),
+        updatedAt = updatedAt?.toDate() ?: createdAt.toDate(),
+        items = items.map { it.toDomain() },
+        subtotal = subtotal,
+        loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
+        appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
+        totalAmount = totalAmount,
+        status = OrderStatus.fromRaw(status),
+        revision = revision ?: 1,
+        lastConfirmedRevision = lastConfirmedRevision,
+    )
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/data/remote/OrderItemDto.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
+
+
+data class OrderItemDto(
+    val id: String = "",
+    val menuItemId: String = "",
+    val name: String = "",
+    val unitPrice: Double = 0.0,
+    val quantity: Int = 0,
+    val preparedQuantity: Int? = 0,
+    val totalPrice: Double? = null,
+    val notes: String? = null,
+) {
+    constructor(domain: OrderItem) : this(
+        id = domain.id,
+        menuItemId = domain.menuItemId,
+        name = domain.name,
+        unitPrice = domain.unitPrice,
+        quantity = domain.quantity,
+        preparedQuantity = domain.preparedQuantity,
+        totalPrice = domain.totalPrice,
+        notes = domain.notes,
+    )
+
+    fun toDomain(): OrderItem = OrderItem(
+        id = id,
+        menuItemId = menuItemId,
+        name = name,
+        unitPrice = unitPrice,
+        quantity = quantity,
+        preparedQuantity = preparedQuantity ?: 0,
+        notes = notes,
+    )
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/domain/CartDraftRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
+
+
+interface CartDraftRepository {
+    fun observeDraft(): Flow<OrderDraft>
+    suspend fun saveDraft(draft: OrderDraft)
+    suspend fun clear()
+}
 
 ```
 
@@ -2215,6 +3144,20 @@ data class MenuItem(
             remainingQuantity <= 5 -> "Quedan $remainingQuantity"
             else -> "$remainingQuantity disponibles"
         }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/domain/MenuRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
+
+
+interface MenuRepository {
+    fun observeMenu(): Flow<List<MenuSection>>
 }
 
 ```
@@ -2413,6 +3356,21 @@ enum class OrderStatus(val title: String) {
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/domain/OrdersRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
+
+
+interface OrdersRepository {
+    suspend fun submit(order: Order)
+    fun observeOrders(nationalId: String): Flow<List<Order>>
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/RestaurantScreen.kt
 
 ```kotlin
@@ -2459,7 +3417,7 @@ object DatabaseModule {
         context,
         AltosDatabase::class.java,
         "altos_database",
-    ).build()
+    ).fallbackToDestructiveMigration().build()
 
     @Provides
     fun provideCartDao(database: AltosDatabase): CartDao = database.cartDao()
@@ -2510,16 +3468,89 @@ object DispatchersModule {
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/di/FirebaseModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+object FirebaseModule {
+
+    @Provides
+    @Singleton
+    fun provideFirebaseApp(
+        @ApplicationContext context: Context,
+    ): FirebaseApp {
+        FirebaseApp.getApps(context).firstOrNull()?.let { return it }
+
+        return checkNotNull(FirebaseApp.initializeApp(context)) {
+            "FirebaseApp.initializeApp returned null. Verify google-services.json and Gradle setup."
+        }
+    }
+
+    @Provides
+    @Singleton
+    fun provideFirebaseAuth(
+        firebaseApp: FirebaseApp,
+    ): FirebaseAuth = FirebaseAuth.getInstance(firebaseApp)
+
+    @Provides
+    @Singleton
+    fun provideFirebaseFirestore(
+        firebaseApp: FirebaseApp,
+    ): FirebaseFirestore = FirebaseFirestore.getInstance(firebaseApp)
+
+    @Provides
+    @Singleton
+    fun provideFirebaseStorage(
+        firebaseApp: FirebaseApp,
+    ): FirebaseStorage = FirebaseStorage.getInstance(firebaseApp)
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/di/RestaurantRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class RestaurantRepositoryModule {
+
+    @Binds
+    abstract fun bindMenuRepository(repository: FirebaseMenuRepository): MenuRepository
+
+    @Binds
+    abstract fun bindOrdersRepository(repository: FirebaseOrdersRepository): OrdersRepository
+
+    @Binds
+    abstract fun bindCartDraftRepository(repository: RoomCartDraftRepository): CartDraftRepository
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/constant/FirestoreCollections.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.util.constant
 
 object FirestoreCollections {
+    const val CLIENTS = "clients"
+    const val CLIENT_LOYALTY_WALLETS = "client_loyalty_wallets"
+    const val LOYALTY_REWARD_TEMPLATES = "loyalty_reward_templates"
+    const val RESTAURANT_MENU_ITEMS = "restaurant_menu_items"
+    const val RESTAURANT_ORDERS = "restaurant_orders"
     const val ADVENTURE_ACTIVITIES = "adventure_activities"
     const val ADVENTURE_FEATURED_PACKAGES = "adventure_featured_packages"
     const val ADVENTURE_BOOKINGS = "adventure_bookings"
-    const val RESTAURANT_MENU_ITEMS = "restaurant_menu_items"
 }
 
 ```
@@ -2537,9 +3568,10 @@ package com.premierdarkcoffee.tourism.altosdelmurco.util.database
         CartDraftEntity::class,
         CartItemEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
+@TypeConverters(RoomConverters::class)
 abstract class AltosDatabase : RoomDatabase() {
     abstract fun cartDao(): CartDao
 }
@@ -2576,6 +3608,49 @@ class AppPreferencesDataSource @Inject constructor(
 
     private companion object {
         val THEME_MODE = stringPreferencesKey("theme_mode")
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/database/RoomConverters.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.database
+
+
+class RoomConverters {
+    @TypeConverter
+    fun fromStringList(value: List<String>?): String = value?.joinToString("||") ?: ""
+
+    @TypeConverter
+    fun toStringList(value: String?): List<String> = value
+        ?.takeIf { it.isNotBlank() }
+        ?.split("||")
+        ?: emptyList()
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/database/TaskAwait.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.database
+
+
+suspend fun <T> Task<T>.awaitResult(): T = suspendCancellableCoroutine { continuation ->
+    addOnSuccessListener { result ->
+        if (continuation.isActive) continuation.resume(result)
+    }
+    addOnFailureListener { error ->
+        if (continuation.isActive) continuation.resumeWithException(error)
+    }
+    addOnCanceledListener {
+        if (continuation.isActive) continuation.cancel()
     }
 }
 

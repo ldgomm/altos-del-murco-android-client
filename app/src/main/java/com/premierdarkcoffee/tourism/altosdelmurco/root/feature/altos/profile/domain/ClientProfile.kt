@@ -19,4 +19,16 @@ data class ClientProfile(
     val profileCompletedAt: Date?,
     val profileImageURL: String?,
     val profileImagePath: String?,
-)
+) {
+    val isComplete: Boolean
+        get() = isProfileComplete &&
+                fullName.isNotBlank() &&
+                nationalId.isNotBlank() &&
+                phoneNumber.isNotBlank() &&
+                address.isNotBlank() &&
+                emergencyContactName.isNotBlank() &&
+                emergencyContactPhone.isNotBlank()
+
+    val hasProfileImage: Boolean
+        get() = !profileImageURL.isNullOrBlank()
+}

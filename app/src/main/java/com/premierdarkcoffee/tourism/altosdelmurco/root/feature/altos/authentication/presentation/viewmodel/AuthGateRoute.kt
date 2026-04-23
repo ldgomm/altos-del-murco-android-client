@@ -10,8 +10,8 @@ import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view.CompleteProfilePlaceholderScreen
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view.SignInPlaceholderScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view.AuthenticationScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view.CompleteProfileScreen
 
 @Composable
 fun AuthGateRoute(
@@ -30,11 +30,14 @@ fun AuthGateRoute(
                 CircularProgressIndicator()
             }
         }
-        SessionState.Unauthenticated -> SignInPlaceholderScreen(modifier = modifier)
-        is SessionState.NeedsProfileCompletion -> CompleteProfilePlaceholderScreen(
-            userId = state.userId,
+
+        SessionState.Unauthenticated -> AuthenticationScreen(modifier = modifier)
+
+        is SessionState.NeedsProfileCompletion -> CompleteProfileScreen(
+            state = state,
             modifier = modifier,
         )
+
         is SessionState.Authenticated -> authenticatedContent(state)
     }
 }

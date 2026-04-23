@@ -1,7 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
 
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.OAuthProvider
+import com.google.firebase.auth.GoogleAuthProvider
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticatedUser
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticationRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
@@ -15,54 +15,37 @@ class FirebaseAuthenticationRepository @Inject constructor(
 
     override fun currentUser(): AuthenticatedUser? {
         val user = auth.currentUser ?: return null
-        val appleProviderUid = user.providerData.firstOrNull { it.providerId == "apple.com" }?.uid.orEmpty()
+        val googleProviderUid = user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+
         return AuthenticatedUser(
             uid = user.uid,
             email = user.email.orEmpty(),
             displayName = user.displayName.orEmpty(),
-            appleUserIdentifier = appleProviderUid,
+            appleUserIdentifier = googleProviderUid,
         )
     }
 
-    override suspend fun signInWithApple(
-        idToken: String,
-        rawNonce: String,
-        fullName: String?,
-        email: String?,
-        appleUserIdentifier: String,
+    override suspend fun signInWithGoogle(
+        googleIdToken: String,
     ): AuthenticatedUser {
-        val credential = OAuthProvider
-            .newCredentialBuilder("apple.com")
-            .setIdTokenWithRawNonce(idToken, rawNonce)
-            .build()
-
+        val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         val authResult = auth.signInWithCredential(credential).awaitResult()
-        val firebaseUser = requireNotNull(authResult.user) { "Firebase auth returned a null user after Apple sign in." }
-
-        val finalDisplayName = fullName?.trim().takeUnless { it.isNullOrEmpty() }
-            ?: firebaseUser.displayName.orEmpty()
-        val finalEmail = email?.trim().takeUnless { it.isNullOrEmpty() }
-            ?: firebaseUser.email.orEmpty()
-        val providerUid = firebaseUser.providerData.firstOrNull { it.providerId == "apple.com" }?.uid
-        val finalAppleIdentifier = providerUid?.takeIf { it.isNotBlank() } ?: appleUserIdentifier
+        val firebaseUser = requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
+        val googleProviderUid = firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = firebaseUser.uid,
-            email = finalEmail,
-            displayName = finalDisplayName,
-            appleUserIdentifier = finalAppleIdentifier,
+            email = firebaseUser.email.orEmpty(),
+            displayName = firebaseUser.displayName.orEmpty(),
+            appleUserIdentifier = googleProviderUid,
         )
     }
 
     override suspend fun reauthenticateCurrentUser(
-        idToken: String,
-        rawNonce: String,
+        googleIdToken: String,
     ) {
         val user = requireNotNull(auth.currentUser) { "No authenticated user found." }
-        val credential = OAuthProvider
-            .newCredentialBuilder("apple.com")
-            .setIdTokenWithRawNonce(idToken, rawNonce)
-            .build()
+        val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         user.reauthenticate(credential).awaitResult()
     }
 

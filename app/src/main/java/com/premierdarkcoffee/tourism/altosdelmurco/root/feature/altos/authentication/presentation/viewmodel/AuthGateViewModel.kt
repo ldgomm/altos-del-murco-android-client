@@ -9,10 +9,11 @@ import javax.inject.Inject
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 @HiltViewModel
 class AuthGateViewModel @Inject constructor(
-    sessionRepository: SessionRepository,
+    private val sessionRepository: SessionRepository,
 ) : ViewModel() {
 
     val sessionState: StateFlow<SessionState> = sessionRepository
@@ -22,4 +23,10 @@ class AuthGateViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = SessionState.Loading,
         )
+
+    fun refreshSession() {
+        viewModelScope.launch {
+            sessionRepository.refresh()
+        }
+    }
 }

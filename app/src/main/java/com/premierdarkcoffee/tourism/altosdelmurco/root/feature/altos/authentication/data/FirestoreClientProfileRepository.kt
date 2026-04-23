@@ -1,11 +1,12 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
 
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.ClientProfileRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfileDocument
-import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
+import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,7 +29,10 @@ class FirestoreClientProfileRepository @Inject constructor(
     }
 
     override suspend fun saveProfile(profile: ClientProfile) {
-        collection.document(profile.id).set(ClientProfileDocument(profile)).awaitResult()
+        collection
+            .document(profile.id)
+            .set(ClientProfileDocument(profile), SetOptions.merge())
+            .awaitResult()
     }
 
     override suspend fun deleteProfile(uid: String) {

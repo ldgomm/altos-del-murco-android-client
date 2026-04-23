@@ -4,4 +4,5 @@ import kotlinx.coroutines.flow.Flow
 
 interface SessionRepository {
     fun sessionState(): Flow<SessionState>
+    suspend fun refresh()
 }
