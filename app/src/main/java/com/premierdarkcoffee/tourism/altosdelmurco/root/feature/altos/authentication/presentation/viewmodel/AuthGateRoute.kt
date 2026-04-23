@@ -1,14 +1,11 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel
 
+import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -23,25 +20,13 @@ fun AuthGateRoute(
     viewModel: AuthGateViewModel = hiltViewModel(),
     authenticatedContent: @Composable (SessionState.Authenticated) -> Unit,
 ) {
-    val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
-    var locallyCompletedState by remember { mutableStateOf<SessionState.Authenticated?>(null) }
+    val sessionState = viewModel.sessionState.collectAsStateWithLifecycle()
 
     LaunchedEffect(sessionState) {
-        when (sessionState) {
-            SessionState.Unauthenticated,
-            SessionState.Loading,
-                -> locallyCompletedState = null
-            is SessionState.Authenticated -> locallyCompletedState = null
-            is SessionState.NeedsProfileCompletion -> Unit
-        }
+        Log.d("AltosAuthGate", "AuthGateRoute -> sessionState=$sessionState")
     }
 
-    locallyCompletedState?.let { authenticated ->
-        authenticatedContent(authenticated)
-        return
-    }
-
-    when (val state = sessionState) {
+    when (val state = sessionState.value) {
         SessionState.Loading -> {
             Box(
                 modifier = modifier.fillMaxSize(),
@@ -51,17 +36,34 @@ fun AuthGateRoute(
             }
         }
 
-        SessionState.Unauthenticated -> AuthenticationScreen(modifier = modifier)
+        SessionState.Unauthenticated -> {
+            AuthenticationScreen(modifier = modifier)
+        }
 
-        is SessionState.NeedsProfileCompletion -> CompleteProfileScreen(
-            state = state,
-            modifier = modifier,
-            onProfileCompleted = { profile ->
-                locallyCompletedState = SessionState.Authenticated(profile = profile)
-                viewModel.refreshSession()
-            },
-        )
+        is SessionState.Authenticated -> {
+            authenticatedContent(state)
+        }
 
-        is SessionState.Authenticated -> authenticatedContent(state)
+        is SessionState.NeedsProfileCompletion -> {
+            val existingProfile = state.existingProfile
+
+            if (existingProfile?.isComplete == true) {
+                LaunchedEffect(existingProfile.id, existingProfile.updatedAt.time) {
+                    viewModel.refreshSession()
+                }
+
+                authenticatedContent(
+                    SessionState.Authenticated(profile = existingProfile)
+                )
+            } else {
+                CompleteProfileScreen(
+                    state = state,
+                    modifier = modifier,
+                    onProfileCompleted = {
+                        viewModel.refreshSession()
+                    },
+                )
+            }
+        }
     }
 }

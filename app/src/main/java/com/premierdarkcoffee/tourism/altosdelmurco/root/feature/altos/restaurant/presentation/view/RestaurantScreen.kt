@@ -6,7 +6,6 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -102,10 +101,18 @@ fun RestaurantScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Restaurante",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Sabor de Los Altos",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Menú, promos y platos destacados",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 },
                 actions = {
                     AssistChip(
@@ -147,7 +154,12 @@ fun RestaurantScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 28.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 14.dp,
+                        bottom = 28.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
                     item {
@@ -170,24 +182,11 @@ fun RestaurantScreen(
 
                     if (uiState.featuredItems.isNotEmpty()) {
                         item {
-                            SectionHeader(
-                                title = "Popular",
-                                subtitle = "Favoritos de los clientes y platos destacados.",
+                            FeaturedCarousel(
+                                featuredItems = uiState.featuredItems,
+                                rewardProvider = viewModel::rewardPresentation,
+                                onOpen = { selectedItemId = it.id },
                             )
-                        }
-
-                        item {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                items(uiState.featuredItems, key = { it.id }) { item ->
-                                    FeaturedMenuCard(
-                                        item = item,
-                                        rewardPresentation = viewModel.rewardPresentation(item),
-                                        onOpen = { selectedItemId = item.id },
-                                    )
-                                }
-                            }
                         }
                     }
 
@@ -282,7 +281,7 @@ private fun RestaurantHeroCard(
                 )
 
                 Text(
-                    text = "Explora el menú, descubre promociones y revisa platos destacados con una experiencia más cercana a Altos iOS.",
+                    text = "Explora el menú con una experiencia más cercana a Altos iOS: hero visible, destacados arriba y categorías claras.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.94f),
                 )
@@ -401,6 +400,33 @@ private fun SectionHeader(
 }
 
 @Composable
+private fun FeaturedCarousel(
+    featuredItems: List<MenuItem>,
+    rewardProvider: (MenuItem) -> RewardPresentation?,
+    onOpen: (MenuItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionHeader(
+            title = "Destacados",
+            subtitle = "El equivalente Compose del featuredCarousel de SwiftUI.",
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(end = 2.dp),
+        ) {
+            items(featuredItems, key = { it.id }) { item ->
+                FeaturedMenuCard(
+                    item = item,
+                    rewardPresentation = rewardProvider(item),
+                    onOpen = { onOpen(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CategorySelectorBlock(
     selectedCategoryId: String?,
     sections: List<MenuSection>,
@@ -504,7 +530,10 @@ private fun FeaturedMenuCard(
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (item.hasOffer) {
                         Text(
                             text = item.price.priceLabel(),
@@ -637,7 +666,10 @@ private fun MenuItemRow(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 PriceCluster(item = item)
                 Spacer(modifier = Modifier.weight(1f))
                 MenuStockBadge(item = item, onColor = MaterialTheme.colorScheme.onSurface)
@@ -659,7 +691,10 @@ private fun MenuItemRow(
 
 @Composable
 private fun PriceCluster(item: MenuItem) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (item.hasOffer) {
             Text(
                 text = item.price.priceLabel(),
@@ -719,15 +754,23 @@ private fun MiniStatusPill(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CompactRewardRibbon(
     reward: RewardPresentation,
     onDark: Boolean,
 ) {
-    val background = if (onDark) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    val background = if (onDark) {
+        Color.White.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    }
     val titleColor = if (onDark) Color.White else MaterialTheme.colorScheme.primary
-    val bodyColor = if (onDark) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val bodyColor = if (onDark) {
+        Color.White.copy(alpha = 0.92f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Surface(
         color = background,
@@ -742,7 +785,11 @@ private fun CompactRewardRibbon(
         ) {
             MiniStatusPill(
                 text = reward.badge,
-                container = if (onDark) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                container = if (onDark) {
+                    Color.White.copy(alpha = 0.18f)
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                },
                 content = titleColor,
             )
             Text(

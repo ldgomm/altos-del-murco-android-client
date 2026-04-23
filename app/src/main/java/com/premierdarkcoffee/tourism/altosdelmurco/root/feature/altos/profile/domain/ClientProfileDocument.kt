@@ -39,22 +39,28 @@ data class ClientProfileDocument(
         profileImagePath = profile.profileImagePath,
     )
 
-    fun toDomain(): ClientProfile = ClientProfile(
-        id = id,
-        email = email,
-        appleUserIdentifier = appleUserIdentifier,
-        fullName = fullName,
-        nationalId = nationalId,
-        phoneNumber = phoneNumber,
-        birthday = birthday,
-        address = address,
-        emergencyContactName = emergencyContactName,
-        emergencyContactPhone = emergencyContactPhone,
-        isProfileComplete = isProfileComplete,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        profileCompletedAt = profileCompletedAt,
-        profileImageURL = profileImageURL,
-        profileImagePath = profileImagePath,
-    )
+    fun toDomain(
+        documentIdFallback: String? = null,
+    ): ClientProfile {
+        val resolvedId = id.trim().ifEmpty { documentIdFallback?.trim().orEmpty() }
+
+        return ClientProfile(
+            id = resolvedId,
+            email = email.trim(),
+            appleUserIdentifier = appleUserIdentifier.trim(),
+            fullName = fullName.trim(),
+            nationalId = nationalId.trim(),
+            phoneNumber = phoneNumber.trim(),
+            birthday = birthday,
+            address = address.trim(),
+            emergencyContactName = emergencyContactName.trim(),
+            emergencyContactPhone = emergencyContactPhone.trim(),
+            isProfileComplete = isProfileComplete,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            profileCompletedAt = profileCompletedAt,
+            profileImageURL = profileImageURL?.trim()?.takeIf { it.isNotEmpty() },
+            profileImagePath = profileImagePath?.trim()?.takeIf { it.isNotEmpty() },
+        )
+    }
 }

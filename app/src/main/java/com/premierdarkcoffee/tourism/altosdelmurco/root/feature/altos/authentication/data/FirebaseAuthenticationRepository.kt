@@ -15,7 +15,8 @@ class FirebaseAuthenticationRepository @Inject constructor(
 
     override fun currentUser(): AuthenticatedUser? {
         val user = auth.currentUser ?: return null
-        val googleProviderUid = user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+        val googleProviderUid =
+            user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = user.uid,
@@ -30,8 +31,10 @@ class FirebaseAuthenticationRepository @Inject constructor(
     ): AuthenticatedUser {
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         val authResult = auth.signInWithCredential(credential).awaitResult()
-        val firebaseUser = requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
-        val googleProviderUid = firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+        val firebaseUser =
+            requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
+        val googleProviderUid =
+            firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = firebaseUser.uid,

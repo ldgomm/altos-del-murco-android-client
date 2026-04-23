@@ -1180,7 +1180,8 @@ class FirebaseAuthenticationRepository @Inject constructor(
 
     override fun currentUser(): AuthenticatedUser? {
         val user = auth.currentUser ?: return null
-        val googleProviderUid = user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+        val googleProviderUid =
+            user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = user.uid,
@@ -1195,8 +1196,10 @@ class FirebaseAuthenticationRepository @Inject constructor(
     ): AuthenticatedUser {
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         val authResult = auth.signInWithCredential(credential).awaitResult()
-        val firebaseUser = requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
-        val googleProviderUid = firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+        val firebaseUser =
+            requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
+        val googleProviderUid =
+            firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = firebaseUser.uid,
@@ -1243,41 +1246,79 @@ class FirebaseSessionRepository @Inject constructor(
 
     private val refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
+    companion object {
+        private const val TAG = "AltosSession"
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun sessionState(): Flow<SessionState> {
-        return authUserFlow()
-            .flatMapLatest { firebaseUser ->
-                refreshRequests
-                    .onStart { emit(Unit) }
-                    .flatMapLatest {
-                        flow {
-                            emit(resolve(firebaseUser))
-                        }
-                    }
+        val authChanges = authUserFlow().map { Unit }
+        val manualRefreshes = refreshRequests.onStart { emit(Unit) }
+
+        return merge(authChanges, manualRefreshes)
+            .mapLatest {
+                Log.d(
+                    TAG,
+                    "sessionState() tick -> auth.currentUser.uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
+                )
+                resolveLatestSessionState()
             }
             .distinctUntilChanged()
     }
 
     override suspend fun refresh() {
-        auth.currentUser?.reload()?.awaitResult()
+        Log.d(
+            TAG,
+            "refresh() requested -> current uid before reload=${auth.currentUser?.uid}"
+        )
+
+        runCatching {
+            auth.currentUser?.reload()?.awaitResult()
+        }.onSuccess {
+            Log.d(
+                TAG,
+                "refresh() reload success -> current uid after reload=${auth.currentUser?.uid}"
+            )
+        }.onFailure { error ->
+            Log.e(TAG, "refresh() reload failure", error)
+        }
+
         refreshRequests.emit(Unit)
     }
 
     private fun authUserFlow(): Flow<FirebaseUser?> = callbackFlow {
         val listener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+            Log.d(
+                TAG,
+                "AuthStateListener -> uid=${firebaseAuth.currentUser?.uid}, email=${firebaseAuth.currentUser?.email}"
+            )
             trySend(firebaseAuth.currentUser).isSuccess
         }
 
         auth.addAuthStateListener(listener)
+
+        Log.d(
+            TAG,
+            "authUserFlow initial emit -> uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
+        )
         trySend(auth.currentUser).isSuccess
 
         awaitClose {
             auth.removeAuthStateListener(listener)
         }
-    }
+    }.distinctUntilChanged()
 
-    private suspend fun resolve(firebaseUser: FirebaseUser?): SessionState {
-        if (firebaseUser == null) return SessionState.Unauthenticated
+    private suspend fun resolveLatestSessionState(): SessionState {
+        val firebaseUser = auth.currentUser
+        if (firebaseUser == null) {
+            Log.d(TAG, "resolveLatestSessionState -> Unauthenticated (firebaseUser=null)")
+            return SessionState.Unauthenticated
+        }
+
+        Log.d(
+            TAG,
+            "resolveLatestSessionState -> firebaseUser uid=${firebaseUser.uid}, email=${firebaseUser.email}, displayName=${firebaseUser.displayName}"
+        )
 
         val currentUser = authenticationRepository.currentUser()
             ?: AuthenticatedUser(
@@ -1287,16 +1328,40 @@ class FirebaseSessionRepository @Inject constructor(
                 appleUserIdentifier = "",
             )
 
-        return when (val destination = resolveSessionUseCase.execute(currentUser)) {
-            SessionDestination.SignedOut -> SessionState.Unauthenticated
-            is SessionDestination.NeedsProfile -> SessionState.NeedsProfileCompletion(
-                user = destination.user,
-                existingProfile = destination.profile,
-            )
+        Log.d(
+            TAG,
+            "resolveLatestSessionState -> currentUser uid=${currentUser.uid}, email=${currentUser.email}, displayName=${currentUser.displayName}, appleUserIdentifier=${currentUser.appleUserIdentifier}"
+        )
 
-            is SessionDestination.Authenticated -> SessionState.Authenticated(
-                profile = destination.profile,
-            )
+        val destination = resolveSessionUseCase.execute(currentUser)
+
+        when (destination) {
+            SessionDestination.SignedOut -> {
+                Log.d(TAG, "resolveLatestSessionState -> destination=SignedOut")
+                return SessionState.Unauthenticated
+            }
+
+            is SessionDestination.NeedsProfile -> {
+                val profile = destination.profile
+                Log.d(
+                    TAG,
+                    "resolveLatestSessionState -> destination=NeedsProfile, profileExists=${profile != null}, profileIsComplete=${profile?.isComplete}, profileId=${profile?.id}, profileEmail=${profile?.email}"
+                )
+                return SessionState.NeedsProfileCompletion(
+                    user = destination.user,
+                    existingProfile = destination.profile,
+                )
+            }
+
+            is SessionDestination.Authenticated -> {
+                Log.d(
+                    TAG,
+                    "resolveLatestSessionState -> destination=Authenticated, profileId=${destination.profile.id}, profileEmail=${destination.profile.email}, profileIsComplete=${destination.profile.isComplete}"
+                )
+                return SessionState.Authenticated(
+                    profile = destination.profile,
+                )
+            }
         }
     }
 }
@@ -1313,31 +1378,116 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 
 @Singleton
 class FirestoreClientProfileRepository @Inject constructor(
-    val firestore: FirebaseFirestore,
+    private val firestore: FirebaseFirestore,
 ) : ClientProfileRepositoriable {
 
     private val collection = firestore.collection(FirestoreCollections.CLIENTS)
 
+    companion object {
+        private const val TAG = "AltosProfileRepo"
+    }
+
     override suspend fun fetchProfile(uid: String): ClientProfile? {
         val cleanUid = uid.trim()
-        if (cleanUid.isEmpty()) return null
+        if (cleanUid.isEmpty()) {
+            Log.d(TAG, "fetchProfile -> empty uid")
+            return null
+        }
+
+        Log.d(TAG, "fetchProfile -> requesting clients/$cleanUid")
 
         val snapshot = collection.document(cleanUid).get().awaitResult()
-        if (!snapshot.exists()) return null
 
-        val document = snapshot.toObject(ClientProfileDocument::class.java) ?: return null
-        return document.toDomain()
+        Log.d(
+            TAG,
+            "fetchProfile -> snapshot exists=${snapshot.exists()}, id=${snapshot.id}, keys=${snapshot.data?.keys?.sorted()}"
+        )
+
+        if (!snapshot.exists()) {
+            Log.d(TAG, "fetchProfile -> document does not exist for uid=$cleanUid")
+            return null
+        }
+
+        val profile = snapshot.toClientProfileOrNull()
+
+        Log.d(
+            TAG,
+            "fetchProfile -> mapped profile null=${profile == null}, " +
+                    "id=${profile?.id}, " +
+                    "email=${profile?.email}, " +
+                    "fullName='${profile?.fullName}', " +
+                    "nationalId='${profile?.nationalId}', " +
+                    "phone='${profile?.phoneNumber}', " +
+                    "address='${profile?.address}', " +
+                    "emergencyName='${profile?.emergencyContactName}', " +
+                    "emergencyPhone='${profile?.emergencyContactPhone}', " +
+                    "isProfileComplete=${profile?.isProfileComplete}, " +
+                    "isComplete=${profile?.isComplete}"
+        )
+
+        return profile
     }
 
     override suspend fun saveProfile(profile: ClientProfile) {
-        collection.document(profile.id).set(ClientProfileDocument(profile), SetOptions.merge())
+        Log.d(
+            TAG,
+            "saveProfile -> writing clients/${profile.id.trim()} " +
+                    "email=${profile.email}, " +
+                    "fullName='${profile.fullName}', " +
+                    "nationalId='${profile.nationalId}', " +
+                    "phone='${profile.phoneNumber}', " +
+                    "address='${profile.address}', " +
+                    "emergencyName='${profile.emergencyContactName}', " +
+                    "emergencyPhone='${profile.emergencyContactPhone}', " +
+                    "isProfileComplete=${profile.isProfileComplete}, " +
+                    "isComplete=${profile.isComplete}"
+        )
+
+        collection
+            .document(profile.id.trim())
+            .set(ClientProfileDocument(profile), SetOptions.merge())
             .awaitResult()
+
+        Log.d(TAG, "saveProfile -> write success clients/${profile.id.trim()}")
     }
 
     override suspend fun deleteProfile(uid: String) {
         val cleanUid = uid.trim()
         if (cleanUid.isEmpty()) return
         collection.document(cleanUid).delete().awaitResult()
+    }
+
+    private fun DocumentSnapshot.toClientProfileOrNull(): ClientProfile? {
+        return runCatching {
+            ClientProfile(
+                id = id.trim(),
+                email = getString("email").orEmpty().trim(),
+                appleUserIdentifier = getString("appleUserIdentifier").orEmpty().trim(),
+                fullName = getString("fullName").orEmpty().trim(),
+                nationalId = getString("nationalId").orEmpty().trim(),
+                phoneNumber = getString("phoneNumber").orEmpty().trim(),
+                birthday = getDateValue("birthday") ?: Date(0),
+                address = getString("address").orEmpty().trim(),
+                emergencyContactName = getString("emergencyContactName").orEmpty().trim(),
+                emergencyContactPhone = getString("emergencyContactPhone").orEmpty().trim(),
+                isProfileComplete = getBoolean("profileComplete") == true,
+                createdAt = getDateValue("createdAt") ?: Date(),
+                updatedAt = getDateValue("updatedAt") ?: Date(),
+                profileCompletedAt = getDateValue("profileCompletedAt"),
+                profileImageURL = getString("profileImageURL")?.trim()?.takeIf { it.isNotEmpty() },
+                profileImagePath = getString("profileImagePath")?.trim()?.takeIf { it.isNotEmpty() },
+            )
+        }.onFailure { error ->
+            Log.e(TAG, "toClientProfileOrNull -> mapping failed for docId=$id", error)
+        }.getOrNull()
+    }
+
+    private fun DocumentSnapshot.getDateValue(field: String): Date? {
+        return when (val value = get(field)) {
+            is Timestamp -> value.toDate()
+            is Date -> value
+            else -> null
+        }
     }
 }
 
@@ -2240,25 +2390,13 @@ fun AuthGateRoute(
     viewModel: AuthGateViewModel = hiltViewModel(),
     authenticatedContent: @Composable (SessionState.Authenticated) -> Unit,
 ) {
-    val sessionState by viewModel.sessionState.collectAsStateWithLifecycle()
-    var locallyCompletedState by remember { mutableStateOf<SessionState.Authenticated?>(null) }
+    val sessionState = viewModel.sessionState.collectAsStateWithLifecycle()
 
     LaunchedEffect(sessionState) {
-        when (sessionState) {
-            SessionState.Unauthenticated,
-            SessionState.Loading,
-                -> locallyCompletedState = null
-            is SessionState.Authenticated -> locallyCompletedState = null
-            is SessionState.NeedsProfileCompletion -> Unit
-        }
+        Log.d("AltosAuthGate", "AuthGateRoute -> sessionState=$sessionState")
     }
 
-    locallyCompletedState?.let { authenticated ->
-        authenticatedContent(authenticated)
-        return
-    }
-
-    when (val state = sessionState) {
+    when (val state = sessionState.value) {
         SessionState.Loading -> {
             Box(
                 modifier = modifier.fillMaxSize(),
@@ -2268,18 +2406,35 @@ fun AuthGateRoute(
             }
         }
 
-        SessionState.Unauthenticated -> AuthenticationScreen(modifier = modifier)
+        SessionState.Unauthenticated -> {
+            AuthenticationScreen(modifier = modifier)
+        }
 
-        is SessionState.NeedsProfileCompletion -> CompleteProfileScreen(
-            state = state,
-            modifier = modifier,
-            onProfileCompleted = { profile ->
-                locallyCompletedState = SessionState.Authenticated(profile = profile)
-                viewModel.refreshSession()
-            },
-        )
+        is SessionState.Authenticated -> {
+            authenticatedContent(state)
+        }
 
-        is SessionState.Authenticated -> authenticatedContent(state)
+        is SessionState.NeedsProfileCompletion -> {
+            val existingProfile = state.existingProfile
+
+            if (existingProfile?.isComplete == true) {
+                LaunchedEffect(existingProfile.id, existingProfile.updatedAt.time) {
+                    viewModel.refreshSession()
+                }
+
+                authenticatedContent(
+                    SessionState.Authenticated(profile = existingProfile)
+                )
+            } else {
+                CompleteProfileScreen(
+                    state = state,
+                    modifier = modifier,
+                    onProfileCompleted = {
+                        viewModel.refreshSession()
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -2807,24 +2962,30 @@ data class ClientProfileDocument(
         profileImagePath = profile.profileImagePath,
     )
 
-    fun toDomain(): ClientProfile = ClientProfile(
-        id = id,
-        email = email,
-        appleUserIdentifier = appleUserIdentifier,
-        fullName = fullName,
-        nationalId = nationalId,
-        phoneNumber = phoneNumber,
-        birthday = birthday,
-        address = address,
-        emergencyContactName = emergencyContactName,
-        emergencyContactPhone = emergencyContactPhone,
-        isProfileComplete = isProfileComplete,
-        createdAt = createdAt,
-        updatedAt = updatedAt,
-        profileCompletedAt = profileCompletedAt,
-        profileImageURL = profileImageURL,
-        profileImagePath = profileImagePath,
-    )
+    fun toDomain(
+        documentIdFallback: String? = null,
+    ): ClientProfile {
+        val resolvedId = id.trim().ifEmpty { documentIdFallback?.trim().orEmpty() }
+
+        return ClientProfile(
+            id = resolvedId,
+            email = email.trim(),
+            appleUserIdentifier = appleUserIdentifier.trim(),
+            fullName = fullName.trim(),
+            nationalId = nationalId.trim(),
+            phoneNumber = phoneNumber.trim(),
+            birthday = birthday,
+            address = address.trim(),
+            emergencyContactName = emergencyContactName.trim(),
+            emergencyContactPhone = emergencyContactPhone.trim(),
+            isProfileComplete = isProfileComplete,
+            createdAt = createdAt,
+            updatedAt = updatedAt,
+            profileCompletedAt = profileCompletedAt,
+            profileImageURL = profileImageURL?.trim()?.takeIf { it.isNotEmpty() },
+            profileImagePath = profileImagePath?.trim()?.takeIf { it.isNotEmpty() },
+        )
+    }
 }
 
 ```
@@ -5003,10 +5164,18 @@ fun RestaurantScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Restaurante",
-                        style = MaterialTheme.typography.titleLarge,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Sabor de Los Altos",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Menú, promos y platos destacados",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 },
                 actions = {
                     AssistChip(
@@ -5048,7 +5217,12 @@ fun RestaurantScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 28.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 14.dp,
+                        bottom = 28.dp
+                    ),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
                     item {
@@ -5071,24 +5245,11 @@ fun RestaurantScreen(
 
                     if (uiState.featuredItems.isNotEmpty()) {
                         item {
-                            SectionHeader(
-                                title = "Popular",
-                                subtitle = "Favoritos de los clientes y platos destacados.",
+                            FeaturedCarousel(
+                                featuredItems = uiState.featuredItems,
+                                rewardProvider = viewModel::rewardPresentation,
+                                onOpen = { selectedItemId = it.id },
                             )
-                        }
-
-                        item {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                items(uiState.featuredItems, key = { it.id }) { item ->
-                                    FeaturedMenuCard(
-                                        item = item,
-                                        rewardPresentation = viewModel.rewardPresentation(item),
-                                        onOpen = { selectedItemId = item.id },
-                                    )
-                                }
-                            }
                         }
                     }
 
@@ -5183,7 +5344,7 @@ private fun RestaurantHeroCard(
                 )
 
                 Text(
-                    text = "Explora el menú, descubre promociones y revisa platos destacados con una experiencia más cercana a Altos iOS.",
+                    text = "Explora el menú con una experiencia más cercana a Altos iOS: hero visible, destacados arriba y categorías claras.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.94f),
                 )
@@ -5302,6 +5463,33 @@ private fun SectionHeader(
 }
 
 @Composable
+private fun FeaturedCarousel(
+    featuredItems: List<MenuItem>,
+    rewardProvider: (MenuItem) -> RewardPresentation?,
+    onOpen: (MenuItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionHeader(
+            title = "Destacados",
+            subtitle = "El equivalente Compose del featuredCarousel de SwiftUI.",
+        )
+
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(end = 2.dp),
+        ) {
+            items(featuredItems, key = { it.id }) { item ->
+                FeaturedMenuCard(
+                    item = item,
+                    rewardPresentation = rewardProvider(item),
+                    onOpen = { onOpen(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun CategorySelectorBlock(
     selectedCategoryId: String?,
     sections: List<MenuSection>,
@@ -5405,7 +5593,10 @@ private fun FeaturedMenuCard(
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (item.hasOffer) {
                         Text(
                             text = item.price.priceLabel(),
@@ -5538,7 +5729,10 @@ private fun MenuItemRow(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 PriceCluster(item = item)
                 Spacer(modifier = Modifier.weight(1f))
                 MenuStockBadge(item = item, onColor = MaterialTheme.colorScheme.onSurface)
@@ -5560,7 +5754,10 @@ private fun MenuItemRow(
 
 @Composable
 private fun PriceCluster(item: MenuItem) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         if (item.hasOffer) {
             Text(
                 text = item.price.priceLabel(),
@@ -5620,15 +5817,23 @@ private fun MiniStatusPill(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CompactRewardRibbon(
     reward: RewardPresentation,
     onDark: Boolean,
 ) {
-    val background = if (onDark) Color.White.copy(alpha = 0.14f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    val background = if (onDark) {
+        Color.White.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
+    }
     val titleColor = if (onDark) Color.White else MaterialTheme.colorScheme.primary
-    val bodyColor = if (onDark) Color.White.copy(alpha = 0.92f) else MaterialTheme.colorScheme.onSurfaceVariant
+    val bodyColor = if (onDark) {
+        Color.White.copy(alpha = 0.92f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
 
     Surface(
         color = background,
@@ -5643,7 +5848,11 @@ private fun CompactRewardRibbon(
         ) {
             MiniStatusPill(
                 text = reward.badge,
-                container = if (onDark) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                container = if (onDark) {
+                    Color.White.copy(alpha = 0.18f)
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                },
                 content = titleColor,
             )
             Text(
