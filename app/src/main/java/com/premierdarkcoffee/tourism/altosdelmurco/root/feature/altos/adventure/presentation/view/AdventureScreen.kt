@@ -51,6 +51,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +68,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityCatalogItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureAvailabilitySlot
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureFeaturedPackage
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventurePricingEngine
@@ -77,12 +79,11 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel.AdventureCatalogViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel.AdventureComboBuilderViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.util.extrension.priceText
 import java.util.Calendar
-import java.util.Date
 
 private sealed interface AdventureMode {
     data object Catalog : AdventureMode
@@ -107,6 +108,13 @@ fun AdventureScreen(
         catalogViewModel.onAppear()
         builderViewModel.onAppear(sessionState.profile)
         menuViewModel.onAppear(sessionState.profile.nationalId)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            catalogViewModel.onDisappear()
+            builderViewModel.onDisappear()
+        }
     }
 
     if (showFoodPicker) {
@@ -177,7 +185,7 @@ fun AdventureScreen(
 @Composable
 private fun AdventureCatalogContent(
     isLoading: Boolean,
-    catalog: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot,
+    catalog: AdventureCatalogSnapshot,
     menuSections: List<MenuSection>,
     builderViewModel: AdventureComboBuilderViewModel,
     onCustomCombo: () -> Unit,
@@ -272,9 +280,9 @@ private fun AdventureCatalogContent(
 @Composable
 private fun FeaturedPackageCard(
     packageModel: AdventureFeaturedPackage,
-    catalog: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot,
+    catalog: AdventureCatalogSnapshot,
     menuSections: List<MenuSection>,
-    reward: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation?,
+    reward: RewardPresentation?,
     onClick: () -> Unit,
 ) {
     val menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id }
@@ -345,7 +353,7 @@ private fun FeaturedPackageCard(
 @Composable
 private fun SingleActivityCard(
     activity: AdventureActivityCatalogItem,
-    reward: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation?,
+    reward: RewardPresentation?,
     onClick: () -> Unit,
 ) {
     AdventureCard {

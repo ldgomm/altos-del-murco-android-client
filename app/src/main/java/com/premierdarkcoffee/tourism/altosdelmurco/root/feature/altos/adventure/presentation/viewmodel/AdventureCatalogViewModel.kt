@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.FetchAdventureCatalogUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ObserveAdventureCatalogUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -18,6 +18,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class AdventureCatalogViewModel @Inject constructor(
+    private val fetchAdventureCatalogUseCase: FetchAdventureCatalogUseCase,
     private val observeAdventureCatalogUseCase: ObserveAdventureCatalogUseCase,
 ) : ViewModel() {
 
@@ -25,19 +26,23 @@ class AdventureCatalogViewModel @Inject constructor(
     val uiState: StateFlow<AdventureCatalogUiState> = _uiState.asStateFlow()
 
     private var catalogJob: Job? = null
+    private var refreshJob: Job? = null
 
     fun onAppear() {
         if (catalogJob?.isActive == true) return
 
         catalogJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
             observeAdventureCatalogUseCase.execute()
                 .catch { error ->
                     if (error is CancellationException) throw error
+
                     _uiState.update {
                         it.copy(
                             isLoading = false,
-                            errorMessage = error.message ?: "No se pudo cargar el catálogo de aventura.",
+                            errorMessage = error.message
+                                ?: "No se pudo cargar el catálogo de aventura.",
                         )
                     }
                 }
@@ -56,6 +61,44 @@ class AdventureCatalogViewModel @Inject constructor(
     fun onDisappear() {
         catalogJob?.cancel()
         catalogJob = null
+
+        refreshJob?.cancel()
+        refreshJob = null
+    }
+
+    fun refresh() {
+        refreshJob?.cancel()
+
+        refreshJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                )
+            }
+
+            runCatching {
+                fetchAdventureCatalogUseCase.execute()
+            }.onSuccess { catalog ->
+                _uiState.update {
+                    it.copy(
+                        catalog = catalog,
+                        isLoading = false,
+                        errorMessage = null,
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = error.message
+                            ?: "No se pudo actualizar el catálogo de aventura.",
+                    )
+                }
+            }
+        }
     }
 
     fun clearError() {
