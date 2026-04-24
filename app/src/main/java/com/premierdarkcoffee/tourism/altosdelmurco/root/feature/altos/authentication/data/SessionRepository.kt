@@ -6,7 +6,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticationRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.ResolveSessionUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionDestination
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
 import javax.inject.Inject
@@ -24,11 +24,11 @@ import android.util.Log
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 @Singleton
-class FirebaseSessionRepository @Inject constructor(
+class SessionRepository @Inject constructor(
     private val auth: FirebaseAuth,
     private val authenticationRepository: AuthenticationRepositoriable,
     private val resolveSessionUseCase: ResolveSessionUseCase,
-) : SessionRepository {
+) : SessionRepositoriable {
 
     private val refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 

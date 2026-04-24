@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.DeleteCurrentAccountUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SignOutUseCase
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,7 +22,7 @@ data class AccountActionsUiState(
 class AccountActionsViewModel @Inject constructor(
     private val signOutUseCase: SignOutUseCase,
     private val deleteCurrentAccountUseCase: DeleteCurrentAccountUseCase,
-    private val sessionRepository: SessionRepository,
+    private val sessionRepositoriable: SessionRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AccountActionsUiState())
@@ -37,7 +37,7 @@ class AccountActionsViewModel @Inject constructor(
             _uiState.update { it.copy(isBusy = true, errorMessage = null) }
             runCatching {
                 signOutUseCase.execute()
-                sessionRepository.refresh()
+                sessionRepositoriable.refresh()
             }.onFailure { error ->
                 _uiState.update { it.copy(errorMessage = error.message ?: "Could not sign out.") }
             }
@@ -56,7 +56,7 @@ class AccountActionsViewModel @Inject constructor(
                     currentUserId = currentUserId,
                     googleIdToken = freshGoogleIdToken,
                 )
-                sessionRepository.refresh()
+                sessionRepositoriable.refresh()
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(

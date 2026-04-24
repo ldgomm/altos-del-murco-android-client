@@ -1,5 +1,6 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardTemplate
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuCategory
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
@@ -7,6 +8,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 
 data class MenuUiState(
     val isLoading: Boolean = true,
+    val isLoadingRewards: Boolean = false,
     val sections: List<MenuSection> = emptyList(),
     val selectedCategoryId: String? = null,
     val walletSnapshot: RewardWalletSnapshot = RewardWalletSnapshot.empty(""),
@@ -27,7 +29,13 @@ data class MenuUiState(
             sections.filter { it.category.id == selectedCategoryId }
         }
 
-    fun itemById(id: String): MenuItem? = sections
-        .flatMap { it.items }
-        .firstOrNull { it.id == id }
+    val allItems: List<MenuItem>
+        get() = sections.flatMap { it.items }
+
+    val restaurantRewardTemplates: List<LoyaltyRewardTemplate>
+        get() = walletSnapshot.availableTemplates
+            .filter { it.scope.matchesRestaurant() && !it.isExpired }
+            .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
+
+    fun itemById(id: String): MenuItem? = allItems.firstOrNull { it.id == id }
 }

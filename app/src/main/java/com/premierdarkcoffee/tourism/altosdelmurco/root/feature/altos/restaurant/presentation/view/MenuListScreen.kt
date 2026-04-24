@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,8 +24,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ReceiptLong
-import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.ReceiptLong
 import androidx.compose.material.icons.rounded.Restaurant
@@ -32,11 +31,9 @@ import androidx.compose.material.icons.rounded.ShoppingCart
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Whatshot
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -45,19 +42,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LargeTopAppBar
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,15 +59,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardRuleType
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardTemplate
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuCategory
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuUiState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -122,18 +112,7 @@ fun MenuListScreen(
                     }
 
                     IconButton(onClick = onOpenCart) {
-                        BadgedBox(
-                            badge = {
-                                if (cartItemsCount > 0) {
-                                    Badge { Text(cartItemsCount.toString()) }
-                                }
-                            },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ShoppingCart,
-                                contentDescription = "Carrito",
-                            )
-                        }
+                        CartIcon(cartItemsCount = cartItemsCount)
                     }
                 },
                 colors = TopAppBarDefaults.largeTopAppBarColors(
@@ -143,18 +122,7 @@ fun MenuListScreen(
         },
         floatingActionButton = {
             FloatingActionButton(onClick = onOpenCart) {
-                BadgedBox(
-                    badge = {
-                        if (cartItemsCount > 0) {
-                            Badge { Text(cartItemsCount.toString()) }
-                        }
-                    },
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ShoppingCart,
-                        contentDescription = "Carrito",
-                    )
-                }
+                CartIcon(cartItemsCount = cartItemsCount)
             }
         },
     ) { innerPadding ->
@@ -206,6 +174,16 @@ fun MenuListScreen(
                         }
                     }
 
+                    if (state.isLoadingRewards || state.restaurantRewardTemplates.isNotEmpty()) {
+                        item {
+                            RewardsSection(
+                                isLoading = state.isLoadingRewards,
+                                templates = state.restaurantRewardTemplates,
+                                allItems = state.allItems,
+                            )
+                        }
+                    }
+
                     if (state.featuredItems.isNotEmpty()) {
                         item {
                             FeaturedCarousel(
@@ -234,6 +212,22 @@ fun MenuListScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CartIcon(cartItemsCount: Int) {
+    BadgedBox(
+        badge = {
+            if (cartItemsCount > 0) {
+                Badge { Text(cartItemsCount.toString()) }
+            }
+        },
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.ShoppingCart,
+            contentDescription = "Carrito",
+        )
     }
 }
 
@@ -328,6 +322,12 @@ private fun RestaurantHeroCard(
                 AssistChip(
                     onClick = {},
                     label = { Text("Nivel $levelTitle") },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Rounded.LocalOffer,
+                            contentDescription = null,
+                        )
+                    },
                 )
             }
 
@@ -340,7 +340,7 @@ private fun RestaurantHeroCard(
                 )
 
                 Text(
-                    text = "Elige tus favoritos, agrega notas para cocina y confirma tu pedido desde el carrito.",
+                    text = "Elige tus favoritos. Si tienes premios Murco Loyalty, se muestran y se aplican automáticamente.",
                     style = MaterialTheme.typography.bodyLarge,
                     color = Color.White.copy(alpha = 0.92f),
                 )
@@ -403,6 +403,139 @@ private fun ErrorCard(
 }
 
 @Composable
+private fun RewardsSection(
+    isLoading: Boolean,
+    templates: List<LoyaltyRewardTemplate>,
+    allItems: List<MenuItem>,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        SectionHeader(
+            title = "Tus cupones y premios",
+            subtitle = "Se aplican automáticamente al abrir un plato elegible o al confirmar el pedido.",
+        )
+
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        if (templates.isEmpty() && !isLoading) {
+            ElevatedCard(shape = RoundedCornerShape(22.dp)) {
+                Text(
+                    text = "Todavía no tienes premios activos para restaurante.",
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(templates, key = { it.id }) { template ->
+                    RewardCouponCard(
+                        template = template,
+                        eligibleItems = eligibleItemsFor(template, allItems),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RewardCouponCard(
+    template: LoyaltyRewardTemplate,
+    eligibleItems: List<MenuItem>,
+) {
+    ElevatedCard(
+        modifier = Modifier.width(300.dp),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text(
+                        text = badgeText(template),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
+                Spacer(modifier = Modifier.weight(1f))
+                template.expirationText?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                    )
+                }
+            }
+
+            Text(
+                text = template.title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Text(
+                text = template.subtitle.ifBlank { template.displaySummary },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            if (eligibleItems.isNotEmpty()) {
+                Text(
+                    text = "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
+                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else "",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private fun eligibleItemsFor(
+    template: LoyaltyRewardTemplate,
+    allItems: List<MenuItem>,
+): List<MenuItem> = when (template.rule.type) {
+    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> allItems.filter { it.canBeOrdered }
+    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
+    LoyaltyRewardRuleType.FREE_MENU_ITEM,
+    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE,
+        -> {
+        val targetId = template.targetMenuItemId ?: return emptyList()
+        allItems.filter { it.id == targetId }
+    }
+    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> emptyList()
+}
+
+private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.rule.type) {
+    LoyaltyRewardRuleType.FREE_MENU_ITEM -> "Gratis"
+    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Promo"
+    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
+    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
+        -> "${(template.rule.percentage ?: 0.0).toInt()}% OFF"
+    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "Aventura"
+}
+
+@Composable
 private fun FeaturedCarousel(
     featuredItems: List<MenuItem>,
     rewardProvider: (MenuItem) -> RewardPresentation?,
@@ -435,7 +568,7 @@ private fun FeaturedMenuCard(
     Box(
         modifier = Modifier
             .width(280.dp)
-            .height(210.dp)
+            .height(220.dp)
             .clip(RoundedCornerShape(30.dp))
             .clickable(onClick = onClick)
             .background(
@@ -547,7 +680,7 @@ private fun MenuSectionCard(
     onOpen: (MenuItem) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(title = section.category.title, subtitle = "")
+        SectionHeader(title = section.category.title, subtitle = "${section.items.size} producto(s)")
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             section.items.forEach { item ->
@@ -727,6 +860,14 @@ private fun CompactRewardRibbon(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            reward.amountText?.let {
+                Text(
+                    text = "Ahorro estimado: $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = titleColor,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

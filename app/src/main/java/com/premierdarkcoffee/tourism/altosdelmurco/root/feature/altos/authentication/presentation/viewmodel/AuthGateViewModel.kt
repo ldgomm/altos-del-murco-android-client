@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -13,10 +13,10 @@ import kotlinx.coroutines.launch
 
 @HiltViewModel
 class AuthGateViewModel @Inject constructor(
-    private val sessionRepository: SessionRepository,
+    private val sessionRepositoriable: SessionRepositoriable,
 ) : ViewModel() {
 
-    val sessionState: StateFlow<SessionState> = sessionRepository
+    val sessionState: StateFlow<SessionState> = sessionRepositoriable
         .sessionState()
         .stateIn(
             scope = viewModelScope,
@@ -26,7 +26,7 @@ class AuthGateViewModel @Inject constructor(
 
     fun refreshSession() {
         viewModelScope.launch {
-            sessionRepository.refresh()
+            sessionRepositoriable.refresh()
         }
     }
 }

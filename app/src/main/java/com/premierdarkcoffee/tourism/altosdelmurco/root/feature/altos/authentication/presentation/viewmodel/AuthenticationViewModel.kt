@@ -3,7 +3,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SignInWithGoogleUseCase
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +21,7 @@ data class AuthenticationUiState(
 @HiltViewModel
 class AuthenticationViewModel @Inject constructor(
     private val signInWithGoogleUseCase: SignInWithGoogleUseCase,
-    private val sessionRepository: SessionRepository,
+    private val sessionRepositoriable: SessionRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthenticationUiState())
@@ -57,7 +57,7 @@ class AuthenticationViewModel @Inject constructor(
 
             runCatching {
                 signInWithGoogleUseCase.execute(idToken)
-                sessionRepository.refresh()
+                sessionRepositoriable.refresh()
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "Google sign-in failed.")

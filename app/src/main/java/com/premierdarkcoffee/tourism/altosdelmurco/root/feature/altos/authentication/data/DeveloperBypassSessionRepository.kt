@@ -1,7 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
 
 import com.premierdarkcoffee.tourism.altosdelmurco.BuildConfig
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import java.util.Date
@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
 @Singleton
-class DeveloperBypassSessionRepository @Inject constructor() : SessionRepository {
+class DeveloperBypassSessionRepository @Inject constructor() : SessionRepositoriable {
     override fun sessionState(): Flow<SessionState> {
         return if (BuildConfig.DEBUG) {
             flowOf(

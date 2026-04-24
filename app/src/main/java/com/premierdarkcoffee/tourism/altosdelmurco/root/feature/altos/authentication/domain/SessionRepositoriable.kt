@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 
 import kotlinx.coroutines.flow.Flow
 
-interface SessionRepository {
+interface SessionRepositoriable {
     fun sessionState(): Flow<SessionState>
     suspend fun refresh()
 }

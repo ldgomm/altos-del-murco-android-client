@@ -3,9 +3,8 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentic
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticatedUser
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.ClientProfileRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.CompleteClientProfileUseCase
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Calendar
@@ -55,7 +54,7 @@ data class CompleteProfileUiState(
 @HiltViewModel
 class CompleteProfileViewModel @Inject constructor(
     private val completeClientProfileUseCase: CompleteClientProfileUseCase,
-    private val sessionRepository: SessionRepository,
+    private val sessionRepositoriable: SessionRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CompleteProfileUiState())
@@ -159,7 +158,7 @@ class CompleteProfileViewModel @Inject constructor(
 
             runCatching {
                 repeat(3) { attempt ->
-                    sessionRepository.refresh()
+                    sessionRepositoriable.refresh()
                     if (attempt < 2) delay(120)
                 }
             }

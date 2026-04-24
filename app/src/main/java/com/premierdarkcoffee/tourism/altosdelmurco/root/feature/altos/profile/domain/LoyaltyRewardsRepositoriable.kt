@@ -4,9 +4,15 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
-interface LoyaltyRewardsRepository {
+interface LoyaltyRewardsRepositoriable {
     suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot
+
+    fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> = flow {
+        emit(loadWalletSnapshot(nationalId))
+    }
 
     suspend fun previewRestaurantRewards(
         nationalId: String,

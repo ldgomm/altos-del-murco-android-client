@@ -1,7 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
 
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data.FirebaseSessionRepository
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data.SessionRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -12,6 +12,6 @@ import dagger.hilt.components.SingletonComponent
 abstract class AuthModule {
     @Binds
     abstract fun bindSessionRepository(
-        repository: FirebaseSessionRepository,
-    ): SessionRepository
+        repository: SessionRepository,
+    ): SessionRepositoriable
 }

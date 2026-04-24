@@ -3,7 +3,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardComputationResult
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ClearCartDraftUseCase
@@ -14,8 +14,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SubmitOrderUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.util.UUID
-import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,13 +23,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.UUID
+import javax.inject.Inject
 
 data class CheckoutUiState(
     val draft: OrderDraft = OrderDraft(),
     val isLoadingCart: Boolean = true,
     val isSubmitting: Boolean = false,
     val isLoadingRewards: Boolean = false,
-    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(RewardWalletSnapshot.empty("")),
+    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
+        RewardWalletSnapshot.empty(
+            ""
+        )
+    ),
     val errorMessage: String? = null,
 ) {
     val subtotal: Double get() = draft.subtotal
@@ -46,7 +50,7 @@ class CheckoutViewModel @Inject constructor(
     private val saveCartDraftUseCase: SaveCartDraftUseCase,
     private val clearCartDraftUseCase: ClearCartDraftUseCase,
     private val submitOrderUseCase: SubmitOrderUseCase,
-    private val loyaltyRewardsRepository: LoyaltyRewardsRepository,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CheckoutUiState())
