@@ -1,22 +1,35 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
 
 import com.google.firebase.Timestamp
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.*
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityType
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBooking
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingBlock
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingRequest
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingStatus
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBuildPlan
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureResourceType
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationEventType
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodItemDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationServingMoment
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.AppliedReward
 import java.util.Date
+import java.util.UUID
 
 data class AdventureReservationItemDraftDto(
-    val id: String,
-    val activity: String,
-    val durationMinutes: Int,
-    val peopleCount: Int,
-    val vehicleCount: Int,
-    val offRoadRiderCount: Int,
-    val nights: Int,
+    val id: String = "",
+    val activity: String = "",
+    val durationMinutes: Int = 0,
+    val peopleCount: Int = 0,
+    val vehicleCount: Int = 0,
+    val offRoadRiderCount: Int = 0,
+    val nights: Int = 0,
 ) {
     constructor(item: AdventureReservationItemDraft) : this(
         id = item.id,
-        activity = item.activity.name.lowercase(),
+        activity = item.activity.rawValue,
         durationMinutes = item.durationMinutes,
         peopleCount = item.peopleCount,
         vehicleCount = item.vehicleCount,
@@ -25,12 +38,9 @@ data class AdventureReservationItemDraftDto(
     )
 
     fun toDomain(): AdventureReservationItemDraft? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(activity, ignoreCase = true)
-        } ?: return null
-
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
         return AdventureReservationItemDraft(
-            id = id,
+            id = id.ifBlank { UUID.randomUUID().toString() },
             activity = activityType,
             durationMinutes = durationMinutes,
             peopleCount = peopleCount,
@@ -42,12 +52,12 @@ data class AdventureReservationItemDraftDto(
 }
 
 data class ReservationFoodItemDraftDto(
-    val id: String,
-    val menuItemId: String,
-    val name: String,
-    val unitPrice: Double,
-    val quantity: Int,
-    val notes: String?,
+    val id: String = "",
+    val menuItemId: String = "",
+    val name: String = "",
+    val unitPrice: Double = 0.0,
+    val quantity: Int = 1,
+    val notes: String? = null,
 ) {
     constructor(item: ReservationFoodItemDraft) : this(
         id = item.id,
@@ -59,24 +69,24 @@ data class ReservationFoodItemDraftDto(
     )
 
     fun toDomain(): ReservationFoodItemDraft = ReservationFoodItemDraft(
-        id = id,
+        id = id.ifBlank { UUID.randomUUID().toString() },
         menuItemId = menuItemId,
         name = name,
         unitPrice = unitPrice,
-        quantity = quantity,
+        quantity = quantity.coerceAtLeast(1),
         notes = notes,
     )
 }
 
 data class ReservationFoodDraftDto(
-    val items: List<ReservationFoodItemDraftDto>,
-    val servingMoment: String,
-    val servingTime: Timestamp?,
-    val notes: String?,
+    val items: List<ReservationFoodItemDraftDto> = emptyList(),
+    val servingMoment: String = ReservationServingMoment.AFTER_ACTIVITIES.rawValue,
+    val servingTime: Timestamp? = null,
+    val notes: String? = null,
 ) {
     constructor(food: ReservationFoodDraft) : this(
         items = food.items.map(::ReservationFoodItemDraftDto),
-        servingMoment = food.servingMoment.name.lowercase(),
+        servingMoment = food.servingMoment.rawValue,
         servingTime = food.servingTime?.let(::Timestamp),
         notes = food.notes,
     )
@@ -90,20 +100,20 @@ data class ReservationFoodDraftDto(
 }
 
 data class AdventureBookingBlockDto(
-    val id: String,
-    val title: String,
-    val activity: String,
-    val resourceType: String,
-    val startAt: Timestamp,
-    val endAt: Timestamp,
-    val reservedUnits: Int,
-    val subtotal: Double,
+    val id: String = "",
+    val title: String = "",
+    val activity: String = "",
+    val resourceType: String = "",
+    val startAt: Timestamp = Timestamp.now(),
+    val endAt: Timestamp = Timestamp.now(),
+    val reservedUnits: Int = 0,
+    val subtotal: Double = 0.0,
 ) {
     constructor(block: AdventureBookingBlock) : this(
         id = block.id,
         title = block.title,
-        activity = block.activity.name.lowercase(),
-        resourceType = block.resourceType.name.lowercase(),
+        activity = block.activity.rawValue,
+        resourceType = block.resourceType.rawValue,
         startAt = Timestamp(block.startAt),
         endAt = Timestamp(block.endAt),
         reservedUnits = block.reservedUnits,
@@ -111,15 +121,10 @@ data class AdventureBookingBlockDto(
     )
 
     fun toDomain(): AdventureBookingBlock? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(activity, ignoreCase = true)
-        } ?: return null
-        val resource = AdventureResourceType.entries.firstOrNull {
-            it.name.equals(resourceType, ignoreCase = true)
-        } ?: return null
-
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
+        val resource = AdventureResourceType.fromRaw(resourceType) ?: return null
         return AdventureBookingBlock(
-            id = id,
+            id = id.ifBlank { UUID.randomUUID().toString() },
             title = title,
             activity = activityType,
             resourceType = resource,
@@ -132,13 +137,13 @@ data class AdventureBookingBlockDto(
 }
 
 data class AdventureAppliedRewardDto(
-    val id: String,
-    val templateId: String,
-    val title: String,
-    val amount: Double,
-    val note: String,
-    val affectedMenuItemIds: List<String>,
-    val affectedActivityIds: List<String>,
+    val id: String = "",
+    val templateId: String = "",
+    val title: String = "",
+    val amount: Double = 0.0,
+    val note: String = "",
+    val affectedMenuItemIds: List<String> = emptyList(),
+    val affectedActivityIds: List<String> = emptyList(),
 ) {
     constructor(domain: AppliedReward) : this(
         id = domain.id,
@@ -162,31 +167,31 @@ data class AdventureAppliedRewardDto(
 }
 
 data class AdventureBookingDto(
-    val clientId: String?,
-    val clientName: String,
-    val whatsappNumber: String,
-    val nationalId: String,
-    val startDayKey: String,
-    val startAt: Timestamp,
-    val endAt: Timestamp,
-    val guestCount: Int?,
-    val eventType: String?,
-    val customEventTitle: String?,
-    val eventNotes: String?,
-    val items: List<AdventureReservationItemDraftDto>,
-    val foodReservation: ReservationFoodDraftDto?,
-    val blocks: List<AdventureBookingBlockDto>,
-    val adventureSubtotal: Double?,
-    val foodSubtotal: Double?,
-    val subtotal: Double,
-    val discountAmount: Double,
-    val loyaltyDiscountAmount: Double?,
-    val appliedRewards: List<AdventureAppliedRewardDto>?,
-    val nightPremium: Double,
-    val totalAmount: Double,
-    val status: String,
-    val createdAt: Timestamp,
-    val notes: String?,
+    val clientId: String? = null,
+    val clientName: String = "",
+    val whatsappNumber: String = "",
+    val nationalId: String = "",
+    val startDayKey: String = "",
+    val startAt: Timestamp = Timestamp.now(),
+    val endAt: Timestamp = Timestamp.now(),
+    val guestCount: Int? = null,
+    val eventType: String? = null,
+    val customEventTitle: String? = null,
+    val eventNotes: String? = null,
+    val items: List<AdventureReservationItemDraftDto> = emptyList(),
+    val foodReservation: ReservationFoodDraftDto? = null,
+    val blocks: List<AdventureBookingBlockDto> = emptyList(),
+    val adventureSubtotal: Double? = null,
+    val foodSubtotal: Double? = null,
+    val subtotal: Double = 0.0,
+    val discountAmount: Double = 0.0,
+    val loyaltyDiscountAmount: Double? = null,
+    val appliedRewards: List<AdventureAppliedRewardDto>? = null,
+    val nightPremium: Double = 0.0,
+    val totalAmount: Double = 0.0,
+    val status: String = AdventureBookingStatus.PENDING.rawValue,
+    val createdAt: Timestamp = Timestamp.now(),
+    val notes: String? = null,
 ) {
     fun toDomain(documentId: String): AdventureBooking = AdventureBooking(
         id = documentId,
@@ -232,7 +237,7 @@ data class AdventureBookingDto(
             startAt = Timestamp(plan.startAt),
             endAt = Timestamp(plan.endAt),
             guestCount = request.guestCount,
-            eventType = request.eventType.name.lowercase(),
+            eventType = request.eventType.rawValue,
             customEventTitle = request.customEventTitle,
             eventNotes = request.eventNotes,
             items = request.items.map(::AdventureReservationItemDraftDto),
@@ -246,7 +251,7 @@ data class AdventureBookingDto(
             appliedRewards = request.appliedRewards.map(::AdventureAppliedRewardDto),
             nightPremium = plan.nightPremium,
             totalAmount = plan.totalAmount,
-            status = status.name.lowercase(),
+            status = status.rawValue,
             createdAt = Timestamp(createdAt),
             notes = request.notes,
         )

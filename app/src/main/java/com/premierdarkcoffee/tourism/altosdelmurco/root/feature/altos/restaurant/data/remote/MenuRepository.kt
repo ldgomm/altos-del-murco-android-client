@@ -23,15 +23,15 @@ class MenuRepository @Inject constructor(
     override fun observeMenu(): Flow<List<MenuSection>> = callbackFlow {
         val registration: ListenerRegistration = firestore
             .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
-            .orderBy("categoryTitle")
-            .orderBy("sortOrder")
             .addSnapshotListener { snapshot, error ->
                 when {
                     error != null -> close(error)
                     snapshot == null -> trySend(emptyList()).isSuccess
                     else -> {
-                        val items = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(MenuItemDto::class.java)?.toDomain()
+                        val items = snapshot.documents.mapNotNull { document ->
+                            MenuItemDto.fromDocument(document)
+                                ?.toDomain(documentId = document.id)
+                                ?.takeIf { it.id.isNotBlank() && it.name.isNotBlank() }
                         }
                         trySend(groupIntoSections(items)).isSuccess
                     }
@@ -42,34 +42,34 @@ class MenuRepository @Inject constructor(
     }
 
     private fun groupIntoSections(items: List<MenuItem>): List<MenuSection> {
-        val preferredOrder = listOf(
-            "Entradas",
-            "Sopas",
-            "Platos Fuertes",
-            "Extras",
-            "Postres",
-            "Bebidas",
-            "Bebidas Alcohólicas",
-        )
-
         return items
-            .groupBy { it.categoryId }
+            .distinctBy { it.id }
+            .groupBy { it.categoryId.ifBlank { "otros" } }
             .mapNotNull { (categoryId, categoryItems) ->
                 val first = categoryItems.firstOrNull() ?: return@mapNotNull null
                 MenuSection(
                     id = categoryId,
                     category = MenuCategory(
                         id = categoryId,
-                        title = first.categoryTitle,
+                        title = first.categoryTitle.ifBlank { "Otros" },
                     ),
-                    items = categoryItems.sortedWith(compareBy({ it.sortOrder }, { it.name })),
+                    items = categoryItems.sortedWith(compareBy<MenuItem> { it.sortOrder }.thenBy { it.name }),
                 )
             }
             .sortedWith(
-                compareBy<MenuSection> {
-                    val index = preferredOrder.indexOf(it.category.title)
-                    if (index == -1) Int.MAX_VALUE else index
-                }.thenBy { it.category.title },
+                compareBy<MenuSection> { categoryRank(it.category.title) }
+                    .thenBy { it.category.title },
             )
+    }
+
+    private fun categoryRank(title: String): Int = when (title.trim()) {
+        "Entradas" -> 0
+        "Sopas" -> 1
+        "Platos Fuertes" -> 2
+        "Extras" -> 3
+        "Postres" -> 4
+        "Bebidas" -> 5
+        "Bebidas Alcohólicas" -> 6
+        else -> Int.MAX_VALUE
     }
 }

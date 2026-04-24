@@ -1,4 +1,4 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus

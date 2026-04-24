@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.ShoppingCartCheckout
@@ -29,6 +30,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -39,8 +41,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.SectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.priceLabel
@@ -48,7 +52,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CartView(
+fun CartScreen(
     state: CartUiState,
     onBack: () -> Unit,
     onCheckout: () -> Unit,
@@ -59,6 +63,8 @@ fun CartView(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val lineDiscounts = state.allocatedDiscountByCartItemId()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -83,6 +89,9 @@ fun CartView(
             if (!state.isEmpty) {
                 CartBottomBar(
                     subtotal = state.subtotal,
+                    discount = state.discount,
+                    total = state.total,
+                    isLoadingRewards = state.isLoadingRewards,
                     canCheckout = state.canCheckout,
                     onCheckout = onCheckout,
                 )
@@ -104,9 +113,20 @@ fun CartView(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 130.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 12.dp,
+                        bottom = 150.dp,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
+                    if (state.isLoadingRewards) {
+                        item {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+
                     state.errorMessage?.let { message ->
                         item {
                             ErrorCardInline(
@@ -119,24 +139,38 @@ fun CartView(
                     item {
                         SectionHeader(
                             title = "Tu pedido",
-                            subtitle = "${state.totalItems} producto(s) en preparación para enviar.",
+                            subtitle = if (state.isLoadingRewards) {
+                                "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
+                            } else {
+                                "${state.totalItems} producto(s) listos para enviar."
+                            },
                         )
                     }
 
                     items(state.items, key = { it.id }) { item ->
                         CartItemCard(
                             item = item,
+                            allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
+                            rewards = state.appliedRewardPresentations(item.menuItem.id),
                             onIncrease = { onIncrease(item.id) },
                             onDecrease = { onDecrease(item.id) },
                             onRemove = { onRemove(item.id) },
                         )
                     }
 
+                    if (state.appliedRewards.isNotEmpty()) {
+                        item {
+                            AppliedRewardsCard(
+                                rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                            )
+                        }
+                    }
+
                     item {
                         OrderSummaryCard(
                             subtotal = state.subtotal,
-                            discount = 0.0,
-                            total = state.subtotal,
+                            discount = state.discount,
+                            total = state.total,
                         )
                     }
                 }
@@ -187,10 +221,14 @@ private fun EmptyCart(
 @Composable
 private fun CartItemCard(
     item: CartItem,
+    allocatedDiscount: Double,
+    rewards: List<RewardPresentation>,
     onIncrease: () -> Unit,
     onDecrease: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val discountedLineTotal = (item.totalPrice - allocatedDiscount).coerceAtLeast(0.0)
+
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -235,11 +273,41 @@ private fun CartItemCard(
                     }
                 }
 
-                Text(
-                    text = item.totalPrice.priceLabel(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    if (allocatedDiscount > 0.0) {
+                        Text(
+                            text = item.totalPrice.priceLabel(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                        Text(
+                            text = discountedLineTotal.priceLabel(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "-${allocatedDiscount.priceLabel()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    } else {
+                        Text(
+                            text = item.totalPrice.priceLabel(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+
+            rewards.forEach { reward ->
+                CompactCartRewardRibbon(reward = reward)
             }
 
             HorizontalDivider()
@@ -275,41 +343,182 @@ private fun CartItemCard(
 }
 
 @Composable
+private fun CompactCartRewardRibbon(reward: RewardPresentation) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.LocalOffer,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = reward.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = reward.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            reward.amountText?.let { amount ->
+                Text(
+                    text = "-$amount",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppliedRewardsCard(
+    rewards: List<RewardPresentation>,
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionHeader(
+                title = "Premios aplicados",
+                subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
+            )
+
+            rewards.forEach { reward ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LocalOffer,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = reward.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = reward.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
+                        )
+                    }
+
+                    reward.amountText?.let { amount ->
+                        Text(
+                            text = "-$amount",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CartBottomBar(
     subtotal: Double,
+    discount: Double,
+    total: Double,
+    isLoadingRewards: Boolean,
     canCheckout: Boolean,
     onCheckout: () -> Unit,
 ) {
     Surface(shadowElevation = 10.dp) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Subtotal",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = subtotal.priceLabel(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                )
+            if (isLoadingRewards) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Button(
-                enabled = canCheckout,
-                onClick = onCheckout,
-                modifier = Modifier.weight(1.25f),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Checkout")
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when {
+                            isLoadingRewards -> "Calculando beneficios"
+                            discount > 0.0 -> "Total con Murco Loyalty"
+                            else -> "Subtotal"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    if (discount > 0.0) {
+                        Text(
+                            text = subtotal.priceLabel(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                    }
+
+                    Text(
+                        text = total.priceLabel(),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (discount > 0.0) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+
+                Button(
+                    enabled = canCheckout,
+                    onClick = onCheckout,
+                    modifier = Modifier.weight(1.25f),
+                ) {
+                    Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Checkout")
+                }
             }
         }
     }
@@ -359,7 +568,7 @@ internal fun OrderSummaryCard(
             SectionHeader(title = "Resumen")
             SummaryLine("Subtotal", subtotal.priceLabel())
             if (discount > 0.0) {
-                SummaryLine("Beneficios", "-${discount.priceLabel()}")
+                SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
             }
             HorizontalDivider()
             SummaryLine("Total", total.priceLabel(), emphasized = true)
@@ -384,6 +593,7 @@ internal fun SummaryLine(
             text = value,
             fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
             style = if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+            color = if (title == "Murco Loyalty") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
     }
 }

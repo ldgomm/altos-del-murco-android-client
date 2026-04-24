@@ -7,11 +7,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AltosPlaceholderCard
 
 @Composable
 fun BookingsScreen(
     modifier: Modifier = Modifier,
+    sessionState: SessionState.Authenticated,
 ) {
     Column(
         modifier = modifier

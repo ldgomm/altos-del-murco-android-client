@@ -5,9 +5,6 @@ import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ObserveOrdersUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrdersGroupingOption
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrdersSortOption
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrdersUiState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.text.SimpleDateFormat
 import java.util.Date

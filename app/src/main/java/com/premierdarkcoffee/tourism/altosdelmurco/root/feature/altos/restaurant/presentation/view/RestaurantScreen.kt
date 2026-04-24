@@ -12,7 +12,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.CartView
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.CartScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrderSuccessScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrdersScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.CartViewModel
@@ -70,6 +70,7 @@ fun RestaurantScreen(
                 levelTitle = menuViewModel.currentLevelTitle(),
                 cartItemsCount = cartState.totalItems,
                 rewardProvider = { item -> menuViewModel.rewardPresentation(item) },
+                eligibleItemsProvider = menuViewModel::eligibleMenuItems,
                 onCategorySelected = menuViewModel::onCategorySelected,
                 onOpenItem = { item -> destination = RestaurantDestination.Detail(item.id) },
                 onOpenCart = { destination = RestaurantDestination.Cart },
@@ -108,7 +109,7 @@ fun RestaurantScreen(
         }
 
         RestaurantDestination.Cart -> {
-            CartView(
+            CartScreen(
                 state = cartState,
                 onBack = { destination = RestaurantDestination.Menu },
                 onCheckout = { destination = RestaurantDestination.Checkout },
@@ -122,7 +123,7 @@ fun RestaurantScreen(
         }
 
         RestaurantDestination.Checkout -> {
-            CheckoutView(
+            CheckoutScreen(
                 state = checkoutState,
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },

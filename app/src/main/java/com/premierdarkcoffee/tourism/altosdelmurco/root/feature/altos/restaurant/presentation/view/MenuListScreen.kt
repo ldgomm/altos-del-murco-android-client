@@ -77,6 +77,7 @@ fun MenuListScreen(
     levelTitle: String,
     cartItemsCount: Int,
     rewardProvider: (MenuItem) -> RewardPresentation?,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
     onCategorySelected: (String?) -> Unit,
     onOpenItem: (MenuItem) -> Unit,
     onOpenCart: () -> Unit,
@@ -174,14 +175,12 @@ fun MenuListScreen(
                         }
                     }
 
-                    if (state.isLoadingRewards || state.restaurantRewardTemplates.isNotEmpty()) {
-                        item {
-                            RewardsSection(
-                                isLoading = state.isLoadingRewards,
-                                templates = state.restaurantRewardTemplates,
-                                allItems = state.allItems,
-                            )
-                        }
+                    item {
+                        RewardsSection(
+                            isLoading = state.isLoadingRewards,
+                            templates = state.restaurantRewardTemplates,
+                            eligibleItemsProvider = eligibleItemsProvider,
+                        )
                     }
 
                     if (state.featuredItems.isNotEmpty()) {
@@ -251,7 +250,7 @@ private fun EmptyRestaurantState(modifier: Modifier = Modifier) {
         modifier = modifier.padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ElevatedCard {
+        ElevatedCard(shape = RoundedCornerShape(28.dp)) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -406,12 +405,12 @@ private fun ErrorCard(
 private fun RewardsSection(
     isLoading: Boolean,
     templates: List<LoyaltyRewardTemplate>,
-    allItems: List<MenuItem>,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionHeader(
             title = "Tus cupones y premios",
-            subtitle = "Se aplican automáticamente al abrir un plato elegible o al confirmar el pedido.",
+            subtitle = "Se aplican automáticamente en platos elegibles y al confirmar el pedido.",
         )
 
         if (isLoading) {
@@ -427,12 +426,12 @@ private fun RewardsSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        } else {
+        } else if (templates.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(templates, key = { it.id }) { template ->
                     RewardCouponCard(
                         template = template,
-                        eligibleItems = eligibleItemsFor(template, allItems),
+                        eligibleItems = eligibleItemsProvider(template),
                     )
                 }
             }
@@ -496,34 +495,23 @@ private fun RewardCouponCard(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            if (eligibleItems.isNotEmpty()) {
-                Text(
-                    text = "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
-                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else "",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            val appliesToText = when {
+                eligibleItems.isNotEmpty() -> "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
+                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
+                template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "Aplica al plato elegible más caro del pedido."
+                else -> "Aún no encontré el producto objetivo en el menú. Revisa el menuItemId del cupón."
             }
+
+            Text(
+                text = appliesToText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
-}
-
-private fun eligibleItemsFor(
-    template: LoyaltyRewardTemplate,
-    allItems: List<MenuItem>,
-): List<MenuItem> = when (template.rule.type) {
-    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> allItems.filter { it.canBeOrdered }
-    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
-    LoyaltyRewardRuleType.FREE_MENU_ITEM,
-    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE,
-        -> {
-        val targetId = template.targetMenuItemId ?: return emptyList()
-        allItems.filter { it.id == targetId }
-    }
-    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> emptyList()
 }
 
 private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.rule.type) {
@@ -662,6 +650,12 @@ private fun CategorySelectorBlock(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            FilterChip(
+                selected = selectedCategoryId == null,
+                onClick = { onCategorySelected(null) },
+                label = { Text("Todo") },
+            )
+
             categories.forEach { category ->
                 FilterChip(
                     selected = selectedCategoryId == category.id,

@@ -14,6 +14,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SubmitOrderUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,24 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
-
-data class CheckoutUiState(
-    val draft: OrderDraft = OrderDraft(),
-    val isLoadingCart: Boolean = true,
-    val isSubmitting: Boolean = false,
-    val isLoadingRewards: Boolean = false,
-    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
-        RewardWalletSnapshot.empty(
-            ""
-        )
-    ),
-    val errorMessage: String? = null,
-) {
-    val subtotal: Double get() = draft.subtotal
-    val discount: Double get() = rewardPreview.totalDiscount.coerceAtLeast(0.0)
-    val total: Double get() = (subtotal - discount).coerceAtLeast(0.0)
-    val canSubmit: Boolean get() = draft.canSubmit && !isSubmitting
-}
+import kotlin.coroutines.cancellation.CancellationException
 
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
@@ -60,6 +44,7 @@ class CheckoutViewModel @Inject constructor(
     val createdOrder: SharedFlow<Order> = _createdOrder.asSharedFlow()
 
     private var currentNationalId: String = ""
+    private var rewardPreviewJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -78,12 +63,12 @@ class CheckoutViewModel @Inject constructor(
     fun syncProfile(profile: ClientProfile) {
         currentNationalId = profile.nationalId.filter { it.isDigit() }
         val current = _uiState.value.draft
-        saveDraft(
-            current.copy(
-                nationalId = currentNationalId,
-                clientName = profile.fullName,
-            ),
+        val updated = current.copy(
+            nationalId = currentNationalId,
+            clientName = profile.fullName,
         )
+        saveDraft(updated)
+        refreshRewardPreview(updated)
     }
 
     fun updateTableNumber(value: String) {
@@ -107,7 +92,7 @@ class CheckoutViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
-            runCatching {
+            try {
                 val preview = buildRewardPreview(draft)
                 val finalOrder = draft
                     .toOrder(orderId = UUID.randomUUID().toString())
@@ -128,7 +113,9 @@ class CheckoutViewModel @Inject constructor(
                         ),
                     )
                 }
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
@@ -141,9 +128,11 @@ class CheckoutViewModel @Inject constructor(
 
     private fun saveDraft(draft: OrderDraft) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 saveCartDraftUseCase.execute(draft)
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo actualizar el checkout.")
                 }
@@ -152,18 +141,20 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private fun refreshRewardPreview(draft: OrderDraft) {
-        viewModelScope.launch {
+        rewardPreviewJob?.cancel()
+        rewardPreviewJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRewards = true) }
-            runCatching {
-                buildRewardPreview(draft)
-            }.onSuccess { preview ->
+            try {
+                val preview = buildRewardPreview(draft)
                 _uiState.update {
                     it.copy(
                         rewardPreview = preview,
                         isLoadingRewards = false,
                     )
                 }
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
@@ -178,7 +169,11 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private suspend fun buildRewardPreview(draft: OrderDraft): RewardComputationResult {
-        val cleanNationalId = draft.nationalId?.trim().orEmpty()
+        val cleanNationalId = draft.nationalId
+            ?.filter(Char::isDigit)
+            ?.takeIf { it.isNotEmpty() }
+            ?: currentNationalId
+
         if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
             return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanNationalId))
         }

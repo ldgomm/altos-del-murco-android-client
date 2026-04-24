@@ -3,13 +3,18 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepositoriable
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardComputationResult
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ClearCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ObserveCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import java.util.Date
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,39 +23,37 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-
-data class CartUiState(
-    val draft: OrderDraft = OrderDraft(),
-    val isLoading: Boolean = true,
-    val errorMessage: String? = null,
-    val lastAddedItemName: String? = null,
-) {
-    val items: List<CartItem> get() = draft.items
-    val totalItems: Int get() = draft.totalItems
-    val subtotal: Double get() = draft.subtotal
-    val isEmpty: Boolean get() = draft.isEmpty
-    val canCheckout: Boolean get() = !draft.isEmpty
-}
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.math.round
 
 @HiltViewModel
 class CartViewModel @Inject constructor(
     observeCartDraftUseCase: ObserveCartDraftUseCase,
     private val saveCartDraftUseCase: SaveCartDraftUseCase,
     private val clearCartDraftUseCase: ClearCartDraftUseCase,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CartUiState())
     val uiState: StateFlow<CartUiState> = _uiState.asStateFlow()
 
+    private var currentNationalId: String = ""
+    private var rewardPreviewJob: Job? = null
+
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
+                val draftNationalId = draft.nationalId?.filter(Char::isDigit).orEmpty()
+                if (draftNationalId.isNotEmpty()) currentNationalId = draftNationalId
+
                 _uiState.update {
                     it.copy(
                         draft = draft,
                         isLoading = false,
                     )
                 }
+
+                refreshRewardPreview(draft)
             }
         }
     }
@@ -58,12 +61,16 @@ class CartViewModel @Inject constructor(
     fun syncProfile(profile: ClientProfile) {
         val current = _uiState.value.draft
         val cleanNationalId = profile.nationalId.filter { it.isDigit() }
+        currentNationalId = cleanNationalId
+
         val updated = current.copy(
             nationalId = cleanNationalId,
             clientName = profile.fullName,
             updatedAt = Date(),
         )
+
         save(updated)
+        refreshRewardPreview(updated)
     }
 
     fun addItem(
@@ -178,9 +185,20 @@ class CartViewModel @Inject constructor(
 
     fun clearCart() {
         viewModelScope.launch {
-            runCatching {
+            try {
                 clearCartDraftUseCase.execute()
-            }.onFailure { error ->
+                rewardPreviewJob?.cancel()
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = RewardComputationResult.empty(
+                            RewardWalletSnapshot.empty(currentNationalId),
+                        ),
+                        isLoadingRewards = false,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo limpiar el carrito.")
                 }
@@ -199,13 +217,95 @@ class CartViewModel @Inject constructor(
 
     private fun save(draft: OrderDraft) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 saveCartDraftUseCase.execute(draft)
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo guardar el carrito.")
                 }
             }
         }
     }
+
+    private fun refreshRewardPreview(draft: OrderDraft) {
+        rewardPreviewJob?.cancel()
+
+        val cleanNationalId = draft.nationalId
+            ?.filter(Char::isDigit)
+            ?.takeIf { it.isNotEmpty() }
+            ?: currentNationalId
+
+        if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    isLoadingRewards = false,
+                    rewardPreview = RewardComputationResult.empty(
+                        RewardWalletSnapshot.empty(cleanNationalId),
+                    ),
+                )
+            }
+            return
+        }
+
+        rewardPreviewJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoadingRewards = true,
+                    errorMessage = null,
+                )
+            }
+
+            try {
+                val preview = buildRewardPreview(
+                    nationalId = cleanNationalId,
+                    draft = draft,
+                )
+
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = preview,
+                        isLoadingRewards = false,
+                        errorMessage = null,
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Expected when the cart changes quickly. Do not show this as a UI error.
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = RewardComputationResult.empty(
+                            RewardWalletSnapshot.empty(cleanNationalId),
+                        ),
+                        isLoadingRewards = false,
+                        errorMessage = error.message ?: "No se pudieron calcular beneficios.",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun buildRewardPreview(
+        nationalId: String,
+        draft: OrderDraft,
+    ): RewardComputationResult {
+        val previewItems = draft.items.map {
+            OrderItem(
+                menuItemId = it.menuItem.id,
+                name = it.menuItem.name,
+                unitPrice = it.unitPrice,
+                quantity = it.safeQuantity,
+                notes = it.notes,
+            )
+        }
+
+        return loyaltyRewardsRepository.previewRestaurantRewards(
+            nationalId = nationalId,
+            items = previewItems,
+        )
+    }
 }
+
+fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
+

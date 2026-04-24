@@ -43,17 +43,14 @@ data class AdventureActivityCatalogDto(
     val updatedAt: Timestamp = Timestamp.now(),
 ) {
     fun toDomain(): AdventureActivityCatalogItem? {
-        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(id, ignoreCase = true) }
-            ?: return null
-        val parsedPricingMode = AdventurePricingMode.entries.firstOrNull {
-            it.name.equals(pricingMode, ignoreCase = true)
-        } ?: return null
+        val activityType = AdventureActivityType.fromRaw(id) ?: return null
+        val parsedPricingMode = AdventurePricingMode.fromRaw(pricingMode) ?: return null
 
         return AdventureActivityCatalogItem(
-            id = id,
+            id = id.ifBlank { activityType.rawValue },
             activityType = activityType,
-            title = title,
-            systemImage = systemImage,
+            title = title.ifBlank { activityType.legacyTitle },
+            systemImage = systemImage.ifBlank { activityType.legacySystemImage },
             shortDescription = shortDescription,
             fullDescription = fullDescription,
             includes = includes,
@@ -61,7 +58,7 @@ data class AdventureActivityCatalogDto(
             pricingMode = parsedPricingMode,
             basePrice = basePrice,
             discountAmount = discountAmount,
-            currency = currency,
+            currency = currency.ifBlank { "USD" },
             defaults = defaults.toDomain(),
             isActive = isActive,
             sortOrder = sortOrder,
@@ -78,9 +75,17 @@ data class AdventureFeaturedPackageItemDto(
     val offRoadRiderCount: Int = 0,
     val nights: Int = 0,
 ) {
+    constructor(item: AdventureReservationItemDraft) : this(
+        activity = item.activity.rawValue,
+        durationMinutes = item.durationMinutes,
+        peopleCount = item.peopleCount,
+        vehicleCount = item.vehicleCount,
+        offRoadRiderCount = item.offRoadRiderCount,
+        nights = item.nights,
+    )
+
     fun toDomain(): AdventureReservationItemDraft? {
-        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(activity, ignoreCase = true) }
-            ?: return null
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
         return AdventureReservationItemDraft(
             activity = activityType,
             durationMinutes = durationMinutes,
@@ -132,7 +137,7 @@ data class AdventureFeaturedPackageDto(
             badge = badge,
             isActive = isActive,
             sortOrder = sortOrder,
-            packageDiscountAmount = packageDiscountAmount,
+            packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
             items = mappedItems,
             foodItems = mappedFoodItems,
             updatedAt = updatedAt.toDate(),

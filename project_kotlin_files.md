@@ -67,17 +67,17 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure
 
 
 data class AdventureReservationItemDraftDto(
-    val id: String,
-    val activity: String,
-    val durationMinutes: Int,
-    val peopleCount: Int,
-    val vehicleCount: Int,
-    val offRoadRiderCount: Int,
-    val nights: Int,
+    val id: String = "",
+    val activity: String = "",
+    val durationMinutes: Int = 0,
+    val peopleCount: Int = 0,
+    val vehicleCount: Int = 0,
+    val offRoadRiderCount: Int = 0,
+    val nights: Int = 0,
 ) {
     constructor(item: AdventureReservationItemDraft) : this(
         id = item.id,
-        activity = item.activity.name.lowercase(),
+        activity = item.activity.rawValue,
         durationMinutes = item.durationMinutes,
         peopleCount = item.peopleCount,
         vehicleCount = item.vehicleCount,
@@ -86,12 +86,9 @@ data class AdventureReservationItemDraftDto(
     )
 
     fun toDomain(): AdventureReservationItemDraft? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(activity, ignoreCase = true)
-        } ?: return null
-
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
         return AdventureReservationItemDraft(
-            id = id,
+            id = id.ifBlank { UUID.randomUUID().toString() },
             activity = activityType,
             durationMinutes = durationMinutes,
             peopleCount = peopleCount,
@@ -103,12 +100,12 @@ data class AdventureReservationItemDraftDto(
 }
 
 data class ReservationFoodItemDraftDto(
-    val id: String,
-    val menuItemId: String,
-    val name: String,
-    val unitPrice: Double,
-    val quantity: Int,
-    val notes: String?,
+    val id: String = "",
+    val menuItemId: String = "",
+    val name: String = "",
+    val unitPrice: Double = 0.0,
+    val quantity: Int = 1,
+    val notes: String? = null,
 ) {
     constructor(item: ReservationFoodItemDraft) : this(
         id = item.id,
@@ -120,24 +117,24 @@ data class ReservationFoodItemDraftDto(
     )
 
     fun toDomain(): ReservationFoodItemDraft = ReservationFoodItemDraft(
-        id = id,
+        id = id.ifBlank { UUID.randomUUID().toString() },
         menuItemId = menuItemId,
         name = name,
         unitPrice = unitPrice,
-        quantity = quantity,
+        quantity = quantity.coerceAtLeast(1),
         notes = notes,
     )
 }
 
 data class ReservationFoodDraftDto(
-    val items: List<ReservationFoodItemDraftDto>,
-    val servingMoment: String,
-    val servingTime: Timestamp?,
-    val notes: String?,
+    val items: List<ReservationFoodItemDraftDto> = emptyList(),
+    val servingMoment: String = ReservationServingMoment.AFTER_ACTIVITIES.rawValue,
+    val servingTime: Timestamp? = null,
+    val notes: String? = null,
 ) {
     constructor(food: ReservationFoodDraft) : this(
         items = food.items.map(::ReservationFoodItemDraftDto),
-        servingMoment = food.servingMoment.name.lowercase(),
+        servingMoment = food.servingMoment.rawValue,
         servingTime = food.servingTime?.let(::Timestamp),
         notes = food.notes,
     )
@@ -151,20 +148,20 @@ data class ReservationFoodDraftDto(
 }
 
 data class AdventureBookingBlockDto(
-    val id: String,
-    val title: String,
-    val activity: String,
-    val resourceType: String,
-    val startAt: Timestamp,
-    val endAt: Timestamp,
-    val reservedUnits: Int,
-    val subtotal: Double,
+    val id: String = "",
+    val title: String = "",
+    val activity: String = "",
+    val resourceType: String = "",
+    val startAt: Timestamp = Timestamp.now(),
+    val endAt: Timestamp = Timestamp.now(),
+    val reservedUnits: Int = 0,
+    val subtotal: Double = 0.0,
 ) {
     constructor(block: AdventureBookingBlock) : this(
         id = block.id,
         title = block.title,
-        activity = block.activity.name.lowercase(),
-        resourceType = block.resourceType.name.lowercase(),
+        activity = block.activity.rawValue,
+        resourceType = block.resourceType.rawValue,
         startAt = Timestamp(block.startAt),
         endAt = Timestamp(block.endAt),
         reservedUnits = block.reservedUnits,
@@ -172,15 +169,10 @@ data class AdventureBookingBlockDto(
     )
 
     fun toDomain(): AdventureBookingBlock? {
-        val activityType = AdventureActivityType.entries.firstOrNull {
-            it.name.equals(activity, ignoreCase = true)
-        } ?: return null
-        val resource = AdventureResourceType.entries.firstOrNull {
-            it.name.equals(resourceType, ignoreCase = true)
-        } ?: return null
-
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
+        val resource = AdventureResourceType.fromRaw(resourceType) ?: return null
         return AdventureBookingBlock(
-            id = id,
+            id = id.ifBlank { UUID.randomUUID().toString() },
             title = title,
             activity = activityType,
             resourceType = resource,
@@ -193,13 +185,13 @@ data class AdventureBookingBlockDto(
 }
 
 data class AdventureAppliedRewardDto(
-    val id: String,
-    val templateId: String,
-    val title: String,
-    val amount: Double,
-    val note: String,
-    val affectedMenuItemIds: List<String>,
-    val affectedActivityIds: List<String>,
+    val id: String = "",
+    val templateId: String = "",
+    val title: String = "",
+    val amount: Double = 0.0,
+    val note: String = "",
+    val affectedMenuItemIds: List<String> = emptyList(),
+    val affectedActivityIds: List<String> = emptyList(),
 ) {
     constructor(domain: AppliedReward) : this(
         id = domain.id,
@@ -223,31 +215,31 @@ data class AdventureAppliedRewardDto(
 }
 
 data class AdventureBookingDto(
-    val clientId: String?,
-    val clientName: String,
-    val whatsappNumber: String,
-    val nationalId: String,
-    val startDayKey: String,
-    val startAt: Timestamp,
-    val endAt: Timestamp,
-    val guestCount: Int?,
-    val eventType: String?,
-    val customEventTitle: String?,
-    val eventNotes: String?,
-    val items: List<AdventureReservationItemDraftDto>,
-    val foodReservation: ReservationFoodDraftDto?,
-    val blocks: List<AdventureBookingBlockDto>,
-    val adventureSubtotal: Double?,
-    val foodSubtotal: Double?,
-    val subtotal: Double,
-    val discountAmount: Double,
-    val loyaltyDiscountAmount: Double?,
-    val appliedRewards: List<AdventureAppliedRewardDto>?,
-    val nightPremium: Double,
-    val totalAmount: Double,
-    val status: String,
-    val createdAt: Timestamp,
-    val notes: String?,
+    val clientId: String? = null,
+    val clientName: String = "",
+    val whatsappNumber: String = "",
+    val nationalId: String = "",
+    val startDayKey: String = "",
+    val startAt: Timestamp = Timestamp.now(),
+    val endAt: Timestamp = Timestamp.now(),
+    val guestCount: Int? = null,
+    val eventType: String? = null,
+    val customEventTitle: String? = null,
+    val eventNotes: String? = null,
+    val items: List<AdventureReservationItemDraftDto> = emptyList(),
+    val foodReservation: ReservationFoodDraftDto? = null,
+    val blocks: List<AdventureBookingBlockDto> = emptyList(),
+    val adventureSubtotal: Double? = null,
+    val foodSubtotal: Double? = null,
+    val subtotal: Double = 0.0,
+    val discountAmount: Double = 0.0,
+    val loyaltyDiscountAmount: Double? = null,
+    val appliedRewards: List<AdventureAppliedRewardDto>? = null,
+    val nightPremium: Double = 0.0,
+    val totalAmount: Double = 0.0,
+    val status: String = AdventureBookingStatus.PENDING.rawValue,
+    val createdAt: Timestamp = Timestamp.now(),
+    val notes: String? = null,
 ) {
     fun toDomain(documentId: String): AdventureBooking = AdventureBooking(
         id = documentId,
@@ -293,7 +285,7 @@ data class AdventureBookingDto(
             startAt = Timestamp(plan.startAt),
             endAt = Timestamp(plan.endAt),
             guestCount = request.guestCount,
-            eventType = request.eventType.name.lowercase(),
+            eventType = request.eventType.rawValue,
             customEventTitle = request.customEventTitle,
             eventNotes = request.eventNotes,
             items = request.items.map(::AdventureReservationItemDraftDto),
@@ -307,9 +299,155 @@ data class AdventureBookingDto(
             appliedRewards = request.appliedRewards.map(::AdventureAppliedRewardDto),
             nightPremium = plan.nightPremium,
             totalAmount = plan.totalAmount,
-            status = status.name.lowercase(),
+            status = status.rawValue,
             createdAt = Timestamp(createdAt),
             notes = request.notes,
+        )
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureBookingsRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
+
+
+@Singleton
+class AdventureBookingsRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+    private val catalogRepository: AdventureCatalogRepositoriable,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
+) : AdventureBookingsRepositoriable {
+
+    override fun observeBookings(
+        day: Date,
+        nationalId: String,
+    ): Flow<List<AdventureBooking>> = callbackFlow {
+        val cleanNationalId = nationalId.trim()
+        if (cleanNationalId.isEmpty()) {
+            trySend(emptyList()).isSuccess
+            close()
+            return@callbackFlow
+        }
+
+        val registration = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .whereEqualTo("startDayKey", AdventureDateHelper.dayKey(day))
+            .orderBy("startAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val bookings = snapshot?.documents.orEmpty().mapNotNull { document ->
+                    document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+                }
+                trySend(bookings).isSuccess
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun fetchAvailability(
+        date: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+    ): List<AdventureAvailabilitySlot> {
+        val catalog = catalogRepository.fetchCatalog()
+        return AdventurePlanner.buildAvailability(
+            day = date,
+            items = items,
+            foodReservation = foodReservation,
+            packageDiscountAmount = packageDiscountAmount,
+            catalog = catalog,
+        )
+    }
+
+    override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
+        val catalog = catalogRepository.fetchCatalog()
+        val basePlan = AdventurePlanner.buildPlan(
+            day = request.date,
+            startAt = request.selectedStartAt,
+            items = request.items,
+            foodReservation = request.foodReservation,
+            packageDiscountAmount = request.packageDiscountAmount,
+            catalog = catalog,
+        ) ?: error("Invalid reservation configuration.")
+
+        val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
+            nationalId = request.nationalId,
+            activityItems = request.items,
+            foodItems = request.foodReservation?.items.orEmpty(),
+            catalog = catalog,
+        )
+
+        val finalPlan = AdventureBuildPlan(
+            startAt = basePlan.startAt,
+            endAt = basePlan.endAt,
+            blocks = basePlan.blocks,
+            adventureSubtotal = basePlan.adventureSubtotal,
+            foodSubtotal = basePlan.foodSubtotal,
+            subtotal = basePlan.subtotal,
+            discountAmount = basePlan.discountAmount,
+            loyaltyDiscountAmount = rewardPreview.totalDiscount,
+            appliedRewards = rewardPreview.appliedRewards,
+            nightPremium = basePlan.nightPremium,
+            totalAmount = max(0.0, basePlan.totalAmount - rewardPreview.totalDiscount),
+            hasNightPremium = basePlan.hasNightPremium,
+        )
+
+        val normalizedRequest = request.copy(
+            packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
+            loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
+            appliedRewards = rewardPreview.appliedRewards,
+        )
+
+        val createdAt = Date()
+        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document()
+        val dto = AdventureBookingDto.from(
+            request = normalizedRequest,
+            plan = finalPlan,
+            createdAt = createdAt,
+            status = AdventureBookingStatus.PENDING,
+        )
+
+        bookingRef.set(dto).awaitResult()
+
+        loyaltyRewardsRepository.reserveRewards(
+            nationalId = normalizedRequest.nationalId,
+            referenceType = LoyaltyRewardReferenceType.BOOKING,
+            referenceId = bookingRef.id,
+            appliedRewards = normalizedRequest.appliedRewards,
+        )
+
+        return dto.toDomain(bookingRef.id)
+    }
+
+    override suspend fun cancelBooking(id: String, nationalId: String) {
+        val cleanNationalId = nationalId.trim()
+        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document(id)
+        val snapshot = bookingRef.get().awaitResult()
+        if (!snapshot.exists()) error("Booking not found.")
+
+        val dto = snapshot.toObject(AdventureBookingDto::class.java)
+            ?: error("Could not read booking data.")
+
+        if (dto.nationalId != cleanNationalId) {
+            error("You are not allowed to cancel this booking.")
+        }
+
+        bookingRef.update("status", AdventureBookingStatus.CANCELED.rawValue).awaitResult()
+
+        loyaltyRewardsRepository.releaseRewards(
+            nationalId = dto.nationalId,
+            referenceId = id,
         )
     }
 }
@@ -358,17 +496,14 @@ data class AdventureActivityCatalogDto(
     val updatedAt: Timestamp = Timestamp.now(),
 ) {
     fun toDomain(): AdventureActivityCatalogItem? {
-        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(id, ignoreCase = true) }
-            ?: return null
-        val parsedPricingMode = AdventurePricingMode.entries.firstOrNull {
-            it.name.equals(pricingMode, ignoreCase = true)
-        } ?: return null
+        val activityType = AdventureActivityType.fromRaw(id) ?: return null
+        val parsedPricingMode = AdventurePricingMode.fromRaw(pricingMode) ?: return null
 
         return AdventureActivityCatalogItem(
-            id = id,
+            id = id.ifBlank { activityType.rawValue },
             activityType = activityType,
-            title = title,
-            systemImage = systemImage,
+            title = title.ifBlank { activityType.legacyTitle },
+            systemImage = systemImage.ifBlank { activityType.legacySystemImage },
             shortDescription = shortDescription,
             fullDescription = fullDescription,
             includes = includes,
@@ -376,7 +511,7 @@ data class AdventureActivityCatalogDto(
             pricingMode = parsedPricingMode,
             basePrice = basePrice,
             discountAmount = discountAmount,
-            currency = currency,
+            currency = currency.ifBlank { "USD" },
             defaults = defaults.toDomain(),
             isActive = isActive,
             sortOrder = sortOrder,
@@ -393,9 +528,17 @@ data class AdventureFeaturedPackageItemDto(
     val offRoadRiderCount: Int = 0,
     val nights: Int = 0,
 ) {
+    constructor(item: AdventureReservationItemDraft) : this(
+        activity = item.activity.rawValue,
+        durationMinutes = item.durationMinutes,
+        peopleCount = item.peopleCount,
+        vehicleCount = item.vehicleCount,
+        offRoadRiderCount = item.offRoadRiderCount,
+        nights = item.nights,
+    )
+
     fun toDomain(): AdventureReservationItemDraft? {
-        val activityType = AdventureActivityType.entries.firstOrNull { it.name.equals(activity, ignoreCase = true) }
-            ?: return null
+        val activityType = AdventureActivityType.fromRaw(activity) ?: return null
         return AdventureReservationItemDraft(
             activity = activityType,
             durationMinutes = durationMinutes,
@@ -447,7 +590,7 @@ data class AdventureFeaturedPackageDto(
             badge = badge,
             isActive = isActive,
             sortOrder = sortOrder,
-            packageDiscountAmount = packageDiscountAmount,
+            packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
             items = mappedItems,
             foodItems = mappedFoodItems,
             updatedAt = updatedAt.toDate(),
@@ -459,55 +602,50 @@ data class AdventureFeaturedPackageDto(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureRepositoryModule.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
-
-
-@Module
-@InstallIn(SingletonComponent::class)
-abstract class AdventureRepositoryModule {
-
-    @Binds
-    abstract fun bindAdventureCatalogRepository(
-        repository: FirebaseAdventureCatalogRepository,
-    ): AdventureCatalogRepository
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/FirebaseAdventureCatalogRepository.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureCatalogRepository.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
 
 
 @Singleton
-class FirebaseAdventureCatalogRepository @Inject constructor(
+class AdventureCatalogRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
-) : AdventureCatalogRepository {
+) : AdventureCatalogRepositoriable {
 
     override suspend fun fetchCatalog(): AdventureCatalogSnapshot {
-        val activitiesSnapshot =
-            firestore.collection(FirestoreCollections.ADVENTURE_ACTIVITIES).get().awaitResult()
-        val packagesSnapshot =
-            firestore.collection(FirestoreCollections.ADVENTURE_FEATURED_PACKAGES).get()
-                .awaitResult()
-        return makeCatalogSnapshot(activitiesSnapshot, packagesSnapshot)
+        val activitiesSnapshot = firestore
+            .collection(FirestoreCollections.ADVENTURE_ACTIVITIES)
+            .get()
+            .awaitResult()
+
+        val packagesSnapshot = firestore
+            .collection(FirestoreCollections.ADVENTURE_FEATURED_PACKAGES)
+            .get()
+            .awaitResult()
+
+        return makeCatalogSnapshot(
+            activitiesSnapshot = activitiesSnapshot,
+            packagesSnapshot = packagesSnapshot,
+        )
     }
 
     override fun observeCatalog(): Flow<AdventureCatalogSnapshot> = callbackFlow {
-        var latestActivities: com.google.firebase.firestore.QuerySnapshot? = null
-        var latestPackages: com.google.firebase.firestore.QuerySnapshot? = null
+        var latestActivities: QuerySnapshot? = null
+        var latestPackages: QuerySnapshot? = null
 
         fun emitIfReady() {
-            val activities = latestActivities
-            val packages = latestPackages
-            if (activities != null && packages != null) {
-                trySend(makeCatalogSnapshot(activities, packages)).isSuccess
+            val activities = latestActivities ?: return
+            val packages = latestPackages ?: return
+            runCatching {
+                makeCatalogSnapshot(
+                    activitiesSnapshot = activities,
+                    packagesSnapshot = packages,
+                )
+            }.onSuccess { snapshot ->
+                trySend(snapshot).isSuccess
+            }.onFailure { error ->
+                close(error)
             }
         }
 
@@ -542,32 +680,63 @@ class FirebaseAdventureCatalogRepository @Inject constructor(
     }
 
     private fun makeCatalogSnapshot(
-        activitiesSnapshot: com.google.firebase.firestore.QuerySnapshot,
-        packagesSnapshot: com.google.firebase.firestore.QuerySnapshot,
+        activitiesSnapshot: QuerySnapshot,
+        packagesSnapshot: QuerySnapshot,
     ): AdventureCatalogSnapshot {
-        val activities = activitiesSnapshot.documents.mapNotNull { doc ->
-            doc.toObject(AdventureActivityCatalogDto::class.java)?.toDomain()
-        }
+        val activities: List<AdventureActivityCatalogItem> = activitiesSnapshot.documents
+            .mapNotNull { document ->
+                document.toObject(AdventureActivityCatalogDto::class.java)?.toDomain()
+            }
+            .sortedWith(compareBy<AdventureActivityCatalogItem> { it.sortOrder }.thenBy { it.title })
 
         val activitiesByType = activities.associateBy { it.activityType }
 
-        val packages: List<AdventureFeaturedPackage> =
-            packagesSnapshot.documents.mapNotNull { doc ->
-                val dto =
-                    doc.toObject(AdventureFeaturedPackageDto::class.java) ?: return@mapNotNull null
+        val packages: List<AdventureFeaturedPackage> = packagesSnapshot.documents
+            .mapNotNull { document ->
+                val dto = document.toObject(AdventureFeaturedPackageDto::class.java)
+                    ?: return@mapNotNull null
                 if (!dto.isActive) return@mapNotNull null
+
                 val packageModel = dto.toDomain() ?: return@mapNotNull null
-                val allItemsActive =
-                    packageModel.items.all { item -> activitiesByType[item.activity]?.isActive == true }
+                val allItemsActive = packageModel.items.all { item ->
+                    activitiesByType[item.activity]?.isActive == true
+                }
                 if (!allItemsActive) return@mapNotNull null
+
                 packageModel
             }
+            .sortedWith(compareBy<AdventureFeaturedPackage> { it.sortOrder }.thenBy { it.title })
 
         return AdventureCatalogSnapshot(
-            activities = activities.sortedWith(compareBy({ it.sortOrder }, { it.title })),
-            featuredPackages = packages.sortedWith(compareBy({ it.sortOrder }, { it.title })),
+            activities = activities,
+            featuredPackages = packages,
         )
     }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureBookingRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
+
+
+interface AdventureBookingsRepositoriable {
+    fun observeBookings(day: Date, nationalId: String): Flow<List<AdventureBooking>>
+
+    suspend fun fetchAvailability(
+        date: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+    ): List<AdventureAvailabilitySlot>
+
+    suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking
+
+    suspend fun cancelBooking(id: String, nationalId: String)
 }
 
 ```
@@ -579,11 +748,24 @@ class FirebaseAdventureCatalogRepository @Inject constructor(
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
 
-enum class AdventurePricingMode {
-    PER_HOUR_PER_VEHICLE,
-    PER_30_MIN_PER_PERSON,
-    PER_NIGHT_PER_PERSON,
-    FIXED_PER_PERSON,
+
+private fun String.catalogEnumKey(): String =
+    filter(Char::isLetterOrDigit).lowercase(Locale.US)
+
+enum class AdventurePricingMode(val rawValue: String) {
+    PER_HOUR_PER_VEHICLE("perHourPerVehicle"),
+    PER_30_MIN_PER_PERSON("per30MinPerPerson"),
+    PER_NIGHT_PER_PERSON("perNightPerPerson"),
+    FIXED_PER_PERSON("fixedPerPerson");
+
+    companion object {
+        fun fromRaw(rawValue: String?): AdventurePricingMode? {
+            val key = rawValue?.catalogEnumKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.catalogEnumKey() == key || it.name.catalogEnumKey() == key
+            }
+        }
+    }
 }
 
 data class AdventureActivityDefaults(
@@ -610,26 +792,31 @@ data class AdventureActivityCatalogItem(
     val defaults: AdventureActivityDefaults,
     val isActive: Boolean,
     val sortOrder: Int,
-    val updatedAt: java.util.Date,
+    val updatedAt: Date,
 ) {
-    val finalUnitPrice: Double = (basePrice - discountAmount).coerceAtLeast(0.0)
+    val finalUnitPrice: Double
+        get() = AdventurePricingEngine.finalUnitPrice(this)
 
-    val hasDiscount: Boolean = discountAmount > 0.0
+    val hasDiscount: Boolean
+        get() = discountAmount > 0.0
 
-    val defaultDraft: AdventureReservationItemDraft = AdventureReservationItemDraft(
-        activity = activityType,
-        durationMinutes = defaults.durationMinutes,
-        peopleCount = defaults.peopleCount,
-        vehicleCount = defaults.vehicleCount,
-        offRoadRiderCount = defaults.offRoadRiderCount,
-        nights = defaults.nights,
-    )
+    val defaultDraft: AdventureReservationItemDraft
+        get() = AdventureReservationItemDraft(
+            activity = activityType,
+            durationMinutes = defaults.durationMinutes,
+            peopleCount = defaults.peopleCount,
+            vehicleCount = defaults.vehicleCount,
+            offRoadRiderCount = defaults.offRoadRiderCount,
+            nights = defaults.nights,
+        )
 }
 
 data class AdventureFeaturedPackageFoodItem(
     val menuItemId: String,
     val quantity: Int,
 ) {
+    val id: String get() = menuItemId
+
     init {
         require(menuItemId.trim().isNotEmpty()) { "menuItemId cannot be blank" }
     }
@@ -645,7 +832,7 @@ data class AdventureFeaturedPackage(
     val packageDiscountAmount: Double,
     val items: List<AdventureReservationItemDraft>,
     val foodItems: List<AdventureFeaturedPackageFoodItem>,
-    val updatedAt: java.util.Date,
+    val updatedAt: Date,
 )
 
 data class AdventureCatalogSnapshot(
@@ -658,13 +845,15 @@ data class AdventureCatalogSnapshot(
     fun activity(activity: AdventureActivityType): AdventureActivityCatalogItem? =
         activitiesByType[activity]
 
-    val activeActivitiesSorted: List<AdventureActivityCatalogItem> = activities
-        .filter { it.isActive }
-        .sortedWith(compareBy<AdventureActivityCatalogItem> { it.sortOrder }.thenBy { it.title })
+    val activeActivitiesSorted: List<AdventureActivityCatalogItem>
+        get() = activities
+            .filter { it.isActive }
+            .sortedWith(compareBy<AdventureActivityCatalogItem> { it.sortOrder }.thenBy { it.title })
 
-    val activePackagesSorted: List<AdventureFeaturedPackage> = featuredPackages
-        .filter { it.isActive }
-        .sortedWith(compareBy<AdventureFeaturedPackage> { it.sortOrder }.thenBy { it.title })
+    val activePackagesSorted: List<AdventureFeaturedPackage>
+        get() = featuredPackages
+            .filter { it.isActive }
+            .sortedWith(compareBy<AdventureFeaturedPackage> { it.sortOrder }.thenBy { it.title })
 
     companion object {
         val EMPTY = AdventureCatalogSnapshot(
@@ -678,13 +867,13 @@ data class AdventureCatalogSnapshot(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureCatalogRepository.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureCatalogRepositoriable.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
 
 
-interface AdventureCatalogRepository {
+interface AdventureCatalogRepositoriable {
     suspend fun fetchCatalog(): AdventureCatalogSnapshot
     fun observeCatalog(): Flow<AdventureCatalogSnapshot>
 }
@@ -699,43 +888,32 @@ interface AdventureCatalogRepository {
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
 
 
+private fun String.normalizedAdventureKey(): String =
+    filter(Char::isLetterOrDigit).lowercase(Locale.US)
+
+fun Double.adventureRoundMoney(): Double = round(this * 100.0) / 100.0
+
 enum class AdventureActivityType(
+    val rawValue: String,
     val legacyTitle: String,
     val legacySystemImage: String,
-    val legacyDurationOptions: List<Int>
+    val legacyDurationOptions: List<Int>,
 ) {
-    OFF_ROAD(
-        legacyTitle = "Off-road 4x4",
-        legacySystemImage = "car.fill",
-        legacyDurationOptions = listOf(60, 120, 180),
-    ),
-    PAINTBALL(
-        legacyTitle = "Paintball",
-        legacySystemImage = "shield.lefthalf.filled",
-        legacyDurationOptions = listOf(30, 60, 90, 120),
-    ),
-    GO_KARTS(
-        legacyTitle = "Go karts",
-        legacySystemImage = "flag.checkered",
-        legacyDurationOptions = listOf(30, 60, 90, 120),
-    ),
-    SHOOTING_RANGE(
-        legacyTitle = "Campo de tiro",
-        legacySystemImage = "target",
-        legacyDurationOptions = listOf(30, 60, 90, 120),
-    ),
-    CAMPING(
-        legacyTitle = "Camping",
-        legacySystemImage = "tent.fill",
-        legacyDurationOptions = emptyList(),
-    ),
-    EXTREME_SLIDE(
-        legacyTitle = "Resbaladera extrema",
-        legacySystemImage = "figure.fall",
-        legacyDurationOptions = listOf(30),
-    );
+    OFF_ROAD("offRoad", "Off-road 4x4", "car.fill", listOf(60, 120, 180)),
+    PAINTBALL("paintball", "Paintball", "shield.lefthalf.filled", listOf(30, 60, 90, 120)),
+    GO_KARTS("goKarts", "Go karts", "flag.checkered", listOf(30, 60, 90, 120)),
+    SHOOTING_RANGE("shootingRange", "Campo de tiro", "target", listOf(30, 60, 90, 120)),
+    CAMPING("camping", "Camping", "tent.fill", emptyList()),
+    EXTREME_SLIDE("extremeSlide", "Resbaladera extrema", "figure.fall", listOf(30));
 
     companion object {
+        fun fromRaw(rawValue: String?): AdventureActivityType? {
+            val key = rawValue?.normalizedAdventureKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
+            }
+        }
+
         fun defaultDraft(activity: AdventureActivityType): AdventureReservationItemDraft =
             when (activity) {
                 OFF_ROAD -> AdventureReservationItemDraft(
@@ -795,60 +973,76 @@ enum class AdventureActivityType(
 
         fun defaultDraft(
             activity: AdventureActivityType,
-            catalog: AdventureCatalogSnapshot?,
-        ): AdventureReservationItemDraft {
-            val config = catalog?.activity(activity) ?: return defaultDraft(activity)
-            return config.defaultDraft
+            catalog: AdventureCatalogSnapshot?
+        ): AdventureReservationItemDraft =
+            catalog?.activity(activity)?.defaultDraft ?: defaultDraft(activity)
+    }
+}
+
+enum class AdventureResourceType(val rawValue: String) {
+    OFF_ROAD_VEHICLES("offRoadVehicles"),
+    PAINTBALL_PEOPLE("paintballPeople"),
+    GO_KART_PEOPLE("goKartPeople"),
+    SHOOTING_PEOPLE("shootingPeople"),
+    CAMPING_PEOPLE("campingPeople"),
+    EXTREME_SLIDE_PEOPLE("extremeSlidePeople");
+
+    companion object {
+        fun fromRaw(rawValue: String?): AdventureResourceType? {
+            val key = rawValue?.normalizedAdventureKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
+            }
         }
     }
 }
 
-enum class AdventureResourceType {
-    OFF_ROAD_VEHICLES,
-    PAINTBALL_PEOPLE,
-    GO_KART_PEOPLE,
-    SHOOTING_PEOPLE,
-    CAMPING_PEOPLE,
-    EXTREME_SLIDE_PEOPLE,
-}
-
-enum class AdventureBookingStatus(val title: String) {
-    PENDING("Pendiente"),
-    CONFIRMED("Confirmada"),
-    COMPLETED("Completada"),
-    CANCELED("Cancelada");
+enum class AdventureBookingStatus(val rawValue: String, val title: String) {
+    PENDING("pending", "Pendiente"),
+    CONFIRMED("confirmed", "Confirmada"),
+    COMPLETED("completed", "Completada"),
+    CANCELED("canceled", "Cancelada");
 
     companion object {
-        fun fromRaw(rawValue: String?): AdventureBookingStatus = entries.firstOrNull {
-            it.name.equals(rawValue, ignoreCase = true)
-        } ?: CONFIRMED
+        fun fromRaw(rawValue: String?): AdventureBookingStatus {
+            val key = rawValue?.normalizedAdventureKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
+            } ?: CONFIRMED
+        }
     }
 }
 
-enum class ReservationEventType(val title: String) {
-    REGULAR_VISIT("Visita regular"),
-    BIRTHDAY("Cumpleaños"),
-    ANNIVERSARY("Aniversario"),
-    CORPORATE("Evento corporativo"),
-    FAMILY_GATHERING("Reunión familiar"),
-    CUSTOM("Otro");
+enum class ReservationEventType(val rawValue: String, val title: String) {
+    REGULAR_VISIT("regularVisit", "Visita regular"),
+    BIRTHDAY("birthday", "Cumpleaños"),
+    ANNIVERSARY("anniversary", "Aniversario"),
+    CORPORATE("corporate", "Evento corporativo"),
+    FAMILY_GATHERING("familyGathering", "Reunión familiar"),
+    CUSTOM("custom", "Otro");
 
     companion object {
-        fun fromRaw(rawValue: String?): ReservationEventType = entries.firstOrNull {
-            it.name.equals(rawValue, ignoreCase = true)
-        } ?: REGULAR_VISIT
+        fun fromRaw(rawValue: String?): ReservationEventType {
+            val key = rawValue?.normalizedAdventureKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
+            } ?: REGULAR_VISIT
+        }
     }
 }
 
-enum class ReservationServingMoment(val title: String) {
-    ON_ARRIVAL("Al llegar"),
-    AFTER_ACTIVITIES("Después de actividades"),
-    SPECIFIC_TIME("Hora específica");
+enum class ReservationServingMoment(val rawValue: String, val title: String) {
+    ON_ARRIVAL("onArrival", "Al llegar"),
+    AFTER_ACTIVITIES("afterActivities", "Después de actividades"),
+    SPECIFIC_TIME("specificTime", "Hora específica");
 
     companion object {
-        fun fromRaw(rawValue: String?): ReservationServingMoment = entries.firstOrNull {
-            it.name.equals(rawValue, ignoreCase = true)
-        } ?: AFTER_ACTIVITIES
+        fun fromRaw(rawValue: String?): ReservationServingMoment {
+            val key = rawValue?.normalizedAdventureKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
+            } ?: AFTER_ACTIVITIES
+        }
     }
 }
 
@@ -861,15 +1055,14 @@ data class AdventureReservationItemDraft(
     val offRoadRiderCount: Int,
     val nights: Int,
 ) {
-    val title: String = activity.legacyTitle
+    val title: String get() = activity.legacyTitle
 
     val summaryText: String
         get() = when (activity) {
             AdventureActivityType.OFF_ROAD -> "${durationMinutes / 60}h • $vehicleCount vehículo(s) • $offRoadRiderCount persona(s)"
             AdventureActivityType.PAINTBALL,
             AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE,
-                -> "$durationMinutes min • $peopleCount persona(s)"
+            AdventureActivityType.SHOOTING_RANGE -> "$durationMinutes min • $peopleCount persona(s)"
 
             AdventureActivityType.CAMPING -> "$nights noche(s) • $peopleCount persona(s)"
             AdventureActivityType.EXTREME_SLIDE -> "1 sesión • $peopleCount persona(s) • transporte incluido"
@@ -892,7 +1085,8 @@ data class ReservationFoodItemDraft(
         notes = notes,
     )
 
-    val subtotal: Double = quantity.coerceAtLeast(1) * unitPrice
+    val safeQuantity: Int get() = quantity.coerceAtLeast(1)
+    val subtotal: Double get() = (safeQuantity * unitPrice).adventureRoundMoney()
 }
 
 data class ReservationFoodDraft(
@@ -901,13 +1095,12 @@ data class ReservationFoodDraft(
     val servingTime: Date?,
     val notes: String?,
 ) {
-    val subtotal: Double = items.sumOf { it.subtotal }
-
-    val isEmpty: Boolean = items.isEmpty()
+    val subtotal: Double get() = items.sumOf { it.subtotal }.adventureRoundMoney()
+    val isEmpty: Boolean get() = items.isEmpty()
 }
 
 data class AdventureBookingBlock(
-    val id: String,
+    val id: String = UUID.randomUUID().toString(),
     val title: String,
     val activity: AdventureActivityType,
     val resourceType: AdventureResourceType,
@@ -933,7 +1126,7 @@ data class AdventureBuildPlan(
 )
 
 data class AdventureAvailabilitySlot(
-    val id: String,
+    val id: String = UUID.randomUUID().toString(),
     val startAt: Date,
     val endAt: Date,
     val blocks: List<AdventureBookingBlock>,
@@ -963,9 +1156,8 @@ data class AdventureBookingRequest(
     val appliedRewards: List<AppliedReward> = emptyList(),
     val notes: String?,
 ) {
-    val hasActivities: Boolean = items.isNotEmpty()
-
-    val hasFoodReservation: Boolean = foodReservation?.isEmpty == false
+    val hasActivities: Boolean get() = items.isNotEmpty()
+    val hasFoodReservation: Boolean get() = foodReservation?.isEmpty == false
 }
 
 data class AdventureBooking(
@@ -996,13 +1188,12 @@ data class AdventureBooking(
     val createdAt: Date,
     val notes: String?,
 ) {
-    val hasActivities: Boolean = items.isNotEmpty()
-
-    val hasFoodReservation: Boolean = foodReservation?.isEmpty == false
+    val hasActivities: Boolean get() = items.isNotEmpty()
+    val hasFoodReservation: Boolean get() = foodReservation?.isEmpty == false
 
     val eventDisplayTitle: String
         get() = if (eventType == ReservationEventType.CUSTOM) {
-            customEventTitle?.trim().takeUnless { it.isNullOrEmpty() } ?: "Evento personalizado"
+            customEventTitle?.trim()?.takeIf { it.isNotEmpty() } ?: "Evento personalizado"
         } else {
             eventType.title
         }
@@ -1017,12 +1208,12 @@ data class AdventureBooking(
 }
 
 object AdventureSchedule {
-    const val SLOT_MINUTES: Int = 30
-    const val DAYTIME_START_HOUR: Int = 7
-    const val DAYTIME_END_HOUR: Int = 20
-    const val NIGHT_PREMIUM_START_HOUR: Int = 18
-    const val OFF_ROAD_PEOPLE_PER_VEHICLE: Int = 2
-    const val FOOD_ONLY_DEFAULT_DURATION_MINUTES: Int = 90
+    const val SLOT_MINUTES = 30
+    const val DAYTIME_START_HOUR = 7
+    const val DAYTIME_END_HOUR = 20
+    const val NIGHT_PREMIUM_START_HOUR = 18
+    const val OFF_ROAD_PEOPLE_PER_VEHICLE = 2
+    const val FOOD_ONLY_DEFAULT_DURATION_MINUTES = 90
 
     fun capacity(resource: AdventureResourceType): Int = when (resource) {
         AdventureResourceType.OFF_ROAD_VEHICLES -> 600
@@ -1035,27 +1226,22 @@ object AdventureSchedule {
 }
 
 object AdventureDateHelper {
-    private val calendar: Calendar = Calendar.getInstance()
+    private val dayFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val timeFormatter = SimpleDateFormat("h:mm a", Locale("es", "EC"))
+    private val shortDateFormatter = SimpleDateFormat("EEE d MMM", Locale("es", "EC"))
 
-    fun dayKey(date: Date): String {
-        val local = Calendar.getInstance().apply { time = date }
-        return "%04d-%02d-%02d".format(
-            local.get(Calendar.YEAR),
-            local.get(Calendar.MONTH) + 1,
-            local.get(Calendar.DAY_OF_MONTH),
-        )
-    }
+    fun dayKey(date: Date): String = dayFormatter.format(date)
+    fun timeText(date: Date): String = timeFormatter.format(date)
+    fun shortDateText(date: Date): String = shortDateFormatter.format(date)
 
-    fun dateOn(day: Date, hour: Int, minute: Int): Date {
-        val cal = Calendar.getInstance().apply {
+    fun dateOn(day: Date, hour: Int, minute: Int): Date =
+        Calendar.getInstance().apply {
             time = day
             set(Calendar.HOUR_OF_DAY, hour)
             set(Calendar.MINUTE, minute)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
-        }
-        return cal.time
-    }
+        }.time
 
     fun addMinutes(value: Int, date: Date): Date = Calendar.getInstance().apply {
         time = date
@@ -1075,6 +1261,9 @@ object AdventureDateHelper {
         set(Calendar.MILLISECOND, 0)
     }.time
 
+    fun sameDay(lhs: Date, rhs: Date): Boolean = dayKey(lhs) == dayKey(rhs)
+    fun isDateInToday(date: Date): Boolean = sameDay(date, Date())
+
     fun slotIndex(date: Date): Int {
         val cal = Calendar.getInstance().apply { time = date }
         val totalMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
@@ -1088,6 +1277,873 @@ object AdventureDateHelper {
                 endHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR ||
                 startHour < AdventureSchedule.DAYTIME_START_HOUR
     }
+
+    fun combineDayAndTime(day: Date, time: Date): Date {
+        val timeCal = Calendar.getInstance().apply { this.time = time }
+        return dateOn(
+            day = day,
+            hour = timeCal.get(Calendar.HOUR_OF_DAY),
+            minute = timeCal.get(Calendar.MINUTE),
+        )
+    }
+}
+
+object AdventurePricingEngine {
+    const val NIGHT_PREMIUM_RATE = 0.25
+
+    fun finalUnitPrice(config: AdventureActivityCatalogItem): Double =
+        (config.basePrice - config.discountAmount).coerceAtLeast(0.0).adventureRoundMoney()
+
+    fun lineBaseSubtotal(
+        item: AdventureReservationItemDraft,
+        config: AdventureActivityCatalogItem
+    ): Double =
+        when (item.activity) {
+            AdventureActivityType.OFF_ROAD -> config.basePrice * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+            AdventureActivityType.PAINTBALL,
+            AdventureActivityType.GO_KARTS,
+            AdventureActivityType.SHOOTING_RANGE -> config.basePrice * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+
+            AdventureActivityType.CAMPING -> config.basePrice * item.peopleCount * item.nights.coerceAtLeast(
+                1
+            )
+
+            AdventureActivityType.EXTREME_SLIDE -> config.basePrice * item.peopleCount
+        }.adventureRoundMoney()
+
+    fun subtotal(
+        item: AdventureReservationItemDraft,
+        config: AdventureActivityCatalogItem
+    ): Double =
+        when (item.activity) {
+            AdventureActivityType.OFF_ROAD -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+            AdventureActivityType.PAINTBALL,
+            AdventureActivityType.GO_KARTS,
+            AdventureActivityType.SHOOTING_RANGE -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+
+            AdventureActivityType.CAMPING -> finalUnitPrice(config) * item.peopleCount * item.nights.coerceAtLeast(
+                1
+            )
+
+            AdventureActivityType.EXTREME_SLIDE -> finalUnitPrice(config) * item.peopleCount
+        }.adventureRoundMoney()
+
+    fun subtotal(item: AdventureReservationItemDraft, catalog: AdventureCatalogSnapshot): Double {
+        val config = catalog.activity(item.activity) ?: return 0.0
+        return subtotal(item, config)
+    }
+
+    fun lineDiscountAmount(
+        item: AdventureReservationItemDraft,
+        catalog: AdventureCatalogSnapshot
+    ): Double {
+        val config = catalog.activity(item.activity) ?: return 0.0
+        return (lineBaseSubtotal(item, config) - subtotal(item, config)).coerceAtLeast(0.0)
+            .adventureRoundMoney()
+    }
+
+    fun estimatedSubtotal(
+        items: List<AdventureReservationItemDraft>,
+        catalog: AdventureCatalogSnapshot
+    ): Double =
+        items.sumOf { subtotal(it, catalog) }.adventureRoundMoney()
+
+    fun estimatedDiscountAmount(
+        items: List<AdventureReservationItemDraft>,
+        catalog: AdventureCatalogSnapshot
+    ): Double =
+        items.sumOf { lineDiscountAmount(it, catalog) }.adventureRoundMoney()
+
+    fun foodSubtotal(foodReservation: ReservationFoodDraft?): Double =
+        (foodReservation?.subtotal ?: 0.0).adventureRoundMoney()
+
+    fun packageTotal(
+        items: List<AdventureReservationItemDraft>,
+        packageDiscountAmount: Double,
+        catalog: AdventureCatalogSnapshot,
+    ): Double = (estimatedSubtotal(items, catalog) - packageDiscountAmount.coerceAtLeast(0.0))
+        .coerceAtLeast(0.0)
+        .adventureRoundMoney()
+}
+
+object AdventurePlanner {
+    fun buildPlan(
+        day: Date,
+        startAt: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+        catalog: AdventureCatalogSnapshot,
+    ): AdventureBuildPlan? {
+        val hasFood = foodReservation?.isEmpty == false
+        if (items.isEmpty() && !hasFood) return null
+
+        val foodSubtotal = AdventurePricingEngine.foodSubtotal(foodReservation)
+        val dayStart = AdventureDateHelper.dateOn(day, AdventureSchedule.DAYTIME_START_HOUR, 0)
+        val dayEnd = AdventureDateHelper.dateOn(day, AdventureSchedule.DAYTIME_END_HOUR, 0)
+
+        if (startAt.before(dayStart)) return null
+
+        if (items.isEmpty()) {
+            val end = AdventureDateHelper.addMinutes(
+                AdventureSchedule.FOOD_ONLY_DEFAULT_DURATION_MINUTES,
+                startAt
+            )
+            if (end.after(dayEnd)) return null
+            return AdventureBuildPlan(
+                startAt = startAt,
+                endAt = end,
+                blocks = emptyList(),
+                adventureSubtotal = 0.0,
+                foodSubtotal = foodSubtotal,
+                subtotal = foodSubtotal,
+                discountAmount = 0.0,
+                loyaltyDiscountAmount = 0.0,
+                appliedRewards = emptyList(),
+                nightPremium = 0.0,
+                totalAmount = foodSubtotal,
+                hasNightPremium = false,
+            )
+        }
+
+        var cursor = startAt
+        val blocks = mutableListOf<AdventureBookingBlock>()
+        var discountedAdventureSubtotal = 0.0
+        var activityDiscountAmount = 0.0
+
+        items.forEachIndexed { index, item ->
+            val config = catalog.activity(item.activity) ?: return null
+            if (!config.isActive) return null
+
+            fun addSimpleBlock(resourceType: AdventureResourceType): Boolean {
+                val end = AdventureDateHelper.addMinutes(item.durationMinutes, cursor)
+                if (end.after(dayEnd)) return false
+                val lineSubtotal = AdventurePricingEngine.subtotal(item, catalog)
+                val lineDiscount = AdventurePricingEngine.lineDiscountAmount(item, catalog)
+                discountedAdventureSubtotal += lineSubtotal
+                activityDiscountAmount += lineDiscount
+                blocks += AdventureBookingBlock(
+                    title = config.title,
+                    activity = item.activity,
+                    resourceType = resourceType,
+                    startAt = cursor,
+                    endAt = end,
+                    reservedUnits = item.peopleCount,
+                    subtotal = lineSubtotal,
+                )
+                cursor = end
+                return true
+            }
+
+            when (item.activity) {
+                AdventureActivityType.OFF_ROAD -> {
+                    if (item.vehicleCount <= 0 || item.offRoadRiderCount <= 0) return null
+                    if (item.offRoadRiderCount > item.vehicleCount * AdventureSchedule.OFF_ROAD_PEOPLE_PER_VEHICLE) return null
+                    val end = AdventureDateHelper.addMinutes(item.durationMinutes, cursor)
+                    if (end.after(dayEnd)) return null
+                    val lineSubtotal = AdventurePricingEngine.subtotal(item, catalog)
+                    val lineDiscount = AdventurePricingEngine.lineDiscountAmount(item, catalog)
+                    discountedAdventureSubtotal += lineSubtotal
+                    activityDiscountAmount += lineDiscount
+                    blocks += AdventureBookingBlock(
+                        title = config.title,
+                        activity = AdventureActivityType.OFF_ROAD,
+                        resourceType = AdventureResourceType.OFF_ROAD_VEHICLES,
+                        startAt = cursor,
+                        endAt = end,
+                        reservedUnits = item.vehicleCount,
+                        subtotal = lineSubtotal,
+                    )
+                    cursor = end
+                }
+
+                AdventureActivityType.PAINTBALL ->
+                    if (!addSimpleBlock(AdventureResourceType.PAINTBALL_PEOPLE)) return null
+
+                AdventureActivityType.GO_KARTS ->
+                    if (!addSimpleBlock(AdventureResourceType.GO_KART_PEOPLE)) return null
+
+                AdventureActivityType.SHOOTING_RANGE ->
+                    if (!addSimpleBlock(AdventureResourceType.SHOOTING_PEOPLE)) return null
+
+                AdventureActivityType.EXTREME_SLIDE -> {
+                    val transportVehicles = max(
+                        1,
+                        ceil(item.peopleCount.toDouble() / AdventureSchedule.OFF_ROAD_PEOPLE_PER_VEHICLE.toDouble()).toInt(),
+                    )
+                    val transportEnd = AdventureDateHelper.addMinutes(30, cursor)
+                    val slideEnd = AdventureDateHelper.addMinutes(30, transportEnd)
+                    if (slideEnd.after(dayEnd)) return null
+
+                    blocks += AdventureBookingBlock(
+                        title = "Transporte al columpio extremo",
+                        activity = AdventureActivityType.EXTREME_SLIDE,
+                        resourceType = AdventureResourceType.OFF_ROAD_VEHICLES,
+                        startAt = cursor,
+                        endAt = transportEnd,
+                        reservedUnits = transportVehicles,
+                        subtotal = 0.0,
+                    )
+
+                    val lineSubtotal = AdventurePricingEngine.subtotal(item, catalog)
+                    val lineDiscount = AdventurePricingEngine.lineDiscountAmount(item, catalog)
+                    discountedAdventureSubtotal += lineSubtotal
+                    activityDiscountAmount += lineDiscount
+
+                    blocks += AdventureBookingBlock(
+                        title = config.title,
+                        activity = AdventureActivityType.EXTREME_SLIDE,
+                        resourceType = AdventureResourceType.EXTREME_SLIDE_PEOPLE,
+                        startAt = transportEnd,
+                        endAt = slideEnd,
+                        reservedUnits = item.peopleCount,
+                        subtotal = lineSubtotal,
+                    )
+                    cursor = slideEnd
+                }
+
+                AdventureActivityType.CAMPING -> {
+                    if (index != items.lastIndex) return null
+                    val campingStart = AdventureDateHelper.dateOn(day, 19, 0)
+                    if (cursor.after(campingStart)) return null
+
+                    repeat(item.nights.coerceAtLeast(1)) { night ->
+                        val start = AdventureDateHelper.addDays(night, campingStart)
+                        val end = AdventureDateHelper.addMinutes(12 * 60, start)
+                        val nightItem = AdventureReservationItemDraft(
+                            activity = AdventureActivityType.CAMPING,
+                            durationMinutes = 0,
+                            peopleCount = item.peopleCount,
+                            vehicleCount = 0,
+                            offRoadRiderCount = 0,
+                            nights = 1,
+                        )
+                        val nightSubtotal = AdventurePricingEngine.subtotal(nightItem, catalog)
+                        val nightDiscount =
+                            AdventurePricingEngine.lineDiscountAmount(nightItem, catalog)
+                        discountedAdventureSubtotal += nightSubtotal
+                        activityDiscountAmount += nightDiscount
+
+                        blocks += AdventureBookingBlock(
+                            title = "${config.title} Noche ${night + 1}",
+                            activity = AdventureActivityType.CAMPING,
+                            resourceType = AdventureResourceType.CAMPING_PEOPLE,
+                            startAt = start,
+                            endAt = end,
+                            reservedUnits = item.peopleCount,
+                            subtotal = nightSubtotal,
+                        )
+                    }
+                    cursor = blocks.lastOrNull()?.endAt ?: cursor
+                }
+            }
+        }
+
+        val last = blocks.lastOrNull() ?: return null
+        val hasNightPremium = items.any { it.activity == AdventureActivityType.CAMPING } ||
+                blocks.any { AdventureDateHelper.isNightPremiumTime(it.startAt, it.endAt) }
+
+        val packageDiscount = packageDiscountAmount.coerceAtLeast(0.0)
+        val totalDiscountAmount = (activityDiscountAmount + packageDiscount).adventureRoundMoney()
+        val packageAdjustedAdventureSubtotal =
+            (discountedAdventureSubtotal - packageDiscount).coerceAtLeast(0.0).adventureRoundMoney()
+        val totalSubtotal = (discountedAdventureSubtotal + foodSubtotal).adventureRoundMoney()
+        val totalAmount = (packageAdjustedAdventureSubtotal + foodSubtotal).adventureRoundMoney()
+
+        return AdventureBuildPlan(
+            startAt = startAt,
+            endAt = last.endAt,
+            blocks = blocks,
+            adventureSubtotal = discountedAdventureSubtotal.adventureRoundMoney(),
+            foodSubtotal = foodSubtotal,
+            subtotal = totalSubtotal,
+            discountAmount = totalDiscountAmount,
+            loyaltyDiscountAmount = 0.0,
+            appliedRewards = emptyList(),
+            nightPremium = 0.0,
+            totalAmount = totalAmount,
+            hasNightPremium = hasNightPremium,
+        )
+    }
+
+    fun affectedDayKeys(day: Date, items: List<AdventureReservationItemDraft>): List<String> {
+        val campingNights =
+            items.firstOrNull { it.activity == AdventureActivityType.CAMPING }?.nights ?: 0
+        val days = max(1, campingNights + 1)
+        return (0 until days).map {
+            AdventureDateHelper.dayKey(
+                AdventureDateHelper.addDays(
+                    it,
+                    day
+                )
+            )
+        }
+    }
+
+    fun buildAvailability(
+        day: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+        catalog: AdventureCatalogSnapshot,
+    ): List<AdventureAvailabilitySlot> {
+        val hasFood = foodReservation?.isEmpty == false
+        if (items.isEmpty() && !hasFood) return emptyList()
+
+        val startWindow = AdventureDateHelper.dateOn(day, AdventureSchedule.DAYTIME_START_HOUR, 0)
+        val endWindow = AdventureDateHelper.dateOn(day, AdventureSchedule.DAYTIME_END_HOUR, 0)
+        val now = Date()
+        val isToday = AdventureDateHelper.sameDay(day, now)
+
+        var current = startWindow
+        val slots = mutableListOf<AdventureAvailabilitySlot>()
+
+        while (!current.after(endWindow)) {
+            val plan =
+                buildPlan(day, current, items, foodReservation, packageDiscountAmount, catalog)
+            if (!(isToday && current.before(now)) && plan != null) {
+                slots += AdventureAvailabilitySlot(
+                    startAt = plan.startAt,
+                    endAt = plan.endAt,
+                    blocks = plan.blocks,
+                    adventureSubtotal = plan.adventureSubtotal,
+                    foodSubtotal = plan.foodSubtotal,
+                    subtotal = plan.subtotal,
+                    discountAmount = plan.discountAmount,
+                    nightPremium = plan.nightPremium,
+                    totalAmount = plan.totalAmount,
+                )
+            }
+            current = AdventureDateHelper.addMinutes(AdventureSchedule.SLOT_MINUTES, current)
+        }
+
+        return slots
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureUseCases.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
+
+
+class FetchAdventureCatalogUseCase @Inject constructor(
+    private val repository: AdventureCatalogRepositoriable,
+) {
+    suspend fun execute(): AdventureCatalogSnapshot = repository.fetchCatalog()
+}
+
+class ObserveAdventureCatalogUseCase @Inject constructor(
+    private val repository: AdventureCatalogRepositoriable,
+) {
+    fun execute(): Flow<AdventureCatalogSnapshot> = repository.observeCatalog()
+}
+
+class GetAdventureAvailabilityUseCase @Inject constructor(
+    private val repository: AdventureBookingsRepositoriable,
+) {
+    suspend fun execute(
+        date: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+    ): List<AdventureAvailabilitySlot> = repository.fetchAvailability(
+        date = date,
+        items = items,
+        foodReservation = foodReservation,
+        packageDiscountAmount = packageDiscountAmount,
+    )
+}
+
+class CreateAdventureBookingUseCase @Inject constructor(
+    private val repository: AdventureBookingsRepositoriable,
+) {
+    suspend fun execute(request: AdventureBookingRequest): AdventureBooking =
+        repository.createBooking(request)
+}
+
+class ObserveAdventureBookingsUseCase @Inject constructor(
+    private val repository: AdventureBookingsRepositoriable,
+) {
+    fun execute(day: Date, nationalId: String): Flow<List<AdventureBooking>> =
+        repository.observeBookings(day = day, nationalId = nationalId)
+}
+
+class CancelAdventureBookingUseCase @Inject constructor(
+    private val repository: AdventureBookingsRepositoriable,
+) {
+    suspend fun execute(id: String, nationalId: String) {
+        repository.cancelBooking(id = id, nationalId = nationalId)
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/view/AdventureBookingsScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
+
+
+@Composable
+fun AdventureBookingsScreen(
+    sessionState: SessionState.Authenticated,
+    modifier: Modifier = Modifier,
+    viewModel: AdventureBookingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var bookingToCancel by remember { mutableStateOf<AdventureBooking?>(null) }
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        viewModel.onAppear(sessionState.profile)
+    }
+
+    val message = state.errorMessage ?: state.successMessage
+    if (message != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissMessage,
+            confirmButton = { TextButton(onClick = viewModel::dismissMessage) { Text("OK") } },
+            title = { Text("Mensaje") },
+            text = { Text(message) },
+        )
+    }
+
+    bookingToCancel?.let { booking ->
+        AlertDialog(
+            onDismissRequest = { bookingToCancel = null },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.cancelBooking(booking)
+                    bookingToCancel = null
+                }) { Text("Cancelar reserva") }
+            },
+            dismissButton = { TextButton(onClick = { bookingToCancel = null }) { Text("Volver") } },
+            title = { Text("¿Cancelar reserva?") },
+            text = { Text("Se liberarán los premios reservados y la reserva quedará como cancelada.") },
+        )
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Mis reservas",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Aventura, comida y eventos por día.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = viewModel::refresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refrescar")
+            }
+        }
+
+        AdventureCard {
+            AdventureSectionTitle("Fecha", "Mira las reservas de un día específico.")
+            OutlinedButton(
+                onClick = {
+                    val calendar = Calendar.getInstance().apply { time = state.selectedDate }
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, day ->
+                            val picked = Calendar.getInstance().apply {
+                                set(year, month, day, 0, 0, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }
+                            viewModel.onDateSelected(picked.time)
+                        },
+                        calendar.get(Calendar.YEAR),
+                        calendar.get(Calendar.MONTH),
+                        calendar.get(Calendar.DAY_OF_MONTH),
+                    ).show()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                Spacer(Modifier.height(0.dp))
+                Text(AdventureDateHelper.shortDateText(state.selectedDate))
+            }
+        }
+
+        if (state.isLoading) {
+            CircularProgressIndicator()
+        } else if (state.bookings.isEmpty()) {
+            AdventureEmptyState(
+                title = "Sin reservas para este día",
+                body = "Cuando crees una reserva de aventura o comida aparecerá aquí.",
+                icon = Icons.Rounded.Event,
+            )
+        } else {
+            state.bookings.forEach { booking ->
+                AdventureBookingCard(
+                    booking = booking,
+                    onCancel = { bookingToCancel = booking },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdventureBookingCard(
+    booking: AdventureBooking,
+    onCancel: () -> Unit,
+) {
+    AdventureCard {
+        Row(
+            verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            AdventureIconBubble(icon = Icons.Rounded.Event)
+            Column(
+                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(
+                    booking.visitTypeTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "${AdventureDateHelper.timeText(booking.startAt)} - ${
+                        AdventureDateHelper.timeText(
+                            booking.endAt
+                        )
+                    }",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(booking.eventDisplayTitle, style = MaterialTheme.typography.bodyMedium)
+            }
+            AssistChip(onClick = {}, label = { Text(booking.status.title) })
+        }
+
+        Divider()
+
+        if (booking.items.isNotEmpty()) {
+            Text("Actividades", fontWeight = FontWeight.Bold)
+            booking.items.forEach { item ->
+                Text(
+                    "• ${item.title}: ${item.summaryText}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        booking.foodReservation?.takeIf { !it.isEmpty }?.let { food ->
+            Text("Comida", fontWeight = FontWeight.Bold)
+            food.items.forEach { item ->
+                Text(
+                    "• ${item.quantity}x ${item.name}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Text(
+                "Servicio: ${food.servingMoment.title}", style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        if (booking.appliedRewards.isNotEmpty()) {
+            Text("Premios aplicados", fontWeight = FontWeight.Bold)
+            booking.appliedRewards.forEach { reward ->
+                Text(
+                    "• ${reward.title}: -${reward.amount.priceText()}",
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        AdventurePriceRow("Total", booking.totalAmount, bold = true)
+
+        if (booking.status == AdventureBookingStatus.PENDING || booking.status == AdventureBookingStatus.CONFIRMED) {
+            OutlinedButton(
+                onClick = onCancel,
+                modifier = Modifier.fillMaxWidth(),
+                enabled = booking.status != AdventureBookingStatus.CANCELED
+            ) {
+                Icon(Icons.Rounded.Cancel, contentDescription = null)
+                Text("Cancelar reserva")
+            }
+        } else if (booking.status == AdventureBookingStatus.COMPLETED) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text("Reserva completada", color = MaterialTheme.colorScheme.primary)
+            }
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/view/AdventureFoodPickerSheet.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
+
+
+private val adventureFoodCategoryDisplayOrder = listOf(
+    "Entradas",
+    "Sopas",
+    "Platos Fuertes",
+    "Extras",
+    "Postres",
+    "Bebidas",
+    "Bebidas Alcohólicas",
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdventureFoodPickerSheet(
+    menuSections: List<MenuSection>,
+    selectedDate: Date,
+    rewardPresentationProvider: (MenuItem, Int) -> RewardPresentation?,
+    displayedPriceProvider: (MenuItem, Int) -> Double,
+    incrementalDiscountProvider: (MenuItem, Int) -> Double,
+    onDismiss: () -> Unit,
+    onAdd: (MenuItem, Int, String?) -> Unit,
+) {
+    var selectedCategoryId by remember { mutableStateOf<String?>(null) }
+    var searchText by remember { mutableStateOf("") }
+
+    val orderedSections = menuSections.sortedWith(
+        compareBy<MenuSection> { section ->
+            adventureFoodCategoryDisplayOrder.indexOf(section.category.title).takeIf { it >= 0 }
+                ?: Int.MAX_VALUE
+        }.thenBy { it.category.title },
+    )
+
+    val visibleSections = orderedSections
+        .filter { section -> selectedCategoryId == null || section.category.id == selectedCategoryId }
+        .mapNotNull { section ->
+            val query = searchText.trim().lowercase()
+            val items = if (query.isEmpty()) {
+                section.items
+            } else {
+                section.items.filter { item ->
+                    item.name.lowercase().contains(query) ||
+                            item.description.lowercase().contains(query) ||
+                            item.ingredients.any { it.lowercase().contains(query) }
+                }
+            }
+            if (items.isEmpty()) null else section.copy(items = items)
+        }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight(0.92f)
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AdventureSectionTitle(
+                    title = "Menú del restaurante",
+                    subtitle = "Agrega platos a tu reserva de aventura.",
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Cerrar")
+                }
+            }
+
+            OutlinedTextField(
+                value = searchText,
+                onValueChange = { searchText = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                label = { Text("Buscar plato, bebida o ingrediente") },
+            )
+
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AssistChip(
+                    onClick = { selectedCategoryId = null },
+                    label = { Text("Todo") },
+                    leadingIcon = if (selectedCategoryId == null) {
+                        { Icon(Icons.Rounded.LocalDining, contentDescription = null) }
+                    } else null,
+                )
+                orderedSections.map { it.category }.distinctBy { it.id }.forEach { category ->
+                    AssistChip(
+                        onClick = { selectedCategoryId = category.id },
+                        label = { Text(category.title) },
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                if (visibleSections.isEmpty()) {
+                    AdventureEmptyState(
+                        title = "No se encontraron platos",
+                        body = "Prueba otra búsqueda o cambia de categoría.",
+                        icon = Icons.Rounded.Search,
+                    )
+                } else {
+                    visibleSections.forEach { section ->
+                        Text(
+                            text = section.category.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        section.items.forEach { item ->
+                            AdventureFoodPickerRow(
+                                item = item,
+                                selectedDate = selectedDate,
+                                rewardPresentation = rewardPresentationProvider(item, 1),
+                                displayedPrice = displayedPriceProvider(item, 1),
+                                incrementalDiscount = incrementalDiscountProvider(item, 1),
+                                onAdd = { quantity, notes ->
+                                    onAdd(item, quantity, notes)
+                                    onDismiss()
+                                },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdventureFoodPickerRow(
+    item: MenuItem,
+    selectedDate: Date,
+    rewardPresentation: RewardPresentation?,
+    displayedPrice: Double,
+    incrementalDiscount: Double,
+    onAdd: (Int, String?) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var quantity by remember { mutableIntStateOf(1) }
+    var notes by remember { mutableStateOf("") }
+    val blockedToday = AdventureDateHelper.isDateInToday(selectedDate) && !item.canBeOrdered
+
+    AdventureCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            AdventureIconBubble(icon = Icons.Rounded.LocalDining)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (incrementalDiscount > 0) {
+                        Text(
+                            text = item.finalPrice.priceText(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                    }
+                    Text(
+                        text = (if (incrementalDiscount > 0) displayedPrice else item.finalPrice).priceText(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                rewardPresentation?.let { reward ->
+                    Text(
+                        text = "${reward.badge}: ${reward.message}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                if (blockedToday) {
+                    Text(
+                        text = "Por hoy está agotado y no se puede pedir.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        if (expanded) {
+            Divider()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                IconButton(onClick = { quantity = (quantity - 1).coerceAtLeast(1) }) {
+                    Icon(Icons.Rounded.Remove, contentDescription = "Menos")
+                }
+                Text(
+                    text = quantity.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = { quantity += 1 }) {
+                    Icon(Icons.Rounded.Add, contentDescription = "Más")
+                }
+            }
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                label = { Text("Notas para cocina") },
+            )
+            Button(
+                onClick = { onAdd(quantity, notes.trim().takeIf { it.isNotEmpty() }) },
+                enabled = !blockedToday,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Agregar a la reserva")
+            }
+        } else {
+            TextButton(onClick = { expanded = true }, enabled = !blockedToday) {
+                Text("Elegir cantidad y notas")
+            }
+        }
+    }
 }
 
 ```
@@ -1100,23 +2156,2137 @@ object AdventureDateHelper {
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
 
 
+private sealed interface AdventureMode {
+    data object Catalog : AdventureMode
+    data object Builder : AdventureMode
+}
+
 @Composable
 fun AdventureScreen(
+    sessionState: SessionState.Authenticated,
+    modifier: Modifier = Modifier,
+    catalogViewModel: AdventureCatalogViewModel = hiltViewModel(),
+    builderViewModel: AdventureComboBuilderViewModel = hiltViewModel(),
+    menuViewModel: MenuViewModel = hiltViewModel(),
+) {
+    val catalogState by catalogViewModel.uiState.collectAsStateWithLifecycle()
+    val builderState by builderViewModel.uiState.collectAsStateWithLifecycle()
+    val menuState by menuViewModel.uiState.collectAsStateWithLifecycle()
+    var mode by remember { mutableStateOf<AdventureMode>(AdventureMode.Catalog) }
+    var showFoodPicker by remember { mutableStateOf(false) }
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        catalogViewModel.onAppear()
+        builderViewModel.onAppear(sessionState.profile)
+        menuViewModel.onAppear(sessionState.profile.nationalId)
+    }
+
+    if (showFoodPicker) {
+        AdventureFoodPickerSheet(
+            menuSections = menuState.sections,
+            selectedDate = builderState.selectedDate,
+            rewardPresentationProvider = builderViewModel::foodPickerRewardPresentation,
+            displayedPriceProvider = builderViewModel::foodPickerDisplayedPrice,
+            incrementalDiscountProvider = builderViewModel::foodPickerIncrementalDiscount,
+            onDismiss = { showFoodPicker = false },
+            onAdd = { item, quantity, notes ->
+                builderViewModel.addFoodItem(item, quantity, notes)
+            },
+        )
+    }
+
+    val message =
+        builderState.errorMessage ?: builderState.successMessage ?: catalogState.errorMessage
+    if (message != null) {
+        AlertDialog(
+            onDismissRequest = {
+                builderViewModel.dismissMessage()
+                catalogViewModel.clearError()
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    builderViewModel.dismissMessage()
+                    catalogViewModel.clearError()
+                }) { Text("OK") }
+            },
+            title = { Text("Mensaje") },
+            text = { Text(message) },
+        )
+    }
+
+    when (mode) {
+        AdventureMode.Catalog -> AdventureCatalogContent(
+            modifier = modifier,
+            isLoading = catalogState.isLoading,
+            catalog = catalogState.catalog,
+            menuSections = menuState.sections,
+            builderViewModel = builderViewModel,
+            onCustomCombo = {
+                builderViewModel.prepareCustomDraftIfNeeded()
+                mode = AdventureMode.Builder
+            },
+            onOpenSingle = { activity ->
+                builderViewModel.replaceItems(listOf(activity.defaultDraft), 0.0)
+                mode = AdventureMode.Builder
+            },
+            onOpenPackage = { packageModel ->
+                builderViewModel.replacePackage(packageModel, menuState.sections)
+                mode = AdventureMode.Builder
+            },
+        )
+
+        AdventureMode.Builder -> AdventureBuilderContent(
+            modifier = modifier,
+            viewModel = builderViewModel,
+            menuSections = menuState.sections,
+            onBack = { mode = AdventureMode.Catalog },
+            onAddFood = { showFoodPicker = true },
+            clientId = sessionState.profile.id,
+        )
+    }
+}
+
+@Composable
+private fun AdventureCatalogContent(
+    isLoading: Boolean,
+    catalog: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot,
+    menuSections: List<MenuSection>,
+    builderViewModel: AdventureComboBuilderViewModel,
+    onCustomCombo: () -> Unit,
+    onOpenSingle: (AdventureActivityCatalogItem) -> Unit,
+    onOpenPackage: (AdventureFeaturedPackage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        AltosPlaceholderCard(
-            title = "Aventura",
-            body = "El catálogo de actividades, paquetes destacados, builder de combos, disponibilidad y reservas se portarán sobre esta base.",
+        AdventureGradientHero(
+            title = "Construye tu combo perfecto",
+            subtitle = "Actividades, paquetes destacados, comida del restaurante, horarios y premios Murco Loyalty en una sola reserva.",
+            action = {
+                Button(
+                    onClick = onCustomCombo,
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
+                ) {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Iniciar combo personalizado")
+                }
+            },
         )
 
+        if (isLoading && catalog.activities.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else {
+            AdventureSectionTitle(
+                title = "Paquetes destacados",
+                subtitle = "Combos sugeridos cargados desde Firestore.",
+            )
+            if (catalog.activePackagesSorted.isEmpty()) {
+                AdventureEmptyState(
+                    title = "No hay paquetes destacados",
+                    body = "Cuando actives paquetes en Firestore aparecerán aquí.",
+                    icon = Icons.Rounded.Explore,
+                )
+            } else {
+                catalog.activePackagesSorted.forEach { packageModel ->
+                    FeaturedPackageCard(
+                        packageModel = packageModel,
+                        catalog = catalog,
+                        menuSections = menuSections,
+                        reward = builderViewModel.packageRewardPresentation(
+                            packageModel,
+                            menuSections
+                        ),
+                        onClick = { onOpenPackage(packageModel) },
+                    )
+                }
+            }
+
+            AdventureSectionTitle(
+                title = "Actividades individuales",
+                subtitle = "Reserva una actividad o úsala como base para tu combo.",
+            )
+            catalog.activeActivitiesSorted.forEach { activity ->
+                SingleActivityCard(
+                    activity = activity,
+                    reward = builderViewModel.catalogRewardPresentation(activity),
+                    onClick = { onOpenSingle(activity) },
+                )
+            }
+
+            AdventureCard {
+                AdventureSectionTitle(
+                    title = "¿Necesitas algo diferente?",
+                    subtitle = "Crea una combinación a medida con tiempos, personas, comida y notas del evento.",
+                )
+                OutlinedButton(onClick = onCustomCombo, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Explore, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Abrir creador de aventuras")
+                }
+            }
+        }
     }
 }
+
+@Composable
+private fun FeaturedPackageCard(
+    packageModel: AdventureFeaturedPackage,
+    catalog: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot,
+    menuSections: List<MenuSection>,
+    reward: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation?,
+    onClick: () -> Unit,
+) {
+    val menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id }
+    val activitySubtotal = AdventurePricingEngine.estimatedSubtotal(packageModel.items, catalog)
+    val foodSubtotal = packageModel.foodItems.sumOf { food ->
+        (menuItemsById[food.menuItemId]?.finalPrice ?: 0.0) * food.quantity
+    }
+    val total =
+        (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount).coerceAtLeast(0.0)
+    val foodSummary = packageModel.foodItems.joinToString(" • ") { food ->
+        "${food.quantity}x ${menuItemsById[food.menuItemId]?.name ?: food.menuItemId}"
+    }
+
+    AdventureCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            AdventureIconBubble(icon = Icons.Rounded.Explore)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        packageModel.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    packageModel.badge?.takeIf { it.isNotBlank() }
+                        ?.let { AdventureBadge(text = it) }
+                }
+                Text(
+                    packageModel.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (foodSummary.isNotBlank()) Text(
+                    foodSummary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "Aventura ${activitySubtotal.priceText()}${if (foodSubtotal > 0) " • Comida ${foodSubtotal.priceText()}" else ""}",
+                    style = MaterialTheme.typography.labelMedium
+                )
+                if (packageModel.packageDiscountAmount > 0) Text(
+                    "Descuento del paquete: ${packageModel.packageDiscountAmount.priceText()}",
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelMedium
+                )
+                reward?.let {
+                    Text(
+                        "${it.badge}: ${it.message}",
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            }
+        }
+        Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text("Desde ${total.priceText()} • Ver combo")
+        }
+    }
+}
+
+@Composable
+private fun SingleActivityCard(
+    activity: AdventureActivityCatalogItem,
+    reward: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation?,
+    onClick: () -> Unit,
+) {
+    AdventureCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            AdventureIconBubble(icon = adventureIconFor(activity.activityType))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    activity.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    activity.shortDescription,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Desde ${activity.finalUnitPrice.priceText()}",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (activity.hasDiscount) {
+                        Text(
+                            "Antes ${activity.basePrice.priceText()}",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough
+                        )
+                    }
+                }
+                reward?.let {
+                    Text(
+                        "${it.badge}: ${it.message}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text("Reservar")
+        }
+    }
+}
+
+@Composable
+private fun AdventureBuilderContent(
+    viewModel: AdventureComboBuilderViewModel,
+    menuSections: List<MenuSection>,
+    onBack: () -> Unit,
+    onAddFood: () -> Unit,
+    clientId: String?,
+    modifier: Modifier = Modifier,
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
+    var editingFood by remember { mutableStateOf<ReservationFoodItemDraft?>(null) }
+
+    editingItem?.let { item ->
+        AdventureItemEditorDialog(
+            item = item,
+            config = viewModel.config(item.activity),
+            onDismiss = { editingItem = null },
+            onSave = {
+                viewModel.updateItem(it)
+                editingItem = null
+            },
+        )
+    }
+
+    editingFood?.let { item ->
+        FoodItemEditorDialog(
+            item = item,
+            onDismiss = { editingFood = null },
+            onSave = {
+                viewModel.updateFoodItem(it)
+                editingFood = null
+            },
+        )
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        bottomBar = {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = { viewModel.submit(clientId) },
+                    enabled = !state.isSubmitting && state.selectedSlot != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (state.isSubmitting) CircularProgressIndicator() else Icon(
+                        Icons.Rounded.CheckCircle,
+                        contentDescription = null
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (state.isSubmitting) "Confirmando..." else "Confirmar reserva")
+                }
+            }
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Crear reserva",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Cerrar"
+                    )
+                }
+            }
+
+            if (state.isLoadingCatalog || state.isLoadingAvailability || state.isLoadingRewards) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            AdventureDateAndSlotsSection(viewModel = viewModel)
+            AdventureEventSection(viewModel = viewModel)
+            AdventureActivitiesSection(viewModel = viewModel, onEditItem = { editingItem = it })
+            AdventureFoodSection(
+                viewModel = viewModel,
+                onAddFood = onAddFood,
+                onEditFood = { editingFood = it })
+            AdventureContactSection(viewModel = viewModel)
+            AdventureSummarySection(viewModel = viewModel)
+            Spacer(Modifier.height(84.dp))
+        }
+    }
+}
+
+@Composable
+private fun AdventureDateAndSlotsSection(viewModel: AdventureComboBuilderViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    AdventureCard {
+        AdventureSectionTitle("Fecha", "Elige el día de visita y luego un horario disponible.")
+        Button(
+            onClick = {
+                val calendar = Calendar.getInstance().apply { time = state.selectedDate }
+                DatePickerDialog(
+                    context,
+                    { _, year, month, day ->
+                        val picked = Calendar.getInstance().apply {
+                            set(year, month, day, 0, 0, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        viewModel.setDate(picked.time)
+                    },
+                    calendar.get(Calendar.YEAR),
+                    calendar.get(Calendar.MONTH),
+                    calendar.get(Calendar.DAY_OF_MONTH),
+                ).show()
+            },
+        ) {
+            Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(AdventureDateHelper.shortDateText(state.selectedDate))
+        }
+    }
+
+    AdventureCard {
+        AdventureSectionTitle("Horarios disponibles", "Selecciona inicio o llegada preferida.")
+        if (state.isLoadingAvailability) {
+            CircularProgressIndicator()
+        } else if (state.availableSlots.isEmpty()) {
+            Text(
+                "Agrega una actividad o comida, o prueba otra fecha.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                state.availableSlots.forEach { slot ->
+                    SlotChip(
+                        slot = slot,
+                        selected = state.selectedSlot?.startAt == slot.startAt,
+                        total = viewModel.effectiveTotal(slot),
+                        onClick = { viewModel.selectSlot(slot) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlotChip(
+    slot: AdventureAvailabilitySlot,
+    selected: Boolean,
+    total: Double,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(vertical = 6.dp)
+            ) {
+                Text(AdventureDateHelper.timeText(slot.startAt), fontWeight = FontWeight.Bold)
+                Text("Termina ${AdventureDateHelper.timeText(slot.endAt)}")
+                Text(
+                    total.priceText(),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun AdventureEventSection(viewModel: AdventureComboBuilderViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    AdventureCard {
+        AdventureSectionTitle("Evento", "Invitados, tipo de evento y notas especiales.")
+        CounterRow(
+            title = "Invitados",
+            value = state.guestCount,
+            onDecrease = { viewModel.setGuestCount(state.guestCount - 1) },
+            onIncrease = { viewModel.setGuestCount(state.guestCount + 1) })
+        EnumDropdown(
+            title = "Tipo de evento",
+            current = state.eventType,
+            values = ReservationEventType.entries,
+            label = { it.title },
+            onSelected = viewModel::setEventType,
+        )
+        if (state.eventType == ReservationEventType.CUSTOM) {
+            OutlinedTextField(
+                value = state.customEventTitle,
+                onValueChange = viewModel::setCustomEventTitle,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nombre del evento") })
+        }
+        OutlinedTextField(
+            value = state.eventNotes,
+            onValueChange = viewModel::setEventNotes,
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            label = { Text("Notas del evento") })
+    }
+}
+
+@Composable
+private fun AdventureActivitiesSection(
+    viewModel: AdventureComboBuilderViewModel,
+    onEditItem: (AdventureReservationItemDraft) -> Unit
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    AdventureCard {
+        AdventureSectionTitle(
+            "Actividades",
+            "Opcionales. Puedes reservar aventura, comida o ambas."
+        )
+        if (state.items.isEmpty()) {
+            Text(
+                "No hay actividades agregadas.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            state.items.forEach { item ->
+                ActivityDraftRow(
+                    item = item,
+                    viewModel = viewModel,
+                    onEdit = { onEditItem(item) },
+                    onDelete = { viewModel.removeItem(item.id) })
+            }
+        }
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            viewModel.availableActivitiesToAdd.forEach { activity ->
+                AssistChip(
+                    onClick = { viewModel.addItem(activity.activityType) },
+                    label = { Text("+ ${activity.title}") })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActivityDraftRow(
+    item: AdventureReservationItemDraft,
+    viewModel: AdventureComboBuilderViewModel,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        AdventureIconBubble(icon = adventureIconFor(item.activity))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.title, fontWeight = FontWeight.Bold)
+            Text(
+                item.summaryText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val base = viewModel.baseAdventureSubtotal(item)
+            val shown = viewModel.displayedAdventureSubtotal(item)
+            Text(
+                if (shown < base) "${base.priceText()} → ${shown.priceText()}" else base.priceText(),
+                color = MaterialTheme.colorScheme.primary
+            )
+            viewModel.appliedRewardPresentation(item)?.let {
+                Text(
+                    it.message,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Editar") }
+        IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Quitar") }
+    }
+}
+
+@Composable
+private fun AdventureFoodSection(
+    viewModel: AdventureComboBuilderViewModel,
+    onAddFood: () -> Unit,
+    onEditFood: (ReservationFoodItemDraft) -> Unit
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    AdventureCard {
+        AdventureSectionTitle("Comida", "Agrega platos del restaurante a la reserva.")
+        if (state.foodItems.isEmpty()) {
+            Text(
+                "No hay platos agregados todavía.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            state.foodItems.forEach { item ->
+                FoodDraftRow(item = item, viewModel = viewModel, onEdit = { onEditFood(item) })
+            }
+            Divider()
+            EnumDropdown(
+                title = "Momento de servicio",
+                current = state.foodServingMoment,
+                values = ReservationServingMoment.entries,
+                label = { it.title },
+                onSelected = viewModel::setFoodServingMoment,
+            )
+            if (state.foodServingMoment == ReservationServingMoment.SPECIFIC_TIME) {
+                val context = LocalContext.current
+                Button(onClick = {
+                    val calendar = Calendar.getInstance().apply { time = state.foodServingTime }
+                    TimePickerDialog(
+                        context,
+                        { _, hour, minute ->
+                            val picked = Calendar.getInstance().apply {
+                                time = state.foodServingTime
+                                set(Calendar.HOUR_OF_DAY, hour)
+                                set(Calendar.MINUTE, minute)
+                            }
+                            viewModel.setFoodServingTime(picked.time)
+                        },
+                        calendar.get(Calendar.HOUR_OF_DAY),
+                        calendar.get(Calendar.MINUTE),
+                        false,
+                    ).show()
+                }) {
+                    Icon(Icons.Rounded.Schedule, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Hora: ${AdventureDateHelper.timeText(state.foodServingTime)}")
+                }
+            }
+            OutlinedTextField(
+                value = state.foodNotes,
+                onValueChange = viewModel::setFoodNotes,
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                label = { Text("Notas de comida") })
+        }
+        OutlinedButton(onClick = onAddFood, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Rounded.Restaurant, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Agregar comida")
+        }
+    }
+}
+
+@Composable
+private fun FoodDraftRow(
+    item: ReservationFoodItemDraft,
+    viewModel: AdventureComboBuilderViewModel,
+    onEdit: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        AdventureIconBubble(icon = Icons.Rounded.LocalDining)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(item.name, fontWeight = FontWeight.Bold)
+            Text(
+                "${item.quantity} x ${item.unitPrice.priceText()}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                viewModel.displayedFoodSubtotal(item).priceText(),
+                color = MaterialTheme.colorScheme.primary
+            )
+            viewModel.appliedRewardPresentation(item)?.let {
+                Text(
+                    it.message,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+        IconButton(onClick = { viewModel.decreaseFoodQuantity(item.id) }) {
+            Icon(
+                Icons.Rounded.Remove,
+                contentDescription = "Menos"
+            )
+        }
+        IconButton(onClick = { viewModel.increaseFoodQuantity(item.id) }) {
+            Icon(
+                Icons.Rounded.Add,
+                contentDescription = "Más"
+            )
+        }
+        IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Editar") }
+        IconButton(onClick = { viewModel.removeFoodItem(item.id) }) {
+            Icon(
+                Icons.Rounded.Delete,
+                contentDescription = "Quitar"
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdventureContactSection(viewModel: AdventureComboBuilderViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    AdventureCard {
+        AdventureSectionTitle("Contacto", "Datos sincronizados desde tu perfil.")
+        ContactLine(Icons.Rounded.Person, "Nombre", state.clientName)
+        ContactLine(Icons.Rounded.Phone, "WhatsApp", state.whatsappNumber)
+        ContactLine(Icons.Rounded.Event, "Cédula", state.nationalId)
+        OutlinedTextField(
+            value = state.notes,
+            onValueChange = viewModel::setNotes,
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            label = { Text("Notas generales") })
+    }
+}
+
+@Composable
+private fun ContactLine(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    value: String
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(value.ifBlank { "No registrado" }, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun AdventureSummarySection(viewModel: AdventureComboBuilderViewModel) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    AdventureCard {
+        AdventureSectionTitle("Resumen", "Revisa el total antes de confirmar.")
+        val slot = state.selectedSlot
+        if (slot != null) {
+            AdventurePriceRow("Aventura", slot.adventureSubtotal)
+            AdventurePriceRow("Comida", slot.foodSubtotal)
+            AdventurePriceRow("Subtotal", slot.subtotal)
+            AdventurePriceRow("Descuento aventura", slot.discountAmount, negative = true)
+            if (state.rewardPreview.totalDiscount > 0) AdventurePriceRow(
+                "Murco Loyalty",
+                state.rewardPreview.totalDiscount,
+                negative = true
+            )
+            Divider()
+            AdventurePriceRow("Total", viewModel.effectiveTotal(slot), bold = true)
+        } else {
+            AdventurePriceRow("Aventura estimada", viewModel.estimatedAdventureSubtotal)
+            AdventurePriceRow("Comida estimada", viewModel.estimatedFoodSubtotal)
+            AdventurePriceRow(
+                "Descuento estimado",
+                viewModel.estimatedDiscountAmount,
+                negative = true
+            )
+            Divider()
+            AdventurePriceRow("Total estimado", viewModel.estimatedTotal, bold = true)
+        }
+        viewModel.activeRewardPresentations.forEach { reward ->
+            Text(
+                "${reward.badge}: ${reward.message}",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+    }
+}
+
+@Composable
+private fun CounterRow(title: String, value: Int, onDecrease: () -> Unit, onIncrease: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("$title: $value", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+        IconButton(onClick = onDecrease) {
+            Icon(
+                Icons.Rounded.Remove,
+                contentDescription = "Menos"
+            )
+        }
+        IconButton(onClick = onIncrease) { Icon(Icons.Rounded.Add, contentDescription = "Más") }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun <T> EnumDropdown(
+    title: String,
+    current: T,
+    values: List<T>,
+    label: (T) -> String,
+    onSelected: (T) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(
+            value = label(current),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(title) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            values.forEach { value ->
+                DropdownMenuItem(text = { Text(label(value)) }, onClick = {
+                    onSelected(value)
+                    expanded = false
+                })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdventureItemEditorDialog(
+    item: AdventureReservationItemDraft,
+    config: AdventureActivityCatalogItem?,
+    onDismiss: () -> Unit,
+    onSave: (AdventureReservationItemDraft) -> Unit
+) {
+    var draft by remember(item.id) { mutableStateOf(item) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("Guardar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        title = { Text(config?.title ?: item.title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (item.activity != AdventureActivityType.CAMPING) {
+                    DurationSelector(
+                        draft = draft,
+                        options = config?.durationOptions ?: item.activity.legacyDurationOptions,
+                        onChanged = { draft = draft.copy(durationMinutes = it) })
+                }
+                when (item.activity) {
+                    AdventureActivityType.OFF_ROAD -> {
+                        CounterRow(
+                            "Vehículos",
+                            draft.vehicleCount,
+                            {
+                                draft = draft.copy(
+                                    vehicleCount = (draft.vehicleCount - 1).coerceAtLeast(1),
+                                    offRoadRiderCount = draft.offRoadRiderCount.coerceAtMost(
+                                        ((draft.vehicleCount - 1).coerceAtLeast(1)) * 2
+                                    )
+                                )
+                            },
+                            { draft = draft.copy(vehicleCount = draft.vehicleCount + 1) })
+                        CounterRow(
+                            "Personas",
+                            draft.offRoadRiderCount,
+                            {
+                                draft = draft.copy(
+                                    offRoadRiderCount = (draft.offRoadRiderCount - 1).coerceAtLeast(
+                                        1
+                                    )
+                                )
+                            },
+                            {
+                                draft = draft.copy(
+                                    offRoadRiderCount = (draft.offRoadRiderCount + 1).coerceAtMost(
+                                        draft.vehicleCount * 2
+                                    )
+                                )
+                            })
+                    }
+
+                    AdventureActivityType.CAMPING -> {
+                        CounterRow(
+                            "Noches",
+                            draft.nights,
+                            { draft = draft.copy(nights = (draft.nights - 1).coerceAtLeast(1)) },
+                            { draft = draft.copy(nights = draft.nights + 1) })
+                        CounterRow(
+                            "Personas",
+                            draft.peopleCount,
+                            {
+                                draft =
+                                    draft.copy(peopleCount = (draft.peopleCount - 1).coerceAtLeast(1))
+                            },
+                            { draft = draft.copy(peopleCount = draft.peopleCount + 1) })
+                    }
+
+                    else -> CounterRow(
+                        "Personas",
+                        draft.peopleCount,
+                        {
+                            draft =
+                                draft.copy(peopleCount = (draft.peopleCount - 1).coerceAtLeast(1))
+                        },
+                        { draft = draft.copy(peopleCount = draft.peopleCount + 1) })
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DurationSelector(
+    draft: AdventureReservationItemDraft,
+    options: List<Int>,
+    onChanged: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.distinct().sorted().forEach { minutes ->
+            FilterChip(
+                selected = draft.durationMinutes == minutes,
+                onClick = { onChanged(minutes) },
+                label = { Text(if (minutes >= 60) "${minutes / 60}h" else "$minutes min") })
+        }
+    }
+}
+
+@Composable
+private fun FoodItemEditorDialog(
+    item: ReservationFoodItemDraft,
+    onDismiss: () -> Unit,
+    onSave: (ReservationFoodItemDraft) -> Unit
+) {
+    var draft by remember(item.id) { mutableStateOf(item) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("Guardar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        title = { Text("Editar comida") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(draft.name, fontWeight = FontWeight.Bold)
+                CounterRow(
+                    "Cantidad",
+                    draft.quantity,
+                    { draft = draft.copy(quantity = (draft.quantity - 1).coerceAtLeast(1)) },
+                    { draft = draft.copy(quantity = draft.quantity + 1) })
+                OutlinedTextField(
+                    value = draft.notes.orEmpty(),
+                    onValueChange = {
+                        draft = draft.copy(notes = it.trim().takeIf { value -> value.isNotEmpty() })
+                    },
+                    minLines = 2,
+                    label = { Text("Notas") })
+            }
+        },
+    )
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/view/AdventureUiComponents.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
+
+
+@Composable
+fun AdventureGradientHero(
+    title: String,
+    subtitle: String,
+    action: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(32.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary,
+                        ),
+                    ),
+                )
+                .padding(22.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AdventureIconBubble(
+                        icon = Icons.Rounded.Terrain,
+                        contentColor = Color.White,
+                        containerColor = Color.White.copy(alpha = 0.18f),
+                    )
+                    Spacer(Modifier.weight(1f))
+                    AdventureBadge(text = "Outdoor", selected = true)
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.92f),
+                )
+                action()
+            }
+        }
+    }
+}
+
+@Composable
+fun AdventureSectionTitle(
+    title: String,
+    subtitle: String? = null,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        subtitle?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+fun AdventureCard(
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (emphasized) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (emphasized) 4.dp else 1.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun AdventureIconBubble(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    contentColor: Color = MaterialTheme.colorScheme.primary,
+    containerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(containerColor),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.size(25.dp),
+        )
+    }
+}
+
+@Composable
+fun AdventureBadge(
+    text: String,
+    selected: Boolean = false,
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (selected) Color.White.copy(alpha = 0.18f) else MaterialTheme.colorScheme.secondaryContainer,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (selected) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+fun AdventurePriceRow(
+    title: String,
+    amount: Double,
+    modifier: Modifier = Modifier,
+    negative: Boolean = false,
+    bold: Boolean = false,
+) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = title,
+            style = if (bold) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = if (negative) "-${amount.priceText()}" else amount.priceText(),
+            style = if (bold) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.SemiBold,
+        )
+    }
+}
+
+fun adventureIconFor(activity: AdventureActivityType): ImageVector = when (activity) {
+    AdventureActivityType.OFF_ROAD -> Icons.Rounded.DirectionsCar
+    AdventureActivityType.PAINTBALL -> Icons.Rounded.SportsKabaddi
+    AdventureActivityType.GO_KARTS -> Icons.Rounded.Flag
+    AdventureActivityType.SHOOTING_RANGE -> Icons.Rounded.MyLocation
+    AdventureActivityType.CAMPING -> Icons.Rounded.Forest
+    AdventureActivityType.EXTREME_SLIDE -> Icons.Rounded.Terrain
+}
+
+@Composable
+fun AdventureEmptyState(
+    title: String,
+    body: String,
+    icon: ImageVector = Icons.Rounded.CalendarMonth,
+) {
+    AdventureCard {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            AdventureIconBubble(icon = icon)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(text = body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureBookingsUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+data class AdventureBookingsUiState(
+    val selectedDate: Date = Date(),
+    val nationalId: String = "",
+    val bookings: List<AdventureBooking> = emptyList(),
+    val isLoading: Boolean = false,
+    val isCancelling: Boolean = false,
+    val errorMessage: String? = null,
+    val successMessage: String? = null,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureBookingsViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+@HiltViewModel
+class AdventureBookingsViewModel @Inject constructor(
+    private val observeAdventureBookingsUseCase: ObserveAdventureBookingsUseCase,
+    private val cancelAdventureBookingUseCase: CancelAdventureBookingUseCase,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AdventureBookingsUiState())
+    val uiState: StateFlow<AdventureBookingsUiState> = _uiState.asStateFlow()
+
+    private var bookingsJob: Job? = null
+
+    fun onAppear(profile: ClientProfile) {
+        val cleanNationalId = profile.nationalId.filter(Char::isDigit)
+        val current = _uiState.value
+        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) return
+        _uiState.update { it.copy(nationalId = cleanNationalId) }
+        observeBookings()
+    }
+
+    fun onDateSelected(date: Date) {
+        _uiState.update { it.copy(selectedDate = date) }
+        observeBookings()
+    }
+
+    fun refresh() {
+        observeBookings()
+    }
+
+    fun cancelBooking(booking: AdventureBooking) {
+        val nationalId = _uiState.value.nationalId
+        if (nationalId.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Tu perfil no tiene cédula registrada.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isCancelling = true,
+                    errorMessage = null,
+                    successMessage = null
+                )
+            }
+            runCatching {
+                cancelAdventureBookingUseCase.execute(
+                    id = booking.id,
+                    nationalId = nationalId,
+                )
+            }.onSuccess {
+                _uiState.update {
+                    it.copy(
+                        isCancelling = false,
+                        successMessage = "Reserva cancelada correctamente.",
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isCancelling = false,
+                        errorMessage = error.message ?: "No se pudo cancelar la reserva.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissMessage() {
+        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
+    }
+
+    private fun observeBookings() {
+        val snapshot = _uiState.value
+        val nationalId = snapshot.nationalId
+        if (nationalId.isBlank()) {
+            bookingsJob?.cancel()
+            bookingsJob = null
+            _uiState.update { it.copy(bookings = emptyList(), isLoading = false) }
+            return
+        }
+
+        bookingsJob?.cancel()
+        bookingsJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            observeAdventureBookingsUseCase.execute(
+                day = snapshot.selectedDate,
+                nationalId = nationalId,
+            ).catch { error ->
+                if (error is CancellationException) throw error
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
+                    )
+                }
+            }.collectLatest { bookings ->
+                _uiState.update {
+                    it.copy(
+                        bookings = bookings,
+                        isLoading = false,
+                        errorMessage = null,
+                    )
+                }
+            }
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureCatalogUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+data class AdventureCatalogUiState(
+    val isLoading: Boolean = true,
+    val catalog: AdventureCatalogSnapshot = AdventureCatalogSnapshot.EMPTY,
+    val errorMessage: String? = null,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureCatalogViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+@HiltViewModel
+class AdventureCatalogViewModel @Inject constructor(
+    private val observeAdventureCatalogUseCase: ObserveAdventureCatalogUseCase,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AdventureCatalogUiState())
+    val uiState: StateFlow<AdventureCatalogUiState> = _uiState.asStateFlow()
+
+    private var catalogJob: Job? = null
+
+    fun onAppear() {
+        if (catalogJob?.isActive == true) return
+
+        catalogJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            observeAdventureCatalogUseCase.execute()
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudo cargar el catálogo de aventura.",
+                        )
+                    }
+                }
+                .collectLatest { catalog ->
+                    _uiState.update {
+                        it.copy(
+                            catalog = catalog,
+                            isLoading = false,
+                            errorMessage = null,
+                        )
+                    }
+                }
+        }
+    }
+
+    fun onDisappear() {
+        catalogJob?.cancel()
+        catalogJob = null
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(errorMessage = null) }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureComboBuilderUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+data class AdventureComboBuilderUiState(
+    val selectedDate: Date = Date(),
+    val items: List<AdventureReservationItemDraft> = emptyList(),
+    val guestCount: Int = 2,
+    val eventType: ReservationEventType = ReservationEventType.REGULAR_VISIT,
+    val customEventTitle: String = "",
+    val eventNotes: String = "",
+    val foodItems: List<ReservationFoodItemDraft> = emptyList(),
+    val foodServingMoment: ReservationServingMoment = ReservationServingMoment.AFTER_ACTIVITIES,
+    val foodServingTime: Date = Date(),
+    val foodNotes: String = "",
+    val clientName: String = "",
+    val whatsappNumber: String = "",
+    val nationalId: String = "",
+    val notes: String = "",
+    val packageDiscountAmount: Double = 0.0,
+    val catalog: AdventureCatalogSnapshot = AdventureCatalogSnapshot.EMPTY,
+    val availableSlots: List<AdventureAvailabilitySlot> = emptyList(),
+    val selectedSlot: AdventureAvailabilitySlot? = null,
+    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(RewardWalletSnapshot.empty("")),
+    val isLoadingCatalog: Boolean = false,
+    val isLoadingAvailability: Boolean = false,
+    val isLoadingRewards: Boolean = false,
+    val isSubmitting: Boolean = false,
+    val createdBooking: AdventureBooking? = null,
+    val errorMessage: String? = null,
+    val successMessage: String? = null,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureComboBuilderViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+@HiltViewModel
+class AdventureComboBuilderViewModel @Inject constructor(
+    private val getAvailabilityUseCase: GetAdventureAvailabilityUseCase,
+    private val createBookingUseCase: CreateAdventureBookingUseCase,
+    private val observeAdventureCatalogUseCase: ObserveAdventureCatalogUseCase,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AdventureComboBuilderUiState())
+    val uiState: StateFlow<AdventureComboBuilderUiState> = _uiState.asStateFlow()
+
+    private val rewardPreviewRequests = MutableStateFlow<RewardPreviewInput?>(null)
+    private var catalogJob: Job? = null
+    private var availabilityJob: Job? = null
+    private var rewardPreviewJob: Job? = null
+
+    init {
+        startRewardPreviewLoop()
+    }
+
+    fun onAppear(profile: ClientProfile? = null) {
+        profile?.let(::syncProfile)
+        startCatalogObservationIfNeeded()
+    }
+
+    fun onDisappear() {
+        catalogJob?.cancel()
+        catalogJob = null
+    }
+
+    fun syncProfile(profile: ClientProfile) {
+        _uiState.update {
+            it.copy(
+                clientName = profile.fullName,
+                whatsappNumber = profile.phoneNumber,
+                nationalId = profile.nationalId.filter(Char::isDigit),
+            )
+        }
+        requestRewardPreview()
+    }
+
+    fun setDate(date: Date) {
+        val startOfDay = AdventureDateHelper.startOfDay(date)
+        _uiState.update {
+            it.copy(
+                selectedDate = startOfDay,
+                selectedSlot = null,
+            )
+        }
+        refreshAvailability()
+    }
+
+    fun setGuestCount(value: Int) = updateState { copy(guestCount = value.coerceIn(1, 300)) }
+    fun setEventType(value: ReservationEventType) = updateState { copy(eventType = value) }
+    fun setCustomEventTitle(value: String) = updateState { copy(customEventTitle = value) }
+    fun setEventNotes(value: String) = updateState { copy(eventNotes = value) }
+    fun setFoodServingMoment(value: ReservationServingMoment) =
+        updateState { copy(foodServingMoment = value) }
+
+    fun setFoodServingTime(value: Date) = updateState { copy(foodServingTime = value) }
+    fun setFoodNotes(value: String) = updateState { copy(foodNotes = value) }
+    fun setNotes(value: String) = updateState { copy(notes = value) }
+    fun setClientName(value: String) = updateState { copy(clientName = value) }
+    fun setWhatsapp(value: String) = updateState { copy(whatsappNumber = value) }
+
+    fun setNationalId(value: String) {
+        updateState { copy(nationalId = value.filter(Char::isDigit)) }
+        requestRewardPreview()
+    }
+
+    fun prepareCustomDraftIfNeeded() {
+        val state = _uiState.value
+        if (state.items.isEmpty() && state.foodItems.isEmpty()) {
+            val firstActivity = state.catalog.activeActivitiesSorted.firstOrNull()
+            if (firstActivity != null) {
+                replaceItems(listOf(firstActivity.defaultDraft), 0.0)
+            } else {
+                refreshAvailability()
+            }
+        }
+    }
+
+    fun replaceItems(
+        items: List<AdventureReservationItemDraft>,
+        packageDiscountAmount: Double,
+    ) {
+        _uiState.update {
+            it.copy(
+                items = items,
+                packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
+                selectedSlot = null,
+                createdBooking = null,
+                successMessage = null,
+                errorMessage = null,
+            )
+        }
+        requestRewardPreview()
+        refreshAvailability()
+    }
+
+    fun replacePackage(
+        packageModel: AdventureFeaturedPackage,
+        menuSections: List<MenuSection>,
+    ) {
+        val foodItems = packageModel.foodItems.mapNotNull { food ->
+            val menuItem =
+                menuSections.flatMap { it.items }.firstOrNull { it.id == food.menuItemId }
+                    ?: return@mapNotNull null
+            ReservationFoodItemDraft(menuItem = menuItem, quantity = food.quantity)
+        }
+
+        _uiState.update {
+            it.copy(
+                items = packageModel.items,
+                foodItems = foodItems,
+                packageDiscountAmount = packageModel.packageDiscountAmount.coerceAtLeast(0.0),
+                selectedSlot = null,
+                createdBooking = null,
+                successMessage = null,
+                errorMessage = null,
+            )
+        }
+        requestRewardPreview()
+        refreshAvailability()
+    }
+
+    val availableActivitiesToAdd: List<AdventureActivityCatalogItem>
+        get() {
+            val selected = _uiState.value.items.map { it.activity }.toSet()
+            return _uiState.value.catalog.activeActivitiesSorted.filterNot { it.activityType in selected }
+        }
+
+    fun addItem(activity: AdventureActivityType) {
+        val state = _uiState.value
+        if (state.items.any { it.activity == activity }) return
+        val draft = AdventureActivityType.defaultDraft(activity, state.catalog)
+        updateItems(state.items + draft)
+    }
+
+    fun updateItem(updated: AdventureReservationItemDraft) {
+        val current = _uiState.value.items
+        updateItems(current.map { if (it.id == updated.id) updated else it })
+    }
+
+    fun removeItem(itemId: String) {
+        updateItems(_uiState.value.items.filterNot { it.id == itemId })
+    }
+
+    fun removeItemAt(index: Int) {
+        val current = _uiState.value.items.toMutableList()
+        if (index !in current.indices) return
+        current.removeAt(index)
+        updateItems(current)
+    }
+
+    fun moveItem(from: Int, to: Int) {
+        val current = _uiState.value.items.toMutableList()
+        if (from !in current.indices || to !in 0..current.size) return
+        val item = current.removeAt(from)
+        current.add(if (to > from) to - 1 else to, item)
+        updateItems(current)
+    }
+
+    fun addFoodItem(
+        menuItem: MenuItem,
+        quantity: Int,
+        notes: String?,
+        selectedDate: Date = _uiState.value.selectedDate,
+    ) {
+        if (AdventureDateHelper.sameDay(selectedDate, Date()) && !menuItem.canBeOrdered) {
+            presentError("Por hoy, ${menuItem.name} está agotado y no se puede pedir. Elige otro día para reservarlo.")
+            return
+        }
+
+        val cleanNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
+        val current = _uiState.value.foodItems.toMutableList()
+        val index =
+            current.indexOfFirst { it.menuItemId == menuItem.id && it.notes.orEmpty() == cleanNotes.orEmpty() }
+        if (index >= 0) {
+            val existing = current[index]
+            current[index] = existing.copy(quantity = existing.quantity + quantity.coerceAtLeast(1))
+        } else {
+            current.add(
+                ReservationFoodItemDraft(
+                    menuItem = menuItem,
+                    quantity = quantity,
+                    notes = cleanNotes
+                )
+            )
+        }
+        updateFoodItems(current)
+    }
+
+    fun updateFoodItem(updated: ReservationFoodItemDraft) {
+        val current = _uiState.value.foodItems.map {
+            if (it.id == updated.id) updated.copy(
+                quantity = updated.quantity.coerceAtLeast(1)
+            ) else it
+        }
+        updateFoodItems(current)
+    }
+
+    fun increaseFoodQuantity(itemId: String) {
+        updateFoodItems(_uiState.value.foodItems.map { if (it.id == itemId) it.copy(quantity = it.quantity + 1) else it })
+    }
+
+    fun decreaseFoodQuantity(itemId: String) {
+        updateFoodItems(_uiState.value.foodItems.map { item ->
+            if (item.id == itemId) item.copy(quantity = (item.quantity - 1).coerceAtLeast(1)) else item
+        })
+    }
+
+    fun removeFoodItem(itemId: String) {
+        updateFoodItems(_uiState.value.foodItems.filterNot { it.id == itemId })
+    }
+
+    fun selectSlot(slot: AdventureAvailabilitySlot) {
+        _uiState.update { it.copy(selectedSlot = slot) }
+    }
+
+    fun submit(clientId: String?) {
+        val state = _uiState.value
+        val selectedSlot = state.selectedSlot
+        val validationMessage = validateBeforeSubmit(state)
+        if (validationMessage != null) {
+            presentError(validationMessage)
+            return
+        }
+        if (selectedSlot == null) {
+            presentError("Selecciona un horario disponible antes de confirmar.")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isSubmitting = true,
+                    errorMessage = null,
+                    successMessage = null
+                )
+            }
+            val request = AdventureBookingRequest(
+                clientId = clientId,
+                clientName = state.clientName.trim(),
+                whatsappNumber = state.whatsappNumber.trim(),
+                nationalId = state.nationalId.filter(Char::isDigit),
+                date = state.selectedDate,
+                selectedStartAt = selectedSlot.startAt,
+                guestCount = state.guestCount.coerceAtLeast(1),
+                eventType = state.eventType,
+                customEventTitle = state.customEventTitle.trim().takeIf { it.isNotEmpty() },
+                eventNotes = state.eventNotes.trim().takeIf { it.isNotEmpty() },
+                items = state.items,
+                foodReservation = buildFoodDraft(state),
+                packageDiscountAmount = state.packageDiscountAmount.coerceAtLeast(0.0),
+                loyaltyDiscountAmount = state.rewardPreview.totalDiscount,
+                appliedRewards = state.rewardPreview.appliedRewards,
+                notes = state.notes.trim().takeIf { it.isNotEmpty() },
+            )
+
+            runCatching {
+                createBookingUseCase.execute(request)
+            }.onSuccess { booking ->
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        createdBooking = booking,
+                        successMessage = "Reserva enviada. Te confirmaremos pronto.",
+                        selectedSlot = null,
+                    )
+                }
+                refreshAvailability()
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isSubmitting = false,
+                        errorMessage = error.message ?: "No se pudo crear la reserva.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissMessage() = updateState { copy(errorMessage = null, successMessage = null) }
+
+    fun presentError(message: String) {
+        _uiState.update { it.copy(errorMessage = message, successMessage = null) }
+    }
+
+    fun config(activity: AdventureActivityType): AdventureActivityCatalogItem? =
+        _uiState.value.catalog.activity(activity)
+
+    val estimatedAdventureSubtotal: Double
+        get() = AdventurePricingEngine.estimatedSubtotal(
+            _uiState.value.items,
+            _uiState.value.catalog
+        )
+
+    val estimatedFoodSubtotal: Double
+        get() = _uiState.value.foodItems.sumOf { it.subtotal }.adventureRoundMoney()
+
+    val estimatedDiscountAmount: Double
+        get() {
+            val state = _uiState.value
+            val activityDiscount =
+                AdventurePricingEngine.estimatedDiscountAmount(state.items, state.catalog)
+            return (activityDiscount + state.packageDiscountAmount + state.rewardPreview.totalDiscount).adventureRoundMoney()
+        }
+
+    val estimatedTotal: Double
+        get() {
+            val state = _uiState.value
+            val plan = AdventurePlanner.buildPlan(
+                day = state.selectedDate,
+                startAt = AdventureDateHelper.dateOn(state.selectedDate, 7, 0),
+                items = state.items,
+                foodReservation = buildFoodDraft(state),
+                packageDiscountAmount = state.packageDiscountAmount,
+                catalog = state.catalog,
+            )
+            val base = plan?.totalAmount
+                ?: (estimatedAdventureSubtotal + estimatedFoodSubtotal - state.packageDiscountAmount).coerceAtLeast(
+                    0.0
+                )
+            return (base - state.rewardPreview.totalDiscount).coerceAtLeast(0.0)
+                .adventureRoundMoney()
+        }
+
+    val activeRewardPresentations: List<RewardPresentation>
+        get() = _uiState.value.rewardPreview.appliedRewards.map {
+            RewardPresentation.fromAppliedReward(
+                it
+            )
+        }
+
+    fun effectiveTotal(slot: AdventureAvailabilitySlot): Double =
+        (slot.totalAmount - _uiState.value.rewardPreview.totalDiscount).coerceAtLeast(0.0)
+            .adventureRoundMoney()
+
+    fun baseAdventureSubtotal(item: AdventureReservationItemDraft): Double =
+        _uiState.value.catalog.activity(item.activity)?.let { config ->
+            AdventurePricingEngine.lineBaseSubtotal(item, config)
+        } ?: 0.0
+
+    fun displayedAdventureSubtotal(item: AdventureReservationItemDraft): Double {
+        val raw = AdventurePricingEngine.subtotal(item, _uiState.value.catalog)
+        val reward = rewardAmountForActivity(item.activity)
+        return (raw - reward).coerceAtLeast(0.0).adventureRoundMoney()
+    }
+
+    fun displayedFoodSubtotal(item: ReservationFoodItemDraft): Double =
+        (item.subtotal - rewardAmount(item)).coerceAtLeast(0.0).adventureRoundMoney()
+
+    fun rewardAmount(item: ReservationFoodItemDraft): Double =
+        _uiState.value.rewardPreview.appliedRewards
+            .filter { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
+            .sumOf { it.amount }
+            .adventureRoundMoney()
+
+    fun appliedRewardPresentation(item: AdventureReservationItemDraft): RewardPresentation? =
+        _uiState.value.rewardPreview.appliedRewards
+            .firstOrNull { reward -> reward.affectedActivityIds.contains(item.activity.rawValue) }
+            ?.let(RewardPresentation::fromAppliedReward)
+
+    fun appliedRewardPresentation(item: ReservationFoodItemDraft): RewardPresentation? =
+        _uiState.value.rewardPreview.appliedRewards
+            .firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
+            ?.let(RewardPresentation::fromAppliedReward)
+
+    fun catalogRewardPresentation(activity: AdventureActivityCatalogItem): RewardPresentation? =
+        RewardPresentationFactory.activityPresentation(
+            activity = activity,
+            wallet = _uiState.value.rewardPreview.walletSnapshot,
+        )
+
+    fun packageRewardPresentation(
+        packageModel: AdventureFeaturedPackage,
+        menuSections: List<MenuSection>,
+    ): RewardPresentation? = RewardPresentationFactory.packagePresentation(
+        packageModel = packageModel,
+        catalog = _uiState.value.catalog,
+        menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id },
+        wallet = _uiState.value.rewardPreview.walletSnapshot,
+    )
+
+    fun foodPickerRewardPresentation(item: MenuItem, quantity: Int): RewardPresentation? {
+        val projected = projectedRewardResult(item, quantity)
+        projected.appliedRewards.firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.id) }
+            ?.let { return RewardPresentation.fromAppliedReward(it) }
+        return RewardPresentationFactory.adventureMenuPresentation(item, projected.walletSnapshot)
+    }
+
+    fun foodPickerDisplayedPrice(item: MenuItem, quantity: Int): Double {
+        val subtotal = item.finalPrice * quantity.coerceAtLeast(1)
+        return (subtotal - foodPickerIncrementalDiscount(item, quantity)).coerceAtLeast(0.0)
+            .adventureRoundMoney()
+    }
+
+    fun foodPickerIncrementalDiscount(item: MenuItem, quantity: Int): Double =
+        projectedRewardResult(item, quantity).totalDiscount.adventureRoundMoney()
+
+    private fun updateItems(items: List<AdventureReservationItemDraft>) {
+        val correctedDiscount = bestMatchingPackageDiscount(items)
+        _uiState.update {
+            it.copy(
+                items = items,
+                packageDiscountAmount = correctedDiscount,
+                selectedSlot = null,
+            )
+        }
+        requestRewardPreview()
+        refreshAvailability()
+    }
+
+    private fun updateFoodItems(foodItems: List<ReservationFoodItemDraft>) {
+        _uiState.update {
+            it.copy(
+                foodItems = foodItems,
+                selectedSlot = null,
+            )
+        }
+        requestRewardPreview()
+        refreshAvailability()
+    }
+
+    private fun bestMatchingPackageDiscount(items: List<AdventureReservationItemDraft>): Double {
+        if (items.size <= 1) return 0.0
+        val state = _uiState.value
+        val activityKey = items
+            .map { keyForActivityPackageMatch(it) }
+            .sorted()
+        return state.catalog.activePackagesSorted
+            .filter { it.items.size > 1 }
+            .firstOrNull { packageModel ->
+                packageModel.items.map { keyForActivityPackageMatch(it) }.sorted() == activityKey
+            }
+            ?.packageDiscountAmount
+            ?.coerceAtLeast(0.0)
+            ?: 0.0
+    }
+
+    private fun keyForActivityPackageMatch(item: AdventureReservationItemDraft): String =
+        listOf(
+            item.activity.rawValue,
+            item.durationMinutes,
+            item.peopleCount,
+            item.vehicleCount,
+            item.offRoadRiderCount,
+            item.nights,
+        ).joinToString("|")
+
+    private fun refreshAvailability() {
+        val state = _uiState.value
+        val hasFood = state.foodItems.isNotEmpty()
+        if (state.items.isEmpty() && !hasFood) {
+            availabilityJob?.cancel()
+            _uiState.update {
+                it.copy(
+                    availableSlots = emptyList(),
+                    selectedSlot = null,
+                    isLoadingAvailability = false
+                )
+            }
+            return
+        }
+
+        availabilityJob?.cancel()
+        availabilityJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingAvailability = true, errorMessage = null) }
+            delay(120)
+            runCatching {
+                getAvailabilityUseCase.execute(
+                    date = _uiState.value.selectedDate,
+                    items = _uiState.value.items,
+                    foodReservation = buildFoodDraft(_uiState.value),
+                    packageDiscountAmount = _uiState.value.packageDiscountAmount,
+                )
+            }.onSuccess { slots ->
+                _uiState.update { current ->
+                    val selected = current.selectedSlot?.let { previous ->
+                        slots.firstOrNull { it.startAt == previous.startAt && it.endAt == previous.endAt }
+                    }
+                    current.copy(
+                        availableSlots = slots,
+                        selectedSlot = selected,
+                        isLoadingAvailability = false,
+                        errorMessage = null,
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isLoadingAvailability = false,
+                        availableSlots = emptyList(),
+                        selectedSlot = null,
+                        errorMessage = error.message ?: "No se pudo verificar disponibilidad.",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun startCatalogObservationIfNeeded() {
+        if (catalogJob?.isActive == true) return
+        catalogJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingCatalog = true, errorMessage = null) }
+            observeAdventureCatalogUseCase.execute()
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoadingCatalog = false,
+                            errorMessage = error.message ?: "No se pudo cargar aventura.",
+                        )
+                    }
+                }
+                .collectLatest { catalog ->
+                    _uiState.update { state ->
+                        val validItems =
+                            state.items.filter { catalog.activity(it.activity)?.isActive == true }
+                        state.copy(
+                            catalog = catalog,
+                            items = validItems,
+                            packageDiscountAmount = if (validItems.size > 1) state.packageDiscountAmount else 0.0,
+                            isLoadingCatalog = false,
+                            errorMessage = null,
+                        )
+                    }
+                    requestRewardPreview()
+                    refreshAvailability()
+                }
+        }
+    }
+
+    private fun startRewardPreviewLoop() {
+        rewardPreviewJob?.cancel()
+        rewardPreviewJob = viewModelScope.launch {
+            rewardPreviewRequests
+                .filter { it != null }
+                .map { requireNotNull(it) }
+                .distinctUntilChanged()
+                .debounce(180)
+                .collectLatest { input ->
+                    if (input.nationalId.isBlank()) {
+                        _uiState.update {
+                            it.copy(
+                                rewardPreview = RewardComputationResult.empty(
+                                    RewardWalletSnapshot.empty("")
+                                )
+                            )
+                        }
+                        return@collectLatest
+                    }
+
+                    _uiState.update { it.copy(isLoadingRewards = true) }
+                    runCatching {
+                        loyaltyRewardsRepository.previewAdventureRewards(
+                            nationalId = input.nationalId,
+                            activityItems = input.activityItems,
+                            foodItems = input.foodItems,
+                            catalog = input.catalog,
+                        )
+                    }.onSuccess { result ->
+                        _uiState.update {
+                            it.copy(
+                                rewardPreview = result,
+                                isLoadingRewards = false,
+                            )
+                        }
+                    }.onFailure { error ->
+                        if (error is CancellationException) throw error
+                        _uiState.update {
+                            it.copy(
+                                rewardPreview = RewardComputationResult.empty(
+                                    RewardWalletSnapshot.empty(
+                                        input.nationalId
+                                    )
+                                ),
+                                isLoadingRewards = false,
+                            )
+                        }
+                    }
+                }
+        }
+    }
+
+    private fun requestRewardPreview() {
+        val state = _uiState.value
+        rewardPreviewRequests.value = RewardPreviewInput(
+            nationalId = state.nationalId.filter(Char::isDigit),
+            activityItems = state.items,
+            foodItems = state.foodItems,
+            catalog = state.catalog,
+        )
+    }
+
+    private fun projectedRewardResult(item: MenuItem, quantity: Int): RewardComputationResult {
+        val state = _uiState.value
+        val wallet = state.rewardPreview.walletSnapshot
+        val projectedItems =
+            state.foodItems + ReservationFoodItemDraft(menuItem = item, quantity = quantity)
+
+        val activityLines = state.items.mapNotNull { draft ->
+            val config = state.catalog.activity(draft.activity) ?: return@mapNotNull null
+            RewardActivityLine(
+                activityId = draft.activity.rawValue,
+                title = config.title,
+                linePrice = AdventurePricingEngine.subtotal(draft, state.catalog),
+            )
+        }
+
+        val foodLines = projectedItems.map { food ->
+            RewardMenuLine(
+                menuItemId = food.menuItemId,
+                name = food.name,
+                unitPrice = food.unitPrice,
+                quantity = food.quantity,
+            )
+        }
+
+        return LoyaltyRewardEngine.evaluateAdventure(
+            templates = wallet.availableTemplates,
+            wallet = wallet,
+            activityLines = activityLines,
+            foodLines = foodLines,
+        )
+    }
+
+    private fun rewardAmountForActivity(activity: AdventureActivityType): Double =
+        _uiState.value.rewardPreview.appliedRewards
+            .filter { reward -> reward.affectedActivityIds.contains(activity.rawValue) }
+            .sumOf { it.amount }
+            .adventureRoundMoney()
+
+    private fun buildFoodDraft(state: AdventureComboBuilderUiState): ReservationFoodDraft? {
+        if (state.foodItems.isEmpty()) return null
+        return ReservationFoodDraft(
+            items = state.foodItems,
+            servingMoment = state.foodServingMoment,
+            servingTime = if (state.foodServingMoment == ReservationServingMoment.SPECIFIC_TIME) state.foodServingTime else null,
+            notes = state.foodNotes.trim().takeIf { it.isNotEmpty() },
+        )
+    }
+
+    private fun validateBeforeSubmit(state: AdventureComboBuilderUiState): String? {
+        if (state.items.isEmpty() && state.foodItems.isEmpty()) return "Agrega al menos una actividad o comida."
+        if (state.clientName.trim().isEmpty()) return "Tu perfil no tiene nombre registrado."
+        if (state.whatsappNumber.trim().isEmpty()) return "Tu perfil no tiene WhatsApp registrado."
+        if (state.nationalId.filter(Char::isDigit)
+                .isEmpty()
+        ) return "Tu perfil no tiene cédula registrada."
+        if (state.eventType == ReservationEventType.CUSTOM && state.customEventTitle.trim()
+                .isEmpty()
+        ) {
+            return "Indica el nombre del evento personalizado."
+        }
+        return null
+    }
+
+    private inline fun updateState(transform: AdventureComboBuilderUiState.() -> AdventureComboBuilderUiState) {
+        _uiState.update(transform)
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/RewardPreviewInput.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+
+
+data class RewardPreviewInput(
+    val nationalId: String,
+    val activityItems: List<AdventureReservationItemDraft>,
+    val foodItems: List<ReservationFoodItemDraft>,
+    val catalog: AdventureCatalogSnapshot,
+)
 
 ```
 
@@ -2727,6 +5897,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.p
 @Composable
 fun BookingsScreen(
     modifier: Modifier = Modifier,
+    sessionState: SessionState.Authenticated,
 ) {
     Column(
         modifier = modifier
@@ -2800,7 +5971,10 @@ class LoyaltyRewardsRepository @Inject constructor(
                         !template.isExpired &&
                         template.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
                         template.isEligible(currentLevel) &&
-                        usageCount(template.id, walletEvents) < template.maxUsesPerClient.coerceAtLeast(1)
+                        usageCount(
+                            template.id,
+                            walletEvents
+                        ) < template.maxUsesPerClient.coerceAtLeast(1)
             }
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
 
@@ -2816,60 +5990,72 @@ class LoyaltyRewardsRepository @Inject constructor(
         )
     }
 
-    override fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> = callbackFlow {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty()) {
-            trySend(RewardWalletSnapshot.empty(""))
-            close()
-            return@callbackFlow
-        }
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    override fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> =
+        callbackFlow {
+            val cleanNationalId = nationalId.cleanNationalId()
+            if (cleanNationalId.isEmpty()) {
+                trySend(RewardWalletSnapshot.empty(""))
+                close()
+                return@callbackFlow
+            }
 
-        var emitJob: Job? = null
-        fun emitLatest() {
-            emitJob?.cancel()
-            emitJob = launch {
-                runCatching { loadWalletSnapshot(cleanNationalId) }
-                    .onSuccess { trySend(it).isSuccess }
-                    .onFailure { close(it) }
+            val refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
+            val registrations = mutableListOf<ListenerRegistration>()
+
+            val loaderJob: Job = launch {
+                refreshRequests
+                    .onStart { emit(Unit) }
+                    .debounce(160)
+                    .mapLatest { loadWalletSnapshot(cleanNationalId) }
+                    .catch { error ->
+                        if (error is CancellationException) throw error
+                        close(error)
+                    }
+                    .collect { wallet ->
+                        trySend(wallet).isSuccess
+                    }
+            }
+
+            fun requestRefresh() {
+                refreshRequests.tryEmit(Unit)
+            }
+
+            registrations += firestore
+                .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
+                .document(cleanNationalId)
+                .addSnapshotListener { _, error ->
+                    if (error != null) close(error) else requestRefresh()
+                }
+
+            registrations += firestore
+                .collection(FirestoreCollections.LOYALTY_REWARD_TEMPLATES)
+                .addSnapshotListener { _, error ->
+                    if (error != null) close(error) else requestRefresh()
+                }
+
+            registrations += firestore
+                .collection(FirestoreCollections.RESTAURANT_ORDERS)
+                .whereEqualTo("nationalId", cleanNationalId)
+                .addSnapshotListener { _, error ->
+                    if (error != null) close(error) else requestRefresh()
+                }
+
+            registrations += firestore
+                .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+                .whereEqualTo("nationalId", cleanNationalId)
+                .addSnapshotListener { _, error ->
+                    if (error != null) close(error) else requestRefresh()
+                }
+
+            requestRefresh()
+
+            awaitClose {
+                registrations.forEach { it.remove() }
+                registrations.clear()
+                loaderJob.cancel()
             }
         }
-
-        val registrations = mutableListOf<ListenerRegistration>()
-
-        registrations += firestore
-            .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(cleanNationalId)
-            .addSnapshotListener { _, error ->
-                if (error != null) close(error) else emitLatest()
-            }
-
-        registrations += firestore
-            .collection(FirestoreCollections.LOYALTY_REWARD_TEMPLATES)
-            .addSnapshotListener { _, error ->
-                if (error != null) close(error) else emitLatest()
-            }
-
-        registrations += firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
-                if (error != null) close(error) else emitLatest()
-            }
-
-        registrations += firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
-                if (error != null) close(error) else emitLatest()
-            }
-
-        emitLatest()
-
-        awaitClose {
-            emitJob?.cancel()
-            registrations.forEach { it.remove() }
-        }
-    }
 
     override suspend fun previewRestaurantRewards(
         nationalId: String,
@@ -3114,34 +6300,60 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     private fun DocumentSnapshot.toLoyaltyRewardTemplateOrNull(): LoyaltyRewardTemplate? {
-        val ruleMap = get("rule") as? Map<*, *> ?: return null
+        val rawRule = get("rule") as? Map<*, *> ?: return null
         val rule = LoyaltyRewardRule(
-            type = parseRuleType(ruleMap.stringValue("type")),
-            percentage = ruleMap.doubleValueOrNull("percentage"),
-            menuItemId = ruleMap.stringValueOrNull("menuItemId"),
-            activityId = ruleMap.stringValueOrNull("activityId"),
-            quantity = ruleMap.intValueOrNull("quantity"),
-            buyQuantity = ruleMap.intValueOrNull("buyQuantity"),
-            freeQuantity = ruleMap.intValueOrNull("freeQuantity"),
-            repeatable = ruleMap.boolValueOrNull("repeatable"),
+            type = parseRuleType(rawRule.stringValue("type")),
+            percentage = rawRule.doubleValueOrNull("percentage"),
+            menuItemId = rawRule.stringValueOrNull("menuItemId")
+                ?: rawRule.stringValueOrNull("menu_item_id"),
+            activityId = rawRule.stringValueOrNull("activityId")
+                ?: rawRule.stringValueOrNull("activity_id"),
+            quantity = rawRule.intValueOrNull("quantity"),
+            buyQuantity = rawRule.intValueOrNull("buyQuantity")
+                ?: rawRule.intValueOrNull("buy_quantity"),
+            freeQuantity = rawRule.intValueOrNull("freeQuantity")
+                ?: rawRule.intValueOrNull("free_quantity"),
+            repeatable = rawRule.boolValueOrNull("repeatable"),
         )
+
+        val resolvedTitle = stringValueOrNull("title")
+            ?.takeIf { it.isNotBlank() }
+            ?: defaultTitleFor(rule)
 
         return LoyaltyRewardTemplate(
             id = stringValueOrNull("id")?.takeIf { it.isNotBlank() } ?: id,
-            title = stringValueOrNull("title").orEmpty(),
+            title = resolvedTitle,
             subtitle = stringValueOrNull("subtitle").orEmpty(),
             scope = parseScope(stringValueOrNull("scope")),
-            minimumLevel = parseLevel(stringValueOrNull("minimumLevel")),
-            triggerMode = parseTriggerMode(stringValueOrNull("triggerMode")),
-            isActive = boolValue("isActive", default = true),
-            canStack = boolValue("canStack", default = true),
+            minimumLevel = parseLevel(
+                stringValueOrNull("minimumLevel") ?: stringValueOrNull("minimum_level")
+            ),
+            triggerMode = parseTriggerMode(
+                stringValueOrNull("triggerMode") ?: stringValueOrNull("trigger_mode")
+            ),
+            isActive = boolValue("isActive", default = boolValue("active", default = true)),
+            canStack = boolValue("canStack", default = boolValue("can_stack", default = true)),
             priority = intValue("priority", default = 0),
-            maxUsesPerClient = intValue("maxUsesPerClient", default = 1).coerceAtLeast(1),
-            expiresInDays = intValueOrNull("expiresInDays"),
+            maxUsesPerClient = intValue(
+                "maxUsesPerClient",
+                default = intValue("max_uses_per_client", default = 1)
+            ).coerceAtLeast(1),
+            expiresInDays = intValueOrNull("expiresInDays") ?: intValueOrNull("expires_in_days"),
             rule = rule,
-            createdAt = dateValue("createdAt") ?: Date(),
-            updatedAt = dateValue("updatedAt") ?: Date(),
+            createdAt = dateValue("createdAt") ?: dateValue("created_at") ?: Date(),
+            updatedAt = dateValue("updatedAt") ?: dateValue("updated_at") ?: dateValue("createdAt")
+            ?: Date(),
         )
+    }
+
+    private fun defaultTitleFor(rule: LoyaltyRewardRule): String {
+        return when (rule.type) {
+            LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE -> "Descuento en plato específico"
+            LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "Descuento en tu plato"
+            LoyaltyRewardRuleType.FREE_MENU_ITEM -> "Plato gratis"
+            LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Promoción especial"
+            LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "Descuento en aventura"
+        }
     }
 
     private fun DocumentSnapshot.walletEvents(): List<LoyaltyWalletEvent> {
@@ -3150,14 +6362,22 @@ class LoyaltyRewardsRepository @Inject constructor(
             val map = raw as? Map<*, *> ?: return@mapNotNull null
             LoyaltyWalletEvent(
                 id = map.stringValueOrNull("id") ?: return@mapNotNull null,
-                templateId = map.stringValueOrNull("templateId") ?: return@mapNotNull null,
-                templateTitle = map.stringValueOrNull("templateTitle").orEmpty(),
-                referenceType = parseReferenceType(map.stringValueOrNull("referenceType")),
-                referenceId = map.stringValueOrNull("referenceId").orEmpty(),
+                templateId = map.stringValueOrNull("templateId")
+                    ?: map.stringValueOrNull("template_id")
+                    ?: return@mapNotNull null,
+                templateTitle = map.stringValueOrNull("templateTitle")
+                    ?: map.stringValueOrNull("template_title")
+                    ?: "Premio Murco Loyalty",
+                referenceType = parseReferenceType(
+                    map.stringValueOrNull("referenceType")
+                        ?: map.stringValueOrNull("reference_type")
+                ),
+                referenceId = map.stringValueOrNull("referenceId")
+                    ?: map.stringValueOrNull("reference_id").orEmpty(),
                 status = parseEventStatus(map.stringValueOrNull("status")),
                 amount = map.doubleValue("amount"),
-                createdAt = map.dateValue("createdAt") ?: Date(),
-                updatedAt = map.dateValue("updatedAt") ?: Date(),
+                createdAt = map.dateValue("createdAt") ?: map.dateValue("created_at") ?: Date(),
+                updatedAt = map.dateValue("updatedAt") ?: map.dateValue("updated_at") ?: Date(),
             )
         }
     }
@@ -3174,10 +6394,11 @@ class LoyaltyRewardsRepository @Inject constructor(
         "updatedAt" to Timestamp(updatedAt),
     )
 
-    private fun usageCount(templateId: String, events: List<LoyaltyWalletEvent>): Int = events.count {
-        it.templateId == templateId &&
-                (it.status == LoyaltyWalletEventStatus.RESERVED || it.status == LoyaltyWalletEventStatus.CONSUMED)
-    }
+    private fun usageCount(templateId: String, events: List<LoyaltyWalletEvent>): Int =
+        events.count {
+            it.templateId == templateId &&
+                    (it.status == LoyaltyWalletEventStatus.RESERVED || it.status == LoyaltyWalletEventStatus.CONSUMED)
+        }
 
     private fun parseScope(raw: String?): LoyaltyRewardScope = when (raw.normalizeKey()) {
         "restaurant" -> LoyaltyRewardScope.RESTAURANT
@@ -3186,10 +6407,11 @@ class LoyaltyRewardsRepository @Inject constructor(
         else -> LoyaltyRewardScope.BOTH
     }
 
-    private fun parseTriggerMode(raw: String?): LoyaltyRewardTriggerMode = when (raw.normalizeKey()) {
-        "manual" -> LoyaltyRewardTriggerMode.MANUAL
-        else -> LoyaltyRewardTriggerMode.AUTOMATIC
-    }
+    private fun parseTriggerMode(raw: String?): LoyaltyRewardTriggerMode =
+        when (raw.normalizeKey()) {
+            "manual" -> LoyaltyRewardTriggerMode.MANUAL
+            else -> LoyaltyRewardTriggerMode.AUTOMATIC
+        }
 
     private fun parseRuleType(raw: String?): LoyaltyRewardRuleType = when (raw.normalizeKey()) {
         "mostexpensivemenuitempercentage" -> LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE
@@ -3200,17 +6422,19 @@ class LoyaltyRewardsRepository @Inject constructor(
         else -> LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE
     }
 
-    private fun parseReferenceType(raw: String?): LoyaltyRewardReferenceType = when (raw.normalizeKey()) {
-        "booking" -> LoyaltyRewardReferenceType.BOOKING
-        else -> LoyaltyRewardReferenceType.ORDER
-    }
+    private fun parseReferenceType(raw: String?): LoyaltyRewardReferenceType =
+        when (raw.normalizeKey()) {
+            "booking" -> LoyaltyRewardReferenceType.BOOKING
+            else -> LoyaltyRewardReferenceType.ORDER
+        }
 
-    private fun parseEventStatus(raw: String?): LoyaltyWalletEventStatus = when (raw.normalizeKey()) {
-        "consumed" -> LoyaltyWalletEventStatus.CONSUMED
-        "released" -> LoyaltyWalletEventStatus.RELEASED
-        "expired" -> LoyaltyWalletEventStatus.EXPIRED
-        else -> LoyaltyWalletEventStatus.RESERVED
-    }
+    private fun parseEventStatus(raw: String?): LoyaltyWalletEventStatus =
+        when (raw.normalizeKey()) {
+            "consumed" -> LoyaltyWalletEventStatus.CONSUMED
+            "released" -> LoyaltyWalletEventStatus.RELEASED
+            "expired" -> LoyaltyWalletEventStatus.EXPIRED
+            else -> LoyaltyWalletEventStatus.RESERVED
+        }
 
     private fun parseLevel(raw: String?): LoyaltyLevel = when (raw.normalizeKey()) {
         "silver" -> LoyaltyLevel.SILVER
@@ -3228,27 +6452,32 @@ class LoyaltyRewardsRepository @Inject constructor(
 
     private fun String.cleanNationalId(): String = filter { it.isDigit() }
 
-    private fun DocumentSnapshot.stringValueOrNull(field: String): String? = getString(field)?.trim()
+    private fun DocumentSnapshot.stringValueOrNull(field: String): String? =
+        getString(field)?.trim()
 
-    private fun DocumentSnapshot.boolValue(field: String, default: Boolean): Boolean = getBoolean(field) ?: default
+    private fun DocumentSnapshot.boolValue(field: String, default: Boolean): Boolean =
+        getBoolean(field) ?: default
 
-    private fun DocumentSnapshot.intValue(field: String, default: Int): Int = intValueOrNull(field) ?: default
+    private fun DocumentSnapshot.intValue(field: String, default: Int): Int =
+        intValueOrNull(field) ?: default
 
-    private fun DocumentSnapshot.intValueOrNull(field: String): Int? = when (val value = get(field)) {
-        is Int -> value
-        is Long -> value.toInt()
-        is Double -> value.toInt()
-        is Number -> value.toInt()
-        else -> null
-    }
+    private fun DocumentSnapshot.intValueOrNull(field: String): Int? =
+        when (val value = get(field)) {
+            is Int -> value
+            is Long -> value.toInt()
+            is Double -> value.toInt()
+            is Number -> value.toInt()
+            else -> null
+        }
 
-    private fun DocumentSnapshot.doubleValue(field: String): Double = when (val value = get(field)) {
-        is Double -> value
-        is Long -> value.toDouble()
-        is Int -> value.toDouble()
-        is Number -> value.toDouble()
-        else -> 0.0
-    }
+    private fun DocumentSnapshot.doubleValue(field: String): Double =
+        when (val value = get(field)) {
+            is Double -> value
+            is Long -> value.toDouble()
+            is Int -> value.toDouble()
+            is Number -> value.toDouble()
+            else -> 0.0
+        }
 
     private fun DocumentSnapshot.dateValue(field: String): Date? = when (val value = get(field)) {
         is Timestamp -> value.toDate()
@@ -3258,17 +6487,19 @@ class LoyaltyRewardsRepository @Inject constructor(
 
     private fun Map<*, *>.stringValue(field: String): String = stringValueOrNull(field).orEmpty()
 
-    private fun Map<*, *>.stringValueOrNull(field: String): String? = (this[field] as? String)?.trim()
+    private fun Map<*, *>.stringValueOrNull(field: String): String? =
+        (this[field] as? String)?.trim()
 
     private fun Map<*, *>.doubleValue(field: String): Double = doubleValueOrNull(field) ?: 0.0
 
-    private fun Map<*, *>.doubleValueOrNull(field: String): Double? = when (val value = this[field]) {
-        is Double -> value
-        is Long -> value.toDouble()
-        is Int -> value.toDouble()
-        is Number -> value.toDouble()
-        else -> null
-    }
+    private fun Map<*, *>.doubleValueOrNull(field: String): Double? =
+        when (val value = this[field]) {
+            is Double -> value
+            is Long -> value.toDouble()
+            is Int -> value.toDouble()
+            is Number -> value.toDouble()
+            else -> null
+        }
 
     private fun Map<*, *>.intValueOrNull(field: String): Int? = when (val value = this[field]) {
         is Int -> value
@@ -4359,6 +7590,17 @@ data class RewardPresentation(
     }
 }
 
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/RewardPresentationFactory.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+
+
 object RewardPresentationFactory {
     fun menuPresentation(
         item: MenuItem,
@@ -4501,6 +7743,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.p
 
 @Composable
 fun ProfileScreen(
+    sessionState: SessionState.Authenticated,
     currentThemeMode: ThemeMode,
     onThemeModeSelected: (ThemeMode) -> Unit,
     modifier: Modifier = Modifier,
@@ -4776,6 +8019,7 @@ data class CartItemEntity(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
 
 
+
 data class MenuItemDto(
     val id: String = "",
     val categoryId: String = "",
@@ -4794,23 +8038,120 @@ data class MenuItemDto(
     val createdAt: Timestamp? = null,
     val updatedAt: Timestamp? = null,
 ) {
-    fun toDomain(): MenuItem = MenuItem(
-        id = id,
-        categoryId = categoryId,
-        categoryTitle = categoryTitle,
-        name = name,
-        description = description,
-        notes = notes,
-        ingredients = ingredients,
-        price = price,
-        offerPrice = offerPrice,
-        imageURL = imageURL,
-        isAvailable = isAvailable,
-        remainingQuantity = remainingQuantity.coerceAtLeast(0),
-        isFeatured = isFeatured,
-        sortOrder = sortOrder,
-    )
+    fun toDomain(documentId: String? = null): MenuItem {
+        val resolvedId = id.trim().ifBlank { documentId.orEmpty().trim() }
+        val resolvedCategoryTitle =
+            categoryTitle.trim().ifBlank { categoryId.toReadableCategoryTitle() }
+        val resolvedCategoryId =
+            categoryId.trim().ifBlank { resolvedCategoryTitle.toCategorySlug() }
+
+        return MenuItem(
+            id = resolvedId,
+            categoryId = resolvedCategoryId,
+            categoryTitle = resolvedCategoryTitle,
+            name = name.trim(),
+            description = description.trim(),
+            notes = notes?.trim()?.takeIf { it.isNotEmpty() },
+            ingredients = ingredients.map { it.trim() }.filter { it.isNotEmpty() },
+            price = price.coerceAtLeast(0.0),
+            offerPrice = offerPrice?.takeIf { it in 0.0..price },
+            imageURL = imageURL?.trim()?.takeIf { it.isNotEmpty() },
+            isAvailable = isAvailable,
+            remainingQuantity = remainingQuantity.coerceAtLeast(0),
+            isFeatured = isFeatured,
+            sortOrder = sortOrder,
+        )
+    }
+
+    companion object {
+        fun fromDocument(document: DocumentSnapshot): MenuItemDto? {
+            val id = document.stringValue("id").ifBlank { document.id }
+            val name = document.stringValue("name")
+            if (id.isBlank() || name.isBlank()) return null
+
+            val price = document.doubleValue("price")
+            val offerPrice = document.doubleValueOrNull("offerPrice") ?: document.doubleValueOrNull(
+                "offer_price"
+            )
+
+            return MenuItemDto(
+                id = id,
+                categoryId = document.stringValue("categoryId").ifBlank {
+                    document.stringValue("category_id")
+                },
+                categoryTitle = document.stringValue("categoryTitle").ifBlank {
+                    document.stringValue("category_title")
+                },
+                name = name,
+                description = document.stringValue("description"),
+                notes = document.stringValueOrNull("notes"),
+                ingredients = document.stringList("ingredients"),
+                price = price,
+                offerPrice = offerPrice,
+                imageURL = document.stringValueOrNull("imageURL")
+                    ?: document.stringValueOrNull("imageUrl")
+                    ?: document.stringValueOrNull("image_url"),
+                isAvailable = document.boolValue(
+                    "isAvailable", default = document.boolValue("available", default = true)
+                ),
+                remainingQuantity = document.intValue(
+                    "remainingQuantity",
+                    default = document.intValue("remaining_quantity", default = 0)
+                ),
+                isFeatured = document.boolValue(
+                    "isFeatured", default = document.boolValue("featured", default = false)
+                ),
+                sortOrder = document.intValue(
+                    "sortOrder", default = document.intValue("sort_order", default = 0)
+                ),
+                createdAt = document.get("createdAt") as? Timestamp,
+                updatedAt = document.get("updatedAt") as? Timestamp,
+            )
+        }
+    }
 }
+
+private fun DocumentSnapshot.stringValue(field: String): String = stringValueOrNull(field).orEmpty()
+
+private fun DocumentSnapshot.stringValueOrNull(field: String): String? = getString(field)?.trim()
+
+private fun DocumentSnapshot.boolValue(field: String, default: Boolean): Boolean =
+    getBoolean(field) ?: default
+
+private fun DocumentSnapshot.intValue(field: String, default: Int): Int =
+    when (val value = get(field)) {
+        is Int -> value
+        is Long -> value.toInt()
+        is Double -> value.toInt()
+        is Number -> value.toInt()
+        else -> default
+    }
+
+private fun DocumentSnapshot.doubleValue(field: String): Double = doubleValueOrNull(field) ?: 0.0
+
+private fun DocumentSnapshot.doubleValueOrNull(field: String): Double? =
+    when (val value = get(field)) {
+        is Double -> value
+        is Long -> value.toDouble()
+        is Int -> value.toDouble()
+        is Number -> value.toDouble()
+        else -> null
+    }
+
+private fun DocumentSnapshot.stringList(field: String): List<String> {
+    val value = get(field) as? List<*> ?: return emptyList()
+    return value.mapNotNull { it as? String }.map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+private fun String.toCategorySlug(): String =
+    trim().lowercase().replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o")
+        .replace("ú", "u").replace("ñ", "n").replace(Regex("[^a-z0-9]+"), "-").trim('-')
+        .ifBlank { "otros" }
+
+private fun String.toReadableCategoryTitle(): String =
+    trim().replace("-", " ").replace("_", " ").split(" ").filter { it.isNotBlank() }
+        .joinToString(" ") { word -> word.lowercase().replaceFirstChar { it.titlecase() } }
+        .ifBlank { "Otros" }
 
 ```
 
@@ -4830,15 +8171,15 @@ class MenuRepository @Inject constructor(
     override fun observeMenu(): Flow<List<MenuSection>> = callbackFlow {
         val registration: ListenerRegistration = firestore
             .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
-            .orderBy("categoryTitle")
-            .orderBy("sortOrder")
             .addSnapshotListener { snapshot, error ->
                 when {
                     error != null -> close(error)
                     snapshot == null -> trySend(emptyList()).isSuccess
                     else -> {
-                        val items = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(MenuItemDto::class.java)?.toDomain()
+                        val items = snapshot.documents.mapNotNull { document ->
+                            MenuItemDto.fromDocument(document)
+                                ?.toDomain(documentId = document.id)
+                                ?.takeIf { it.id.isNotBlank() && it.name.isNotBlank() }
                         }
                         trySend(groupIntoSections(items)).isSuccess
                     }
@@ -4849,35 +8190,35 @@ class MenuRepository @Inject constructor(
     }
 
     private fun groupIntoSections(items: List<MenuItem>): List<MenuSection> {
-        val preferredOrder = listOf(
-            "Entradas",
-            "Sopas",
-            "Platos Fuertes",
-            "Extras",
-            "Postres",
-            "Bebidas",
-            "Bebidas Alcohólicas",
-        )
-
         return items
-            .groupBy { it.categoryId }
+            .distinctBy { it.id }
+            .groupBy { it.categoryId.ifBlank { "otros" } }
             .mapNotNull { (categoryId, categoryItems) ->
                 val first = categoryItems.firstOrNull() ?: return@mapNotNull null
                 MenuSection(
                     id = categoryId,
                     category = MenuCategory(
                         id = categoryId,
-                        title = first.categoryTitle,
+                        title = first.categoryTitle.ifBlank { "Otros" },
                     ),
-                    items = categoryItems.sortedWith(compareBy({ it.sortOrder }, { it.name })),
+                    items = categoryItems.sortedWith(compareBy<MenuItem> { it.sortOrder }.thenBy { it.name }),
                 )
             }
             .sortedWith(
-                compareBy<MenuSection> {
-                    val index = preferredOrder.indexOf(it.category.title)
-                    if (index == -1) Int.MAX_VALUE else index
-                }.thenBy { it.category.title },
+                compareBy<MenuSection> { categoryRank(it.category.title) }
+                    .thenBy { it.category.title },
             )
+    }
+
+    private fun categoryRank(title: String): Int = when (title.trim()) {
+        "Entradas" -> 0
+        "Sopas" -> 1
+        "Platos Fuertes" -> 2
+        "Extras" -> 3
+        "Postres" -> 4
+        "Bebidas" -> 5
+        "Bebidas Alcohólicas" -> 6
+        else -> Int.MAX_VALUE
     }
 }
 
@@ -5872,6 +9213,7 @@ fun MenuListScreen(
     levelTitle: String,
     cartItemsCount: Int,
     rewardProvider: (MenuItem) -> RewardPresentation?,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
     onCategorySelected: (String?) -> Unit,
     onOpenItem: (MenuItem) -> Unit,
     onOpenCart: () -> Unit,
@@ -5969,14 +9311,12 @@ fun MenuListScreen(
                         }
                     }
 
-                    if (state.isLoadingRewards || state.restaurantRewardTemplates.isNotEmpty()) {
-                        item {
-                            RewardsSection(
-                                isLoading = state.isLoadingRewards,
-                                templates = state.restaurantRewardTemplates,
-                                allItems = state.allItems,
-                            )
-                        }
+                    item {
+                        RewardsSection(
+                            isLoading = state.isLoadingRewards,
+                            templates = state.restaurantRewardTemplates,
+                            eligibleItemsProvider = eligibleItemsProvider,
+                        )
                     }
 
                     if (state.featuredItems.isNotEmpty()) {
@@ -6046,7 +9386,7 @@ private fun EmptyRestaurantState(modifier: Modifier = Modifier) {
         modifier = modifier.padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ElevatedCard {
+        ElevatedCard(shape = RoundedCornerShape(28.dp)) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -6201,12 +9541,12 @@ private fun ErrorCard(
 private fun RewardsSection(
     isLoading: Boolean,
     templates: List<LoyaltyRewardTemplate>,
-    allItems: List<MenuItem>,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionHeader(
             title = "Tus cupones y premios",
-            subtitle = "Se aplican automáticamente al abrir un plato elegible o al confirmar el pedido.",
+            subtitle = "Se aplican automáticamente en platos elegibles y al confirmar el pedido.",
         )
 
         if (isLoading) {
@@ -6222,12 +9562,12 @@ private fun RewardsSection(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-        } else {
+        } else if (templates.isNotEmpty()) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(templates, key = { it.id }) { template ->
                     RewardCouponCard(
                         template = template,
-                        eligibleItems = eligibleItemsFor(template, allItems),
+                        eligibleItems = eligibleItemsProvider(template),
                     )
                 }
             }
@@ -6291,34 +9631,23 @@ private fun RewardCouponCard(
                 overflow = TextOverflow.Ellipsis,
             )
 
-            if (eligibleItems.isNotEmpty()) {
-                Text(
-                    text = "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
-                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else "",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            val appliesToText = when {
+                eligibleItems.isNotEmpty() -> "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
+                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
+                template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "Aplica al plato elegible más caro del pedido."
+                else -> "Aún no encontré el producto objetivo en el menú. Revisa el menuItemId del cupón."
             }
+
+            Text(
+                text = appliesToText,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
-}
-
-private fun eligibleItemsFor(
-    template: LoyaltyRewardTemplate,
-    allItems: List<MenuItem>,
-): List<MenuItem> = when (template.rule.type) {
-    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> allItems.filter { it.canBeOrdered }
-    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
-    LoyaltyRewardRuleType.FREE_MENU_ITEM,
-    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE,
-        -> {
-        val targetId = template.targetMenuItemId ?: return emptyList()
-        allItems.filter { it.id == targetId }
-    }
-    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> emptyList()
 }
 
 private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.rule.type) {
@@ -6457,6 +9786,12 @@ private fun CategorySelectorBlock(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            FilterChip(
+                selected = selectedCategoryId == null,
+                onClick = { onCategorySelected(null) },
+                label = { Text("Todo") },
+            )
+
             categories.forEach { category ->
                 FilterChip(
                     selected = selectedCategoryId == category.id,
@@ -6752,6 +10087,7 @@ fun RestaurantScreen(
                 levelTitle = menuViewModel.currentLevelTitle(),
                 cartItemsCount = cartState.totalItems,
                 rewardProvider = { item -> menuViewModel.rewardPresentation(item) },
+                eligibleItemsProvider = menuViewModel::eligibleMenuItems,
                 onCategorySelected = menuViewModel::onCategorySelected,
                 onOpenItem = { item -> destination = RestaurantDestination.Detail(item.id) },
                 onOpenCart = { destination = RestaurantDestination.Cart },
@@ -6790,7 +10126,7 @@ fun RestaurantScreen(
         }
 
         RestaurantDestination.Cart -> {
-            CartView(
+            CartScreen(
                 state = cartState,
                 onBack = { destination = RestaurantDestination.Menu },
                 onCheckout = { destination = RestaurantDestination.Checkout },
@@ -6804,7 +10140,7 @@ fun RestaurantScreen(
         }
 
         RestaurantDestination.Checkout -> {
-            CheckoutView(
+            CheckoutScreen(
                 state = checkoutState,
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
@@ -6842,7 +10178,7 @@ fun RestaurantScreen(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/cart/CartView.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/cart/CartScreen.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart
@@ -6850,7 +10186,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CartView(
+fun CartScreen(
     state: CartUiState,
     onBack: () -> Unit,
     onCheckout: () -> Unit,
@@ -6861,6 +10197,8 @@ fun CartView(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val lineDiscounts = state.allocatedDiscountByCartItemId()
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
@@ -6885,6 +10223,9 @@ fun CartView(
             if (!state.isEmpty) {
                 CartBottomBar(
                     subtotal = state.subtotal,
+                    discount = state.discount,
+                    total = state.total,
+                    isLoadingRewards = state.isLoadingRewards,
                     canCheckout = state.canCheckout,
                     onCheckout = onCheckout,
                 )
@@ -6906,9 +10247,20 @@ fun CartView(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 130.dp),
+                    contentPadding = PaddingValues(
+                        start = 16.dp,
+                        end = 16.dp,
+                        top = 12.dp,
+                        bottom = 150.dp,
+                    ),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
+                    if (state.isLoadingRewards) {
+                        item {
+                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+
                     state.errorMessage?.let { message ->
                         item {
                             ErrorCardInline(
@@ -6921,24 +10273,38 @@ fun CartView(
                     item {
                         SectionHeader(
                             title = "Tu pedido",
-                            subtitle = "${state.totalItems} producto(s) en preparación para enviar.",
+                            subtitle = if (state.isLoadingRewards) {
+                                "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
+                            } else {
+                                "${state.totalItems} producto(s) listos para enviar."
+                            },
                         )
                     }
 
                     items(state.items, key = { it.id }) { item ->
                         CartItemCard(
                             item = item,
+                            allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
+                            rewards = state.appliedRewardPresentations(item.menuItem.id),
                             onIncrease = { onIncrease(item.id) },
                             onDecrease = { onDecrease(item.id) },
                             onRemove = { onRemove(item.id) },
                         )
                     }
 
+                    if (state.appliedRewards.isNotEmpty()) {
+                        item {
+                            AppliedRewardsCard(
+                                rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                            )
+                        }
+                    }
+
                     item {
                         OrderSummaryCard(
                             subtotal = state.subtotal,
-                            discount = 0.0,
-                            total = state.subtotal,
+                            discount = state.discount,
+                            total = state.total,
                         )
                     }
                 }
@@ -6989,10 +10355,14 @@ private fun EmptyCart(
 @Composable
 private fun CartItemCard(
     item: CartItem,
+    allocatedDiscount: Double,
+    rewards: List<RewardPresentation>,
     onIncrease: () -> Unit,
     onDecrease: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val discountedLineTotal = (item.totalPrice - allocatedDiscount).coerceAtLeast(0.0)
+
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -7037,11 +10407,41 @@ private fun CartItemCard(
                     }
                 }
 
-                Text(
-                    text = item.totalPrice.priceLabel(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                )
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    if (allocatedDiscount > 0.0) {
+                        Text(
+                            text = item.totalPrice.priceLabel(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                        Text(
+                            text = discountedLineTotal.priceLabel(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = "-${allocatedDiscount.priceLabel()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    } else {
+                        Text(
+                            text = item.totalPrice.priceLabel(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+
+            rewards.forEach { reward ->
+                CompactCartRewardRibbon(reward = reward)
             }
 
             HorizontalDivider()
@@ -7077,41 +10477,182 @@ private fun CartItemCard(
 }
 
 @Composable
+private fun CompactCartRewardRibbon(reward: RewardPresentation) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.LocalOffer,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = reward.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = reward.message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            reward.amountText?.let { amount ->
+                Text(
+                    text = "-$amount",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppliedRewardsCard(
+    rewards: List<RewardPresentation>,
+) {
+    ElevatedCard(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            SectionHeader(
+                title = "Premios aplicados",
+                subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
+            )
+
+            rewards.forEach { reward ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.LocalOffer,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = reward.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = reward.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
+                        )
+                    }
+
+                    reward.amountText?.let { amount ->
+                        Text(
+                            text = "-$amount",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun CartBottomBar(
     subtotal: Double,
+    discount: Double,
+    total: Double,
+    isLoadingRewards: Boolean,
     canCheckout: Boolean,
     onCheckout: () -> Unit,
 ) {
     Surface(shadowElevation = 10.dp) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Subtotal",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = subtotal.priceLabel(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                )
+            if (isLoadingRewards) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
 
-            Button(
-                enabled = canCheckout,
-                onClick = onCheckout,
-                modifier = Modifier.weight(1.25f),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Checkout")
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when {
+                            isLoadingRewards -> "Calculando beneficios"
+                            discount > 0.0 -> "Total con Murco Loyalty"
+                            else -> "Subtotal"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+
+                    if (discount > 0.0) {
+                        Text(
+                            text = subtotal.priceLabel(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                    }
+
+                    Text(
+                        text = total.priceLabel(),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (discount > 0.0) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+
+                Button(
+                    enabled = canCheckout,
+                    onClick = onCheckout,
+                    modifier = Modifier.weight(1.25f),
+                ) {
+                    Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
+                    Spacer(modifier = Modifier.size(8.dp))
+                    Text("Checkout")
+                }
             }
         }
     }
@@ -7161,7 +10702,7 @@ internal fun OrderSummaryCard(
             SectionHeader(title = "Resumen")
             SummaryLine("Subtotal", subtotal.priceLabel())
             if (discount > 0.0) {
-                SummaryLine("Beneficios", "-${discount.priceLabel()}")
+                SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
             }
             HorizontalDivider()
             SummaryLine("Total", total.priceLabel(), emphasized = true)
@@ -7186,6 +10727,7 @@ internal fun SummaryLine(
             text = value,
             fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
             style = if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+            color = if (title == "Murco Loyalty") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )
     }
 }
@@ -7194,7 +10736,7 @@ internal fun SummaryLine(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/cart/CheckoutView.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/cart/CheckoutScreen.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view
@@ -7202,7 +10744,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutView(
+fun CheckoutScreen(
     state: CheckoutUiState,
     profile: ClientProfile,
     onBack: () -> Unit,
@@ -8027,41 +11569,83 @@ private fun Date.shortDateTime(): String =
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/order/OrdersUiState.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/viewmodel/CartUiState.kt
 
 ```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
 
-data class OrdersUiState(
-    val nationalId: String = "",
-    val orders: List<Order> = emptyList(),
-    val isLoading: Boolean = false,
-    val grouping: OrdersGroupingOption = OrdersGroupingOption.DATE,
-    val sortOption: OrdersSortOption = OrdersSortOption.NEWEST,
-    val statusFilter: OrderStatus? = null,
+data class CartUiState(
+    val draft: OrderDraft = OrderDraft(),
+    val isLoading: Boolean = true,
+    val isLoadingRewards: Boolean = false,
+    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
+        RewardWalletSnapshot.empty("")
+    ),
     val errorMessage: String? = null,
+    val lastAddedItemName: String? = null,
 ) {
-    val visibleOrders: List<Order>
-        get() {
-            val filtered = statusFilter?.let { status -> orders.filter { it.status == status } } ?: orders
-            return when (sortOption) {
-                OrdersSortOption.NEWEST -> filtered.sortedByDescending { it.createdAt.time }
-                OrdersSortOption.OLDEST -> filtered.sortedBy { it.createdAt.time }
-                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedByDescending { it.totalAmount }
+    val items: List<CartItem> get() = draft.items
+    val totalItems: Int get() = draft.totalItems
+    val subtotal: Double get() = draft.subtotal.roundMoney()
+    val discount: Double get() = rewardPreview.totalDiscount.coerceIn(0.0, subtotal).roundMoney()
+    val total: Double get() = (subtotal - discount).coerceAtLeast(0.0).roundMoney()
+    val appliedRewards: List<AppliedReward> get() = rewardPreview.appliedRewards
+    val isEmpty: Boolean get() = draft.isEmpty
+    val canCheckout: Boolean get() = !draft.isEmpty
+
+    fun allocatedDiscountByCartItemId(): Map<String, Double> {
+        if (items.isEmpty() || appliedRewards.isEmpty()) return emptyMap()
+
+        val allocations = items.associate { it.id to 0.0 }.toMutableMap()
+
+        appliedRewards.forEach { reward ->
+            val affectedMenuIds = reward.affectedMenuItemIds.toSet()
+            if (affectedMenuIds.isEmpty() || reward.amount <= 0.0) return@forEach
+
+            val candidates = items.filter { item ->
+                item.menuItem.id in affectedMenuIds && item.totalPrice > 0.0
+            }
+            if (candidates.isEmpty()) return@forEach
+
+            val availableTotal = candidates.sumOf { item ->
+                (item.totalPrice - (allocations[item.id] ?: 0.0)).coerceAtLeast(0.0)
+            }
+            if (availableTotal <= 0.0) return@forEach
+
+            var remainingRewardAmount = reward.amount.coerceAtLeast(0.0).roundMoney()
+
+            candidates.forEachIndexed { index, item ->
+                val alreadyAllocated = allocations[item.id] ?: 0.0
+                val lineCapacity = (item.totalPrice - alreadyAllocated).coerceAtLeast(0.0)
+
+                if (lineCapacity <= 0.0 || remainingRewardAmount <= 0.0) return@forEachIndexed
+
+                val rawShare = if (index == candidates.lastIndex) {
+                    remainingRewardAmount
+                } else {
+                    reward.amount * (lineCapacity / availableTotal)
+                }
+
+                val allocation = min(
+                    lineCapacity,
+                    rawShare.coerceAtMost(remainingRewardAmount),
+                ).coerceAtLeast(0.0).roundMoney()
+
+                allocations[item.id] = (alreadyAllocated + allocation).roundMoney()
+                remainingRewardAmount =
+                    (remainingRewardAmount - allocation).coerceAtLeast(0.0).roundMoney()
             }
         }
-}
 
-enum class OrdersGroupingOption(val title: String) {
-    DATE("Fecha"),
-    STATUS("Estado"),
-}
+        return allocations
+            .filterValues { it > 0.0 }
+            .mapValues { (_, value) -> value.roundMoney() }
+    }
 
-enum class OrdersSortOption(val title: String) {
-    NEWEST("Recientes"),
-    OLDEST("Antiguos"),
-    HIGHEST_TOTAL("Mayor total"),
+    fun appliedRewardPresentations(menuItemId: String): List<RewardPresentation> = appliedRewards
+        .filter { reward -> reward.affectedMenuItemIds.contains(menuItemId) }
+        .map(RewardPresentation::fromAppliedReward)
 }
 
 ```
@@ -8074,38 +11658,34 @@ enum class OrdersSortOption(val title: String) {
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
 
-data class CartUiState(
-    val draft: OrderDraft = OrderDraft(),
-    val isLoading: Boolean = true,
-    val errorMessage: String? = null,
-    val lastAddedItemName: String? = null,
-) {
-    val items: List<CartItem> get() = draft.items
-    val totalItems: Int get() = draft.totalItems
-    val subtotal: Double get() = draft.subtotal
-    val isEmpty: Boolean get() = draft.isEmpty
-    val canCheckout: Boolean get() = !draft.isEmpty
-}
-
 @HiltViewModel
 class CartViewModel @Inject constructor(
     observeCartDraftUseCase: ObserveCartDraftUseCase,
     private val saveCartDraftUseCase: SaveCartDraftUseCase,
     private val clearCartDraftUseCase: ClearCartDraftUseCase,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CartUiState())
     val uiState: StateFlow<CartUiState> = _uiState.asStateFlow()
 
+    private var currentNationalId: String = ""
+    private var rewardPreviewJob: Job? = null
+
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
+                val draftNationalId = draft.nationalId?.filter(Char::isDigit).orEmpty()
+                if (draftNationalId.isNotEmpty()) currentNationalId = draftNationalId
+
                 _uiState.update {
                     it.copy(
                         draft = draft,
                         isLoading = false,
                     )
                 }
+
+                refreshRewardPreview(draft)
             }
         }
     }
@@ -8113,12 +11693,16 @@ class CartViewModel @Inject constructor(
     fun syncProfile(profile: ClientProfile) {
         val current = _uiState.value.draft
         val cleanNationalId = profile.nationalId.filter { it.isDigit() }
+        currentNationalId = cleanNationalId
+
         val updated = current.copy(
             nationalId = cleanNationalId,
             clientName = profile.fullName,
             updatedAt = Date(),
         )
+
         save(updated)
+        refreshRewardPreview(updated)
     }
 
     fun addItem(
@@ -8233,9 +11817,20 @@ class CartViewModel @Inject constructor(
 
     fun clearCart() {
         viewModelScope.launch {
-            runCatching {
+            try {
                 clearCartDraftUseCase.execute()
-            }.onFailure { error ->
+                rewardPreviewJob?.cancel()
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = RewardComputationResult.empty(
+                            RewardWalletSnapshot.empty(currentNationalId),
+                        ),
+                        isLoadingRewards = false,
+                    )
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo limpiar el carrito.")
                 }
@@ -8254,22 +11849,104 @@ class CartViewModel @Inject constructor(
 
     private fun save(draft: OrderDraft) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 saveCartDraftUseCase.execute(draft)
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo guardar el carrito.")
                 }
             }
         }
     }
+
+    private fun refreshRewardPreview(draft: OrderDraft) {
+        rewardPreviewJob?.cancel()
+
+        val cleanNationalId = draft.nationalId
+            ?.filter(Char::isDigit)
+            ?.takeIf { it.isNotEmpty() }
+            ?: currentNationalId
+
+        if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
+            _uiState.update {
+                it.copy(
+                    isLoadingRewards = false,
+                    rewardPreview = RewardComputationResult.empty(
+                        RewardWalletSnapshot.empty(cleanNationalId),
+                    ),
+                )
+            }
+            return
+        }
+
+        rewardPreviewJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoadingRewards = true,
+                    errorMessage = null,
+                )
+            }
+
+            try {
+                val preview = buildRewardPreview(
+                    nationalId = cleanNationalId,
+                    draft = draft,
+                )
+
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = preview,
+                        isLoadingRewards = false,
+                        errorMessage = null,
+                    )
+                }
+            } catch (_: CancellationException) {
+                // Expected when the cart changes quickly. Do not show this as a UI error.
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(
+                        rewardPreview = RewardComputationResult.empty(
+                            RewardWalletSnapshot.empty(cleanNationalId),
+                        ),
+                        isLoadingRewards = false,
+                        errorMessage = error.message ?: "No se pudieron calcular beneficios.",
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun buildRewardPreview(
+        nationalId: String,
+        draft: OrderDraft,
+    ): RewardComputationResult {
+        val previewItems = draft.items.map {
+            OrderItem(
+                menuItemId = it.menuItem.id,
+                name = it.menuItem.name,
+                unitPrice = it.unitPrice,
+                quantity = it.safeQuantity,
+                notes = it.notes,
+            )
+        }
+
+        return loyaltyRewardsRepository.previewRestaurantRewards(
+            nationalId = nationalId,
+            items = previewItems,
+        )
+    }
 }
+
+fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
+
 
 ```
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/viewmodel/CheckoutViewModel.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/viewmodel/CheckoutUiState.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
@@ -8293,6 +11970,16 @@ data class CheckoutUiState(
     val canSubmit: Boolean get() = draft.canSubmit && !isSubmitting
 }
 
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/viewmodel/CheckoutViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
+
+
 @HiltViewModel
 class CheckoutViewModel @Inject constructor(
     observeCartDraftUseCase: ObserveCartDraftUseCase,
@@ -8309,6 +11996,7 @@ class CheckoutViewModel @Inject constructor(
     val createdOrder: SharedFlow<Order> = _createdOrder.asSharedFlow()
 
     private var currentNationalId: String = ""
+    private var rewardPreviewJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -8327,12 +12015,12 @@ class CheckoutViewModel @Inject constructor(
     fun syncProfile(profile: ClientProfile) {
         currentNationalId = profile.nationalId.filter { it.isDigit() }
         val current = _uiState.value.draft
-        saveDraft(
-            current.copy(
-                nationalId = currentNationalId,
-                clientName = profile.fullName,
-            ),
+        val updated = current.copy(
+            nationalId = currentNationalId,
+            clientName = profile.fullName,
         )
+        saveDraft(updated)
+        refreshRewardPreview(updated)
     }
 
     fun updateTableNumber(value: String) {
@@ -8356,7 +12044,7 @@ class CheckoutViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
-            runCatching {
+            try {
                 val preview = buildRewardPreview(draft)
                 val finalOrder = draft
                     .toOrder(orderId = UUID.randomUUID().toString())
@@ -8377,7 +12065,9 @@ class CheckoutViewModel @Inject constructor(
                         ),
                     )
                 }
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
@@ -8390,9 +12080,11 @@ class CheckoutViewModel @Inject constructor(
 
     private fun saveDraft(draft: OrderDraft) {
         viewModelScope.launch {
-            runCatching {
+            try {
                 saveCartDraftUseCase.execute(draft)
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo actualizar el checkout.")
                 }
@@ -8401,18 +12093,20 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private fun refreshRewardPreview(draft: OrderDraft) {
-        viewModelScope.launch {
+        rewardPreviewJob?.cancel()
+        rewardPreviewJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRewards = true) }
-            runCatching {
-                buildRewardPreview(draft)
-            }.onSuccess { preview ->
+            try {
+                val preview = buildRewardPreview(draft)
                 _uiState.update {
                     it.copy(
                         rewardPreview = preview,
                         isLoadingRewards = false,
                     )
                 }
-            }.onFailure { error ->
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
@@ -8427,7 +12121,11 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private suspend fun buildRewardPreview(draft: OrderDraft): RewardComputationResult {
-        val cleanNationalId = draft.nationalId?.trim().orEmpty()
+        val cleanNationalId = draft.nationalId
+            ?.filter(Char::isDigit)
+            ?.takeIf { it.isNotEmpty() }
+            ?: currentNationalId
+
         if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
             return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanNationalId))
         }
@@ -8470,10 +12168,12 @@ data class MenuUiState(
     val categories: List<MenuCategory>
         get() = sections.map { it.category }
 
+    val allItems: List<MenuItem>
+        get() = sections.flatMap { it.items }.distinctBy { it.id }
+
     val featuredItems: List<MenuItem>
-        get() = sections
-            .flatMap { it.items }
-            .filter { it.isFeatured }
+        get() = allItems.filter { it.isFeatured }
+            .sortedWith(compareBy<MenuItem> { it.sortOrder }.thenBy { it.name })
 
     val visibleSections: List<MenuSection>
         get() = if (selectedCategoryId.isNullOrBlank()) {
@@ -8482,12 +12182,10 @@ data class MenuUiState(
             sections.filter { it.category.id == selectedCategoryId }
         }
 
-    val allItems: List<MenuItem>
-        get() = sections.flatMap { it.items }
-
     val restaurantRewardTemplates: List<LoyaltyRewardTemplate>
-        get() = walletSnapshot.availableTemplates
-            .filter { it.scope.matchesRestaurant() && !it.isExpired }
+        get() = walletSnapshot.availableTemplates.filter { template ->
+            template.scope == LoyaltyRewardScope.RESTAURANT || template.scope == LoyaltyRewardScope.BOTH
+        }.filterNot { it.isExpired }
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
 
     fun itemById(id: String): MenuItem? = allItems.firstOrNull { it.id == id }
@@ -8522,7 +12220,7 @@ class MenuViewModel @Inject constructor(
     }
 
     fun setNationalId(nationalId: String?) {
-        val cleanNationalId = nationalId?.filter { it.isDigit() }.orEmpty()
+        val cleanNationalId = nationalId?.filter(Char::isDigit).orEmpty()
 
         if (cleanNationalId.isEmpty()) {
             rewardsJob?.cancel()
@@ -8545,6 +12243,16 @@ class MenuViewModel @Inject constructor(
             _uiState.update { it.copy(isLoadingRewards = true, errorMessage = null) }
             loyaltyRewardsRepository
                 .observeWalletSnapshot(cleanNationalId)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoadingRewards = false,
+                            walletSnapshot = RewardWalletSnapshot.empty(cleanNationalId),
+                            errorMessage = error.message ?: "No se pudieron cargar tus beneficios.",
+                        )
+                    }
+                }
                 .collectLatest { wallet ->
                     _uiState.update {
                         it.copy(
@@ -8567,9 +12275,6 @@ class MenuViewModel @Inject constructor(
 
     fun currentLevelTitle(): String = _uiState.value.walletSnapshot.currentLevel.title
 
-    val restaurantRewardTemplates: List<LoyaltyRewardTemplate>
-        get() = _uiState.value.restaurantRewardTemplates
-
     fun rewardPresentation(item: MenuItem): RewardPresentation? =
         rewardPresentation(item, quantity = 1)
 
@@ -8580,7 +12285,7 @@ class MenuViewModel @Inject constructor(
         val projected = projectedRewardResult(item, quantity)
 
         projected.appliedRewards
-            .firstOrNull { it.affectedMenuItemIds.contains(item.id) }
+            .firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.id) }
             ?.let { return RewardPresentation.fromAppliedReward(it) }
 
         return RewardPresentationFactory.menuPresentation(
@@ -8606,6 +12311,7 @@ class MenuViewModel @Inject constructor(
         val allItems = _uiState.value.allItems
         return when (template.rule.type) {
             LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> allItems.filter { it.canBeOrdered }
+
             LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
             LoyaltyRewardRuleType.FREE_MENU_ITEM,
             LoyaltyRewardRuleType.BUY_X_GET_Y_FREE,
@@ -8618,44 +12324,55 @@ class MenuViewModel @Inject constructor(
         }
     }
 
-    fun rewardForAppliedReward(reward: AppliedReward): RewardPresentation =
-        RewardPresentation.fromAppliedReward(reward)
-
     private fun startMenuObservationIfNeeded() {
         if (menuJob?.isActive == true) return
 
         menuJob = viewModelScope.launch {
-            observeMenuUseCase.execute().collectLatest { sections ->
-                val sorted = sortSections(sections)
-                _uiState.update { current ->
-                    current.copy(
-                        isLoading = false,
-                        sections = sorted,
-                        selectedCategoryId = current.selectedCategoryId
-                            ?.takeIf { selected -> sorted.any { it.category.id == selected } }
-                            ?: sorted.firstOrNull()?.category?.id,
-                        errorMessage = null,
-                    )
+            observeMenuUseCase.execute()
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudo cargar el menú.",
+                        )
+                    }
                 }
-            }
+                .collectLatest { sections ->
+                    val sorted = sortSections(sections)
+                    _uiState.update { current ->
+                        current.copy(
+                            isLoading = false,
+                            sections = sorted,
+                            selectedCategoryId = current.selectedCategoryId
+                                ?.takeIf { selected -> sorted.any { it.category.id == selected } },
+                            errorMessage = null,
+                        )
+                    }
+                }
         }
     }
 
     private fun projectedRewardResult(
         item: MenuItem,
         quantity: Int,
-    ): RewardComputationResult = LoyaltyRewardEngine.evaluateRestaurant(
-        templates = _uiState.value.walletSnapshot.availableTemplates,
-        wallet = _uiState.value.walletSnapshot,
-        menuLines = listOf(
-            RewardMenuLine(
-                menuItemId = item.id,
-                name = item.name,
-                unitPrice = item.finalPrice,
-                quantity = quantity.coerceAtLeast(1),
+    ): RewardComputationResult {
+        val wallet = _uiState.value.walletSnapshot
+        if (wallet.availableTemplates.isEmpty()) return RewardComputationResult.empty(wallet)
+
+        return LoyaltyRewardEngine.evaluateRestaurant(
+            templates = wallet.availableTemplates,
+            wallet = wallet,
+            menuLines = listOf(
+                RewardMenuLine(
+                    menuItemId = item.id,
+                    name = item.name,
+                    unitPrice = item.finalPrice,
+                    quantity = quantity.coerceAtLeast(1),
+                ),
             ),
-        ),
-    )
+        )
+    }
 
     private fun sortSections(sections: List<MenuSection>): List<MenuSection> {
         val preferredOrder = listOf(
@@ -8669,7 +12386,13 @@ class MenuViewModel @Inject constructor(
         )
 
         return sections
-            .map { section -> section.copy(items = section.items.sortedBy { it.sortOrder }) }
+            .map { section ->
+                section.copy(
+                    items = section.items.sortedWith(
+                        compareBy<MenuItem> { it.sortOrder }.thenBy { it.name },
+                    ),
+                )
+            }
             .sortedWith(
                 compareBy<MenuSection> {
                     val index = preferredOrder.indexOf(it.category.title)
@@ -8679,6 +12402,47 @@ class MenuViewModel @Inject constructor(
     }
 
     private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/viewmodel/OrdersUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
+
+
+data class OrdersUiState(
+    val nationalId: String = "",
+    val orders: List<Order> = emptyList(),
+    val isLoading: Boolean = false,
+    val grouping: OrdersGroupingOption = OrdersGroupingOption.DATE,
+    val sortOption: OrdersSortOption = OrdersSortOption.NEWEST,
+    val statusFilter: OrderStatus? = null,
+    val errorMessage: String? = null,
+) {
+    val visibleOrders: List<Order>
+        get() {
+            val filtered = statusFilter?.let { status -> orders.filter { it.status == status } } ?: orders
+            return when (sortOption) {
+                OrdersSortOption.NEWEST -> filtered.sortedByDescending { it.createdAt.time }
+                OrdersSortOption.OLDEST -> filtered.sortedBy { it.createdAt.time }
+                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedByDescending { it.totalAmount }
+            }
+        }
+}
+
+enum class OrdersGroupingOption(val title: String) {
+    DATE("Fecha"),
+    STATUS("Estado"),
+}
+
+enum class OrdersSortOption(val title: String) {
+    NEWEST("Recientes"),
+    OLDEST("Antiguos"),
+    HIGHEST_TOTAL("Mayor total"),
 }
 
 ```
@@ -8773,6 +12537,33 @@ class OrdersViewModel @Inject constructor(
 
         fun dateGroupTitle(date: Date): String = dayFormatter.format(date)
     }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/di/AdventureRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class AdventureRepositoryModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindAdventureCatalogRepository(
+        repository: AdventureCatalogRepository,
+    ): AdventureCatalogRepositoriable
+
+    @Binds
+    @Singleton
+    abstract fun bindAdventureBookingsRepository(
+        repository: AdventureBookingsRepository,
+    ): AdventureBookingsRepositoriable
 }
 
 ```
@@ -9339,13 +13130,14 @@ fun AltosMainShell(
                 RestaurantScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.ADVENTURE.route) {
-                AdventureScreen()
+                AdventureScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.BOOKINGS.route) {
-                BookingsScreen()
+                BookingsScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.PROFILE.route) {
                 ProfileScreen(
+                    sessionState = sessionState,
                     currentThemeMode = currentThemeMode,
                     onThemeModeSelected = onThemeModeSelected,
                 )

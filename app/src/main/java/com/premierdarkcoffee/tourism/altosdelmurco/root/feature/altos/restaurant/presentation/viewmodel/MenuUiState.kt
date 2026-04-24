@@ -1,5 +1,6 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardTemplate
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuCategory
@@ -17,10 +18,12 @@ data class MenuUiState(
     val categories: List<MenuCategory>
         get() = sections.map { it.category }
 
+    val allItems: List<MenuItem>
+        get() = sections.flatMap { it.items }.distinctBy { it.id }
+
     val featuredItems: List<MenuItem>
-        get() = sections
-            .flatMap { it.items }
-            .filter { it.isFeatured }
+        get() = allItems.filter { it.isFeatured }
+            .sortedWith(compareBy<MenuItem> { it.sortOrder }.thenBy { it.name })
 
     val visibleSections: List<MenuSection>
         get() = if (selectedCategoryId.isNullOrBlank()) {
@@ -29,12 +32,10 @@ data class MenuUiState(
             sections.filter { it.category.id == selectedCategoryId }
         }
 
-    val allItems: List<MenuItem>
-        get() = sections.flatMap { it.items }
-
     val restaurantRewardTemplates: List<LoyaltyRewardTemplate>
-        get() = walletSnapshot.availableTemplates
-            .filter { it.scope.matchesRestaurant() && !it.isExpired }
+        get() = walletSnapshot.availableTemplates.filter { template ->
+            template.scope == LoyaltyRewardScope.RESTAURANT || template.scope == LoyaltyRewardScope.BOTH
+        }.filterNot { it.isExpired }
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
 
     fun itemById(id: String): MenuItem? = allItems.firstOrNull { it.id == id }

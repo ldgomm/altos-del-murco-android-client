@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure
 
 import kotlinx.coroutines.flow.Flow
 
-interface AdventureCatalogRepository {
+interface AdventureCatalogRepositoriable {
     suspend fun fetchCatalog(): AdventureCatalogSnapshot
     fun observeCatalog(): Flow<AdventureCatalogSnapshot>
 }

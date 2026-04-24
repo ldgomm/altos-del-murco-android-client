@@ -27,7 +27,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view.BookingsScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.view.HomeScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.view.ProfileScreen
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.MenuListScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.RestaurantScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.ThemeMode
 
@@ -112,13 +111,14 @@ fun AltosMainShell(
                 RestaurantScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.ADVENTURE.route) {
-                AdventureScreen()
+                AdventureScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.BOOKINGS.route) {
-                BookingsScreen()
+                BookingsScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.PROFILE.route) {
                 ProfileScreen(
+                    sessionState = sessionState,
                     currentThemeMode = currentThemeMode,
                     onThemeModeSelected = onThemeModeSelected,
                 )

@@ -20,10 +20,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.round
 
 @HiltViewModel
@@ -45,7 +47,7 @@ class MenuViewModel @Inject constructor(
     }
 
     fun setNationalId(nationalId: String?) {
-        val cleanNationalId = nationalId?.filter { it.isDigit() }.orEmpty()
+        val cleanNationalId = nationalId?.filter(Char::isDigit).orEmpty()
 
         if (cleanNationalId.isEmpty()) {
             rewardsJob?.cancel()
@@ -68,6 +70,16 @@ class MenuViewModel @Inject constructor(
             _uiState.update { it.copy(isLoadingRewards = true, errorMessage = null) }
             loyaltyRewardsRepository
                 .observeWalletSnapshot(cleanNationalId)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoadingRewards = false,
+                            walletSnapshot = RewardWalletSnapshot.empty(cleanNationalId),
+                            errorMessage = error.message ?: "No se pudieron cargar tus beneficios.",
+                        )
+                    }
+                }
                 .collectLatest { wallet ->
                     _uiState.update {
                         it.copy(
@@ -90,9 +102,6 @@ class MenuViewModel @Inject constructor(
 
     fun currentLevelTitle(): String = _uiState.value.walletSnapshot.currentLevel.title
 
-    val restaurantRewardTemplates: List<LoyaltyRewardTemplate>
-        get() = _uiState.value.restaurantRewardTemplates
-
     fun rewardPresentation(item: MenuItem): RewardPresentation? =
         rewardPresentation(item, quantity = 1)
 
@@ -103,7 +112,7 @@ class MenuViewModel @Inject constructor(
         val projected = projectedRewardResult(item, quantity)
 
         projected.appliedRewards
-            .firstOrNull { it.affectedMenuItemIds.contains(item.id) }
+            .firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.id) }
             ?.let { return RewardPresentation.fromAppliedReward(it) }
 
         return RewardPresentationFactory.menuPresentation(
@@ -129,6 +138,7 @@ class MenuViewModel @Inject constructor(
         val allItems = _uiState.value.allItems
         return when (template.rule.type) {
             LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> allItems.filter { it.canBeOrdered }
+
             LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
             LoyaltyRewardRuleType.FREE_MENU_ITEM,
             LoyaltyRewardRuleType.BUY_X_GET_Y_FREE,
@@ -141,44 +151,55 @@ class MenuViewModel @Inject constructor(
         }
     }
 
-    fun rewardForAppliedReward(reward: AppliedReward): RewardPresentation =
-        RewardPresentation.fromAppliedReward(reward)
-
     private fun startMenuObservationIfNeeded() {
         if (menuJob?.isActive == true) return
 
         menuJob = viewModelScope.launch {
-            observeMenuUseCase.execute().collectLatest { sections ->
-                val sorted = sortSections(sections)
-                _uiState.update { current ->
-                    current.copy(
-                        isLoading = false,
-                        sections = sorted,
-                        selectedCategoryId = current.selectedCategoryId
-                            ?.takeIf { selected -> sorted.any { it.category.id == selected } }
-                            ?: sorted.firstOrNull()?.category?.id,
-                        errorMessage = null,
-                    )
+            observeMenuUseCase.execute()
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudo cargar el menú.",
+                        )
+                    }
                 }
-            }
+                .collectLatest { sections ->
+                    val sorted = sortSections(sections)
+                    _uiState.update { current ->
+                        current.copy(
+                            isLoading = false,
+                            sections = sorted,
+                            selectedCategoryId = current.selectedCategoryId
+                                ?.takeIf { selected -> sorted.any { it.category.id == selected } },
+                            errorMessage = null,
+                        )
+                    }
+                }
         }
     }
 
     private fun projectedRewardResult(
         item: MenuItem,
         quantity: Int,
-    ): RewardComputationResult = LoyaltyRewardEngine.evaluateRestaurant(
-        templates = _uiState.value.walletSnapshot.availableTemplates,
-        wallet = _uiState.value.walletSnapshot,
-        menuLines = listOf(
-            RewardMenuLine(
-                menuItemId = item.id,
-                name = item.name,
-                unitPrice = item.finalPrice,
-                quantity = quantity.coerceAtLeast(1),
+    ): RewardComputationResult {
+        val wallet = _uiState.value.walletSnapshot
+        if (wallet.availableTemplates.isEmpty()) return RewardComputationResult.empty(wallet)
+
+        return LoyaltyRewardEngine.evaluateRestaurant(
+            templates = wallet.availableTemplates,
+            wallet = wallet,
+            menuLines = listOf(
+                RewardMenuLine(
+                    menuItemId = item.id,
+                    name = item.name,
+                    unitPrice = item.finalPrice,
+                    quantity = quantity.coerceAtLeast(1),
+                ),
             ),
-        ),
-    )
+        )
+    }
 
     private fun sortSections(sections: List<MenuSection>): List<MenuSection> {
         val preferredOrder = listOf(
@@ -192,7 +213,13 @@ class MenuViewModel @Inject constructor(
         )
 
         return sections
-            .map { section -> section.copy(items = section.items.sortedBy { it.sortOrder }) }
+            .map { section ->
+                section.copy(
+                    items = section.items.sortedWith(
+                        compareBy<MenuItem> { it.sortOrder }.thenBy { it.name },
+                    ),
+                )
+            }
             .sortedWith(
                 compareBy<MenuSection> {
                     val index = preferredOrder.indexOf(it.category.title)

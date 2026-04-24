@@ -51,7 +51,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CheckoutView(
+fun CheckoutScreen(
     state: CheckoutUiState,
     profile: ClientProfile,
     onBack: () -> Unit,
