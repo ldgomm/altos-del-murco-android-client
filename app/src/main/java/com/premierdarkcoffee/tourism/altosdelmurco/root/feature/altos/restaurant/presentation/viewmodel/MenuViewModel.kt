@@ -2,10 +2,13 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardEngine
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardMenuLine
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentationFactory
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuCategory
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ObserveMenuUseCase
@@ -31,9 +34,7 @@ class MenuViewModel @Inject constructor(
     private var observeJob: Job? = null
     private var lastRewardsNationalId: String? = null
 
-    fun onAppear(
-        nationalId: String?,
-    ) {
+    fun onAppear(nationalId: String?) {
         if (observeJob == null) {
             observeJob = viewModelScope.launch {
                 observeMenuUseCase.execute().collectLatest { sections ->
@@ -63,19 +64,55 @@ class MenuViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    fun rewardPresentation(
-        item: MenuItem,
-    ): RewardPresentation? = RewardPresentationFactory.menuPresentation(
-        item = item,
-        wallet = _uiState.value.walletSnapshot,
-    )
-
     fun currentLevelTitle(): String = _uiState.value.walletSnapshot.currentLevel.title
 
-    private fun refreshRewards(
-        nationalId: String?,
-    ) {
-        val cleanNationalId = nationalId?.trim().orEmpty()
+    fun rewardPresentation(
+        item: MenuItem,
+        quantity: Int = 1,
+    ): RewardPresentation? {
+        val projected = projectedRewardResult(item, quantity)
+
+        projected.appliedRewards
+            .firstOrNull { it.affectedMenuItemIds.contains(item.id) }
+            ?.let { return RewardPresentation.fromAppliedReward(it) }
+
+        return RewardPresentationFactory.menuPresentation(
+            item = item,
+            wallet = _uiState.value.walletSnapshot,
+        )
+    }
+
+    fun incrementalDiscount(
+        item: MenuItem,
+        quantity: Int = 1,
+    ): Double = projectedRewardResult(item, quantity).totalDiscount.roundMoney()
+
+    fun displayedPrice(
+        item: MenuItem,
+        quantity: Int = 1,
+    ): Double {
+        val subtotal = (item.finalPrice * quantity.coerceAtLeast(1)).roundMoney()
+        return (subtotal - incrementalDiscount(item, quantity)).coerceAtLeast(0.0).roundMoney()
+    }
+
+    private fun projectedRewardResult(
+        item: MenuItem,
+        quantity: Int,
+    ) = LoyaltyRewardEngine.evaluateRestaurant(
+        templates = _uiState.value.walletSnapshot.availableTemplates,
+        wallet = _uiState.value.walletSnapshot,
+        menuLines = listOf(
+            RewardMenuLine(
+                menuItemId = item.id,
+                name = item.name,
+                unitPrice = item.finalPrice,
+                quantity = quantity.coerceAtLeast(1),
+            ),
+        ),
+    )
+
+    private fun refreshRewards(nationalId: String?) {
+        val cleanNationalId = nationalId?.filter { it.isDigit() }.orEmpty()
         if (cleanNationalId.isEmpty()) {
             _uiState.update {
                 it.copy(walletSnapshot = RewardWalletSnapshot.empty(""))
@@ -95,38 +132,37 @@ class MenuViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching {
                 loyaltyRewardsRepository.loadWalletSnapshot(cleanNationalId)
-            }.onSuccess { wallet ->
-                _uiState.update { it.copy(walletSnapshot = wallet) }
+            }.onSuccess { snapshot ->
+                _uiState.update { it.copy(walletSnapshot = snapshot, errorMessage = null) }
             }.onFailure { error ->
                 _uiState.update {
                     it.copy(
                         walletSnapshot = RewardWalletSnapshot.empty(cleanNationalId),
-                        errorMessage = error.message ?: "Could not load loyalty wallet.",
+                        errorMessage = error.message ?: "No se pudieron cargar tus beneficios.",
                     )
                 }
             }
         }
     }
 
-    private fun sortSections(
-        sections: List<MenuSection>,
-    ): List<MenuSection> = sections
-        .map { section ->
-            section.copy(items = section.items.sortedBy { it.sortOrder })
-        }
-        .sortedWith(
-            compareBy<MenuSection> { categoryRank(it.category.title) }
-                .thenBy { it.category.title }
+    private fun sortSections(sections: List<MenuSection>): List<MenuSection> {
+        val preferredOrder = listOf(
+            "Entradas",
+            "Sopas",
+            "Platos Fuertes",
+            "Extras",
+            "Postres",
+            "Bebidas",
+            "Bebidas Alcohólicas",
         )
 
-    private fun categoryRank(title: String): Int = when (title.trim()) {
-        "Entradas" -> 0
-        "Sopas" -> 1
-        "Platos Fuertes" -> 2
-        "Extras" -> 3
-        "Postres" -> 4
-        "Bebidas" -> 5
-        "Bebidas Alcohólicas" -> 6
-        else -> Int.MAX_VALUE
+        return sections.sortedWith(
+            compareBy<MenuSection> {
+                val index = preferredOrder.indexOf(it.category.title)
+                if (index == -1) Int.MAX_VALUE else index
+            }.thenBy { it.category.title },
+        )
     }
+
+    private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
 }

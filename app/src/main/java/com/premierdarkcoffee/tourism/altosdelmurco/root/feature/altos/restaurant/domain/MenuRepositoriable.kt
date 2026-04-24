@@ -2,6 +2,6 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import kotlinx.coroutines.flow.Flow
 
-interface MenuRepository {
+interface MenuRepositoriable {
     fun observeMenu(): Flow<List<MenuSection>>
 }

@@ -1,12 +1,14 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local
 
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartDraftEntity
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartDraftWithItems
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartItemEntity
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartDraftRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderDraft
 import java.util.Date
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
     id = id,
@@ -66,10 +68,31 @@ internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
                 isFeatured = item.isFeatured,
                 sortOrder = item.sortOrder,
             ),
-            quantity = item.quantity,
+            quantity = item.quantity.coerceAtLeast(1),
             notes = item.itemNotes,
         )
     },
     revision = draft.revision,
     lastConfirmedRevision = draft.lastConfirmedRevision,
 )
+
+@Singleton
+class CartDraftRepository @Inject constructor(
+    private val cartDao: CartDao,
+) : CartDraftRepositoriable {
+
+    override fun observeDraft(): Flow<OrderDraft> = cartDao.observeCart().map { stored ->
+        stored?.toDomain() ?: OrderDraft()
+    }
+
+    override suspend fun saveDraft(draft: OrderDraft) {
+        cartDao.replaceDraft(
+            draft = draft.copy(updatedAt = Date()).toEntity(),
+            items = draft.items.map { it.toEntity(draft.id) },
+        )
+    }
+
+    override suspend fun clear() {
+        cartDao.clearAll()
+    }
+}

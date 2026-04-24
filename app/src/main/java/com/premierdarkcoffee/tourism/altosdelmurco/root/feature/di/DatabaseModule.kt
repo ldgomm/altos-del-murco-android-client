@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
 
 import android.content.Context
 import androidx.room.Room
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartDao
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local.CartDao
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.AltosDatabase
 import dagger.Module
 import dagger.Provides

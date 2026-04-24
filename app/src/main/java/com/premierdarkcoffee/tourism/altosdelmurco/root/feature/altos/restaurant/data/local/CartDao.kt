@@ -1,4 +1,4 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local
 
 import androidx.room.Dao
 import androidx.room.Query
@@ -26,7 +26,10 @@ interface CartDao {
     suspend fun deleteDraft(draftId: String = CartDraftEntity.DEFAULT_ID)
 
     @Transaction
-    suspend fun replaceDraft(draft: CartDraftEntity, items: List<CartItemEntity>) {
+    suspend fun replaceDraft(
+        draft: CartDraftEntity,
+        items: List<CartItemEntity>,
+    ) {
         deleteItemsForDraft(draft.id)
         upsertDraft(draft)
         if (items.isNotEmpty()) upsertItems(items)

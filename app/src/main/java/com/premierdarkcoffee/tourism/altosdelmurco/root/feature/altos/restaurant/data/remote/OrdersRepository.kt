@@ -7,20 +7,20 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardReferenceType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepository
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrdersRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrdersRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Singleton
-class FirebaseOrdersRepository @Inject constructor(
+class OrdersRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
     private val loyaltyRewardsRepository: LoyaltyRewardsRepository,
-) : OrdersRepository {
+) : OrdersRepositoriable {
 
     override suspend fun submit(order: Order) {
         val quantitiesByMenuItemId = order.items

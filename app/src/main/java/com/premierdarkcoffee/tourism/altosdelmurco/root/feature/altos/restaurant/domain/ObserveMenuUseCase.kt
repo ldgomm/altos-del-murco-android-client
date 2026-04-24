@@ -3,7 +3,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 import kotlinx.coroutines.flow.Flow
 
 class ObserveMenuUseCase(
-    private val repository: MenuRepository,
+    private val repository: MenuRepositoriable,
 ) {
     fun execute(): Flow<List<MenuSection>> = repository.observeMenu()
 }

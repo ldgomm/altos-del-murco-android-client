@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import kotlinx.coroutines.flow.Flow
 
-interface OrdersRepository {
+interface OrdersRepositoriable {
     suspend fun submit(order: Order)
     fun observeOrders(nationalId: String): Flow<List<Order>>
 }

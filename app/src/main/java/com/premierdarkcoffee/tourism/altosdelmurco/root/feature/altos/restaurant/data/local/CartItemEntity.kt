@@ -1,9 +1,10 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local
 
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+
 
 @Entity(
     tableName = "cart_items",

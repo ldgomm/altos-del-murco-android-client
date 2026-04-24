@@ -3,16 +3,16 @@ package com.premierdarkcoffee.tourism.altosdelmurco.util.database
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartDao
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartDraftEntity
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.CartItemEntity
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local.CartDao
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local.CartDraftEntity
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.local.CartItemEntity
 
 @Database(
     entities = [
         CartDraftEntity::class,
         CartItemEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(RoomConverters::class)

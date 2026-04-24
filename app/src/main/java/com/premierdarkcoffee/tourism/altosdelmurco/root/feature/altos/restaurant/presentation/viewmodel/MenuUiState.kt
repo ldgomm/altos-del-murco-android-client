@@ -26,4 +26,8 @@ data class MenuUiState(
         } else {
             sections.filter { it.category.id == selectedCategoryId }
         }
+
+    fun itemById(id: String): MenuItem? = sections
+        .flatMap { it.items }
+        .firstOrNull { it.id == id }
 }

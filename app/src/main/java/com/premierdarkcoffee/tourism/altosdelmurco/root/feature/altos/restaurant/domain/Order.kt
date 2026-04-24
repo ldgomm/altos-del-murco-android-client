@@ -20,23 +20,21 @@ data class Order(
     val lastConfirmedRevision: Int?,
 ) {
     val totalItems: Int = items.sumOf { it.quantity }
-
     val preparedItemsCount: Int = items.sumOf { it.safePreparedQuantity }
-
     val allItemsCompleted: Boolean = items.isNotEmpty() && items.all { it.isCompleted }
-
     val hasStartedPreparing: Boolean = items.any { it.isStarted }
-
     val requiresReconfirmation: Boolean = lastConfirmedRevision != revision
-
     val wasEditedAfterConfirmation: Boolean = lastConfirmedRevision?.let { revision > it } ?: false
 
     fun withLoyalty(
         appliedRewards: List<AppliedReward>,
         discount: Double,
-    ): Order = copy(
-        loyaltyDiscountAmount = discount.coerceAtLeast(0.0),
-        appliedRewards = appliedRewards,
-        totalAmount = (subtotal - discount.coerceAtLeast(0.0)).coerceAtLeast(0.0),
-    )
+    ): Order {
+        val safeDiscount = discount.coerceIn(0.0, subtotal)
+        return copy(
+            loyaltyDiscountAmount = safeDiscount,
+            appliedRewards = appliedRewards,
+            totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0),
+        )
+    }
 }

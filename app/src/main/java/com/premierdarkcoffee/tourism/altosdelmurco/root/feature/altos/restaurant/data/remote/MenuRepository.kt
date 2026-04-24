@@ -4,19 +4,21 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuCategory
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.collections.component1
+import kotlin.collections.component2
 
 @Singleton
-class FirebaseMenuRepository @Inject constructor(
+class MenuRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
-) : MenuRepository {
+) : MenuRepositoriable {
 
     override fun observeMenu(): Flow<List<MenuSection>> = callbackFlow {
         val registration: ListenerRegistration = firestore
@@ -40,6 +42,16 @@ class FirebaseMenuRepository @Inject constructor(
     }
 
     private fun groupIntoSections(items: List<MenuItem>): List<MenuSection> {
+        val preferredOrder = listOf(
+            "Entradas",
+            "Sopas",
+            "Platos Fuertes",
+            "Extras",
+            "Postres",
+            "Bebidas",
+            "Bebidas Alcohólicas",
+        )
+
         return items
             .groupBy { it.categoryId }
             .mapNotNull { (categoryId, categoryItems) ->
@@ -50,9 +62,14 @@ class FirebaseMenuRepository @Inject constructor(
                         id = categoryId,
                         title = first.categoryTitle,
                     ),
-                    items = categoryItems.sortedBy { it.sortOrder },
+                    items = categoryItems.sortedWith(compareBy({ it.sortOrder }, { it.name })),
                 )
             }
-            .sortedBy { it.category.title }
+            .sortedWith(
+                compareBy<MenuSection> {
+                    val index = preferredOrder.indexOf(it.category.title)
+                    if (index == -1) Int.MAX_VALUE else index
+                }.thenBy { it.category.title },
+            )
     }
 }

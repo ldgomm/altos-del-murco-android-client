@@ -6,6 +6,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import kotlin.collections.map
 
+
 data class OrderDto(
     val id: String = "",
     val nationalId: String? = null,

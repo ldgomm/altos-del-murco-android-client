@@ -2,7 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import kotlinx.coroutines.flow.Flow
 
-interface CartDraftRepository {
+interface CartDraftRepositoriable {
     fun observeDraft(): Flow<OrderDraft>
     suspend fun saveDraft(draft: OrderDraft)
     suspend fun clear()
