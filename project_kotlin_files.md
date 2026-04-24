@@ -1767,6 +1767,188 @@ class CancelAdventureBookingUseCase @Inject constructor(
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/ExperienceComboPricingPolicy.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
+
+
+/**
+ * Premium pricing policy for the redesigned Experience Builder.
+ *
+ * Goal:
+ * - A package discount belongs only to the activities that still match the original featured package.
+ * - Removing an activity can remove the combo discount, but must not remove individual activity discounts.
+ * - Adding an extra activity must keep the valid package discount and price the extra activity separately.
+ * - One activity alone is never a combo.
+ */
+data class ExperienceComboPricingBreakdown(
+    val matchedPackageId: String?,
+    val matchedPackageTitle: String?,
+    val packageMatchedItems: List<AdventureReservationItemDraft>,
+    val extraItems: List<AdventureReservationItemDraft>,
+    val activityBaseSubtotal: Double,
+    val activityDiscountAmount: Double,
+    val activitySubtotalAfterIndividualDiscounts: Double,
+    val foodSubtotal: Double,
+    val comboDiscountAmount: Double,
+    val loyaltyDiscountAmount: Double,
+    val finalTotal: Double,
+) {
+    val hasValidCombo: Boolean get() = matchedPackageId != null && comboDiscountAmount > 0 && packageMatchedItems.size > 1
+    val subtotalBeforeComboAndLoyalty: Double get() = activitySubtotalAfterIndividualDiscounts + foodSubtotal
+    val totalSavings: Double get() = activityDiscountAmount + comboDiscountAmount + loyaltyDiscountAmount
+}
+
+object ExperienceComboPricingPolicy {
+
+    fun calculate(
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        catalog: AdventureCatalogSnapshot,
+        featuredPackages: List<AdventureFeaturedPackage> = catalog.activePackagesSorted,
+        preferredPackageId: String? = null,
+        loyaltyDiscountAmount: Double = 0.0,
+    ): ExperienceComboPricingBreakdown {
+        val normalizedItems = items.filter { catalog.activity(it.activity)?.isActive == true }
+        val foodSubtotal = AdventurePricingEngine.foodSubtotal(foodReservation)
+        val activityBaseSubtotal = normalizedItems.sumOf { item ->
+            catalog.activity(item.activity)?.let { config ->
+                AdventurePricingEngine.lineBaseSubtotal(item, config)
+            } ?: 0.0
+        }.adventureRoundMoney()
+        val activitySubtotalAfterIndividualDiscounts = AdventurePricingEngine
+            .estimatedSubtotal(normalizedItems, catalog)
+            .adventureRoundMoney()
+        val activityDiscountAmount =
+            (activityBaseSubtotal - activitySubtotalAfterIndividualDiscounts)
+                .coerceAtLeast(0.0)
+                .adventureRoundMoney()
+
+        val match = bestPackageMatch(
+            selectedItems = normalizedItems,
+            packages = featuredPackages,
+            preferredPackageId = preferredPackageId,
+        )
+
+        val comboDiscount = when {
+            normalizedItems.size <= 1 -> 0.0
+            match == null -> 0.0
+            else -> match.packageModel.packageDiscountAmount.coerceAtLeast(0.0)
+        }.adventureRoundMoney()
+
+        val subtotalBeforeLoyalty =
+            (activitySubtotalAfterIndividualDiscounts + foodSubtotal - comboDiscount)
+                .coerceAtLeast(0.0)
+                .adventureRoundMoney()
+        val safeLoyalty =
+            loyaltyDiscountAmount.coerceIn(0.0, subtotalBeforeLoyalty).adventureRoundMoney()
+        val finalTotal =
+            (subtotalBeforeLoyalty - safeLoyalty).coerceAtLeast(0.0).adventureRoundMoney()
+
+        return ExperienceComboPricingBreakdown(
+            matchedPackageId = if (comboDiscount > 0) match?.packageModel?.id else null,
+            matchedPackageTitle = if (comboDiscount > 0) match?.packageModel?.title else null,
+            packageMatchedItems = match?.matchedItems.orEmpty(),
+            extraItems = match?.extraItems ?: normalizedItems,
+            activityBaseSubtotal = activityBaseSubtotal,
+            activityDiscountAmount = activityDiscountAmount,
+            activitySubtotalAfterIndividualDiscounts = activitySubtotalAfterIndividualDiscounts,
+            foodSubtotal = foodSubtotal,
+            comboDiscountAmount = comboDiscount,
+            loyaltyDiscountAmount = safeLoyalty,
+            finalTotal = finalTotal,
+        )
+    }
+
+    private data class PackageMatch(
+        val packageModel: AdventureFeaturedPackage,
+        val matchedItems: List<AdventureReservationItemDraft>,
+        val extraItems: List<AdventureReservationItemDraft>,
+        val score: Int,
+    )
+
+    private fun bestPackageMatch(
+        selectedItems: List<AdventureReservationItemDraft>,
+        packages: List<AdventureFeaturedPackage>,
+        preferredPackageId: String?,
+    ): PackageMatch? {
+        if (selectedItems.size <= 1) return null
+
+        val matches = packages
+            .filter { it.isActive && it.items.size > 1 }
+            .mapNotNull { packageModel -> matchPackage(selectedItems, packageModel) }
+            .filter { it.matchedItems.size == it.packageModel.items.size }
+
+        if (matches.isEmpty()) return null
+
+        val preferred =
+            preferredPackageId?.let { id -> matches.firstOrNull { it.packageModel.id == id } }
+        if (preferred != null) return preferred
+
+        return matches.maxWithOrNull(
+            compareBy<PackageMatch> { it.score }
+                .thenBy { it.extraItems.size * -1 }
+                .thenBy { it.packageModel.packageDiscountAmount },
+        )
+    }
+
+    private fun matchPackage(
+        selectedItems: List<AdventureReservationItemDraft>,
+        packageModel: AdventureFeaturedPackage,
+    ): PackageMatch? {
+        val remaining = selectedItems.toMutableList()
+        val matched = mutableListOf<AdventureReservationItemDraft>()
+        var score = 0
+
+        packageModel.items.forEach { packageItem ->
+            val index = remaining.indexOfFirst { selected ->
+                sameActivitySignature(selected, packageItem)
+            }
+            if (index < 0) return null
+            val selected = remaining.removeAt(index)
+            matched += selected
+            score += 10
+            score += max(0, 5 - durationDistance(selected, packageItem))
+        }
+
+        return PackageMatch(
+            packageModel = packageModel,
+            matchedItems = matched,
+            extraItems = remaining,
+            score = score,
+        )
+    }
+
+    private fun sameActivitySignature(
+        selected: AdventureReservationItemDraft,
+        packageItem: AdventureReservationItemDraft,
+    ): Boolean {
+        if (selected.activity != packageItem.activity) return false
+        return when (selected.activity) {
+            AdventureActivityType.OFF_ROAD ->
+                selected.durationMinutes == packageItem.durationMinutes &&
+                        selected.vehicleCount >= packageItem.vehicleCount &&
+                        selected.offRoadRiderCount >= packageItem.offRoadRiderCount
+
+            AdventureActivityType.CAMPING ->
+                selected.nights >= packageItem.nights && selected.peopleCount >= packageItem.peopleCount
+
+            else ->
+                selected.durationMinutes == packageItem.durationMinutes && selected.peopleCount >= packageItem.peopleCount
+        }
+    }
+
+    private fun durationDistance(
+        selected: AdventureReservationItemDraft,
+        packageItem: AdventureReservationItemDraft,
+    ): Int = kotlin.math.abs(selected.durationMinutes - packageItem.durationMinutes) / 30
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/view/AdventureFoodPickerSheet.kt
 
 ```kotlin
@@ -1794,115 +1976,289 @@ fun AdventureFoodPickerSheet(
     onDismiss: () -> Unit,
     onAdd: (MenuItem, Int, String?) -> Unit,
 ) {
+    val theme = AppSectionTheme.Adventure
+    val palette = LocalBrandDarkTheme.current
+
     var selectedCategoryId by remember { mutableStateOf<String?>(null) }
     var searchText by remember { mutableStateOf("") }
 
-    val orderedSections = menuSections.sortedWith(
-        compareBy<MenuSection> { section ->
-            adventureFoodCategoryDisplayOrder.indexOf(section.category.title).takeIf { it >= 0 }
-                ?: Int.MAX_VALUE
-        }.thenBy { it.category.title },
-    )
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val visibleSections = orderedSections
-        .filter { section -> selectedCategoryId == null || section.category.id == selectedCategoryId }
-        .mapNotNull { section ->
-            val query = searchText.trim().lowercase()
-            val items = if (query.isEmpty()) {
-                section.items
-            } else {
-                section.items.filter { item ->
-                    item.name.lowercase().contains(query) ||
-                            item.description.lowercase().contains(query) ||
-                            item.ingredients.any { it.lowercase().contains(query) }
-                }
+    val orderedSections = remember(menuSections) {
+        menuSections.sortedWith(
+            compareBy<MenuSection> { section ->
+                adventureFoodCategoryDisplayOrder
+                    .indexOf(section.category.title)
+                    .takeIf { it >= 0 }
+                    ?: Int.MAX_VALUE
+            }.thenBy { it.category.title },
+        )
+    }
+
+    val visibleSections = remember(
+        orderedSections,
+        selectedCategoryId,
+        searchText,
+    ) {
+        val query = searchText.trim().lowercase()
+
+        orderedSections
+            .filter { section ->
+                selectedCategoryId == null || section.category.id == selectedCategoryId
             }
-            if (items.isEmpty()) null else section.copy(items = items)
-        }
-
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxHeight(0.92f)
-                .padding(horizontal = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AdventureSectionTitle(
-                    title = "Menú del restaurante",
-                    subtitle = "Agrega platos a tu reserva de aventura.",
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(onClick = onDismiss) {
-                    Icon(Icons.Rounded.Close, contentDescription = "Cerrar")
-                }
-            }
-
-            OutlinedTextField(
-                value = searchText,
-                onValueChange = { searchText = it },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                label = { Text("Buscar plato, bebida o ingrediente") },
-            )
-
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AssistChip(
-                    onClick = { selectedCategoryId = null },
-                    label = { Text("Todo") },
-                    leadingIcon = if (selectedCategoryId == null) {
-                        { Icon(Icons.Rounded.LocalDining, contentDescription = null) }
-                    } else null,
-                )
-                orderedSections.map { it.category }.distinctBy { it.id }.forEach { category ->
-                    AssistChip(
-                        onClick = { selectedCategoryId = category.id },
-                        label = { Text(category.title) },
-                    )
-                }
-            }
-
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                if (visibleSections.isEmpty()) {
-                    AdventureEmptyState(
-                        title = "No se encontraron platos",
-                        body = "Prueba otra búsqueda o cambia de categoría.",
-                        icon = Icons.Rounded.Search,
-                    )
+            .mapNotNull { section ->
+                val items = if (query.isEmpty()) {
+                    section.items
                 } else {
-                    visibleSections.forEach { section ->
-                        Text(
-                            text = section.category.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        section.items.forEach { item ->
-                            AdventureFoodPickerRow(
-                                item = item,
-                                selectedDate = selectedDate,
-                                rewardPresentation = rewardPresentationProvider(item, 1),
-                                displayedPrice = displayedPriceProvider(item, 1),
-                                incrementalDiscount = incrementalDiscountProvider(item, 1),
-                                onAdd = { quantity, notes ->
-                                    onAdd(item, quantity, notes)
-                                    onDismiss()
-                                },
-                            )
-                        }
+                    section.items.filter { item ->
+                        item.name.lowercase().contains(query) ||
+                                item.description.lowercase().contains(query) ||
+                                item.ingredients.any { ingredient ->
+                                    ingredient.lowercase().contains(query)
+                                }
                     }
                 }
-                Spacer(Modifier.height(18.dp))
+
+                if (items.isEmpty()) null else section.copy(items = items)
+            }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        CompositionLocalProvider(LocalContentColor provides Color.Transparent) {
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight(0.92f)
+                    .padding(horizontal = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    BrandSectionHeader(
+                        theme = theme,
+                        title = "Menú del restaurante",
+                        subtitle = "Agrega platos a tu reserva de aventura.",
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Cerrar",
+                        )
+                    }
+                }
+
+                AdventureFoodSearchField(
+                    value = searchText,
+                    onValueChange = { searchText = it },
+                )
+
+                AdventureFoodCategoryChips(
+                    orderedSections = orderedSections,
+                    selectedCategoryId = selectedCategoryId,
+                    onSelectedCategoryChange = { selectedCategoryId = it },
+                )
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (visibleSections.isEmpty()) {
+                        AdventureFoodEmptyState()
+                    } else {
+                        visibleSections.forEach { section ->
+                            Text(
+                                text = section.category.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.DarkGray,
+                            )
+
+                            section.items.forEach { item ->
+                                AdventureFoodPickerRow(
+                                    item = item,
+                                    selectedDate = selectedDate,
+                                    rewardPresentation = rewardPresentationProvider(item, 1),
+                                    displayedPrice = displayedPriceProvider(item, 1),
+                                    incrementalDiscount = incrementalDiscountProvider(item, 1),
+                                    onAdd = { quantity, notes ->
+                                        onAdd(item, quantity, notes)
+                                        onDismiss()
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(18.dp))
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun AdventureFoodSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(AppTheme.Radius.large),
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = null,
+            )
+        },
+        label = { Text("Buscar plato, bebida o ingrediente") },
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = palette.textPrimary,
+            unfocusedTextColor = palette.textPrimary,
+            disabledTextColor = palette.textTertiary,
+
+            focusedContainerColor = palette.elevatedCard,
+            unfocusedContainerColor = palette.elevatedCard,
+            disabledContainerColor = palette.card,
+
+            cursorColor = palette.primary,
+
+            focusedBorderColor = palette.primary,
+            unfocusedBorderColor = palette.stroke,
+            disabledBorderColor = palette.stroke.copy(alpha = 0.55f),
+
+            focusedLabelColor = palette.primary,
+            unfocusedLabelColor = palette.textSecondary,
+
+            focusedLeadingIconColor = palette.primary,
+            unfocusedLeadingIconColor = palette.textSecondary,
+        ),
+    )
+}
+
+@Composable
+private fun AdventureFoodCategoryChips(
+    orderedSections: List<MenuSection>,
+    selectedCategoryId: String?,
+    onSelectedCategoryChange: (String?) -> Unit,
+) {
+    val theme = AppSectionTheme.Adventure
+
+    Row(
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        AdventureSelectableBadge(
+            title = "Todo",
+            selected = selectedCategoryId == null,
+            onClick = { onSelectedCategoryChange(null) },
+            leadingIcon = Icons.Rounded.LocalDining,
+        )
+
+        orderedSections
+            .map { it.category }
+            .distinctBy { it.id }
+            .forEach { category ->
+                AdventureSelectableBadge(
+                    title = category.title,
+                    selected = selectedCategoryId == category.id,
+                    onClick = { onSelectedCategoryChange(category.id) },
+                )
+            }
+    }
+}
+
+@Composable
+private fun AdventureSelectableBadge(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+) {
+    val theme = AppSectionTheme.Adventure
+    val palette = LocalBrandPalette.current
+
+    Row(
+        modifier = Modifier
+            .clip(CircleShape)
+            .clickable(onClick = onClick)
+            .background(
+                brush = if (selected) {
+                    palette.heroGradient
+                } else {
+                    palette.chipGradient
+                },
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) Color.Transparent else palette.stroke,
+                shape = CircleShape,
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = if (selected) palette.onPrimary else palette.primary,
+            )
+        }
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = if (selected) palette.onPrimary else palette.primary,
+        )
+    }
+}
+
+@Composable
+private fun AdventureFoodEmptyState() {
+    val theme = AppSectionTheme.Adventure
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = Icons.Rounded.Search,
+            size = 54.dp,
+        )
+
+        Text(
+            text = "No se encontraron platos",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = palette.textPrimary,
+        )
+
+        Text(
+            text = "Prueba otra búsqueda o cambia de categoría.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+        )
     }
 }
 
@@ -1915,105 +2271,251 @@ private fun AdventureFoodPickerRow(
     incrementalDiscount: Double,
     onAdd: (Int, String?) -> Unit,
 ) {
+    val theme = AppSectionTheme.Adventure
+    val palette = LocalBrandPalette.current
+
     var expanded by remember { mutableStateOf(false) }
     var quantity by remember { mutableIntStateOf(1) }
     var notes by remember { mutableStateOf("") }
-    val blockedToday = AdventureDateHelper.isDateInToday(selectedDate) && !item.canBeOrdered
 
-    AdventureCard {
+    val blockedToday = AdventureDateHelper.isDateInToday(selectedDate) && !item.canBeOrdered
+    val originalPrice = item.finalPrice
+    val effectivePrice = if (incrementalDiscount > 0) displayedPrice else item.finalPrice
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Top,
         ) {
-            AdventureIconBubble(icon = Icons.Rounded.LocalDining)
+            BrandIconBubble(
+                theme = theme,
+                icon = Icons.Rounded.LocalDining,
+            )
+
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
                     text = item.name,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
                 )
-                Text(
-                    text = item.description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+
+                if (item.description.isNotBlank()) {
+                    Text(
+                        text = item.description,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary,
+                    )
+                }
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (incrementalDiscount > 0) {
                         Text(
-                            text = item.finalPrice.priceText(),
+                            text = originalPrice.priceText(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.textTertiary,
                             textDecoration = TextDecoration.LineThrough,
                         )
                     }
+
                     Text(
-                        text = (if (incrementalDiscount > 0) displayedPrice else item.finalPrice).priceText(),
+                        text = effectivePrice.priceText(),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = palette.primary,
                     )
                 }
+
                 rewardPresentation?.let { reward ->
-                    Text(
-                        text = "${reward.badge}: ${reward.message}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    AdventureRewardBadge(reward = reward)
                 }
+
                 if (blockedToday) {
                     Text(
                         text = "Por hoy está agotado y no se puede pedir.",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.destructive,
                     )
                 }
             }
         }
 
         if (expanded) {
-            Divider()
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                IconButton(onClick = { quantity = (quantity - 1).coerceAtLeast(1) }) {
-                    Icon(Icons.Rounded.Remove, contentDescription = "Menos")
-                }
-                Text(
-                    text = quantity.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                IconButton(onClick = { quantity += 1 }) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Más")
-                }
-            }
-            OutlinedTextField(
+            HorizontalDivider(color = palette.stroke)
+
+            QuantitySelector(
+                quantity = quantity,
+                onDecrease = { quantity = (quantity - 1).coerceAtLeast(1) },
+                onIncrease = { quantity += 1 },
+            )
+
+            AdventureFoodNotesField(
                 value = notes,
                 onValueChange = { notes = it },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
-                label = { Text("Notas para cocina") },
             )
-            Button(
-                onClick = { onAdd(quantity, notes.trim().takeIf { it.isNotEmpty() }) },
+
+            BrandPrimaryButton(
+                theme = theme,
+                onClick = {
+                    onAdd(
+                        quantity,
+                        notes.trim().takeIf { it.isNotEmpty() },
+                    )
+                },
                 enabled = !blockedToday,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Agregar a la reserva")
+                Text(
+                    text = "Agregar a la reserva",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         } else {
-            TextButton(onClick = { expanded = true }, enabled = !blockedToday) {
-                Text("Elegir cantidad y notas")
+            TextButton(
+                onClick = { expanded = true },
+                enabled = !blockedToday,
+            ) {
+                Text(
+                    text = "Elegir cantidad y notas",
+                    color = if (blockedToday) palette.textTertiary else palette.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }
+}
+
+@Composable
+private fun AdventureRewardBadge(
+    reward: RewardPresentation,
+) {
+    val palette = LocalBrandPalette.current
+
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(palette.chipGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = CircleShape,
+            )
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    ) {
+        Text(
+            text = "${reward.badge}: ${reward.message}",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = palette.primary,
+        )
+    }
+}
+
+@Composable
+private fun QuantitySelector(
+    quantity: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        IconButton(
+            onClick = onDecrease,
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(palette.chipGradient)
+                .border(
+                    width = 1.dp,
+                    color = palette.stroke,
+                    shape = CircleShape,
+                ),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Remove,
+                contentDescription = "Menos",
+                tint = palette.primary,
+            )
+        }
+
+        Text(
+            text = quantity.toString(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = palette.textPrimary,
+        )
+
+        IconButton(
+            onClick = onIncrease,
+            modifier = Modifier
+                .size(42.dp)
+                .clip(CircleShape)
+                .background(palette.chipGradient)
+                .border(
+                    width = 1.dp,
+                    color = palette.stroke,
+                    shape = CircleShape,
+                ),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Más",
+                tint = palette.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdventureFoodNotesField(
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier.fillMaxWidth(),
+        minLines = 2,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(AppTheme.Radius.large),
+        label = { Text("Notas para cocina") },
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = palette.textPrimary,
+            unfocusedTextColor = palette.textPrimary,
+            disabledTextColor = palette.textTertiary,
+
+            focusedContainerColor = palette.elevatedCard,
+            unfocusedContainerColor = palette.elevatedCard,
+            disabledContainerColor = palette.card,
+
+            cursorColor = palette.primary,
+
+            focusedBorderColor = palette.primary,
+            unfocusedBorderColor = palette.stroke,
+            disabledBorderColor = palette.stroke.copy(alpha = 0.55f),
+
+            focusedLabelColor = palette.primary,
+            unfocusedLabelColor = palette.textSecondary,
+        ),
+    )
 }
 
 ```
@@ -2031,6 +2533,8 @@ private sealed interface AdventureMode {
     data object Builder : AdventureMode
 }
 
+private val AdventureTheme = AppSectionTheme.Adventure
+
 @Composable
 fun AdventureScreen(
     sessionState: SessionState.Authenticated,
@@ -2039,9 +2543,37 @@ fun AdventureScreen(
     builderViewModel: AdventureComboBuilderViewModel = hiltViewModel(),
     menuViewModel: MenuViewModel = hiltViewModel(),
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val adventurePalette = AppTheme.palette(AdventureTheme, darkTheme)
+
+    CompositionLocalProvider(
+        LocalAppSectionTheme provides AdventureTheme,
+        LocalBrandPalette provides adventurePalette,
+    ) {
+        AdventureScreenContent(
+            sessionState = sessionState,
+            modifier = modifier,
+            catalogViewModel = catalogViewModel,
+            builderViewModel = builderViewModel,
+            menuViewModel = menuViewModel,
+        )
+    }
+}
+
+@Composable
+private fun AdventureScreenContent(
+    sessionState: SessionState.Authenticated,
+    modifier: Modifier = Modifier,
+    catalogViewModel: AdventureCatalogViewModel,
+    builderViewModel: AdventureComboBuilderViewModel,
+    menuViewModel: MenuViewModel,
+) {
     val catalogState by catalogViewModel.uiState.collectAsStateWithLifecycle()
     val builderState by builderViewModel.uiState.collectAsStateWithLifecycle()
     val menuState by menuViewModel.uiState.collectAsStateWithLifecycle()
+
+    val palette = LocalBrandPalette.current
+
     var mode by remember { mutableStateOf<AdventureMode>(AdventureMode.Catalog) }
     var showFoodPicker by remember { mutableStateOf(false) }
 
@@ -2072,8 +2604,10 @@ fun AdventureScreen(
         )
     }
 
-    val message =
-        builderState.errorMessage ?: builderState.successMessage ?: catalogState.errorMessage
+    val message = builderState.errorMessage
+        ?: builderState.successMessage
+        ?: catalogState.errorMessage
+
     if (message != null) {
         AlertDialog(
             onDismissRequest = {
@@ -2081,45 +2615,65 @@ fun AdventureScreen(
                 catalogViewModel.clearError()
             },
             confirmButton = {
-                TextButton(onClick = {
-                    builderViewModel.dismissMessage()
-                    catalogViewModel.clearError()
-                }) { Text("OK") }
+                TextButton(
+                    onClick = {
+                        builderViewModel.dismissMessage()
+                        catalogViewModel.clearError()
+                    },
+                ) {
+                    Text("OK", color = palette.primary)
+                }
             },
-            title = { Text("Mensaje") },
-            text = { Text(message) },
+            title = {
+                Text(
+                    text = "Mensaje",
+                    color = palette.textPrimary,
+                )
+            },
+            text = {
+                Text(
+                    text = message,
+                    color = palette.textSecondary,
+                )
+            },
+            containerColor = palette.elevatedCard,
+            titleContentColor = palette.textPrimary,
+            textContentColor = palette.textSecondary,
         )
     }
 
-    when (mode) {
-        AdventureMode.Catalog -> AdventureCatalogContent(
-            modifier = modifier,
-            isLoading = catalogState.isLoading,
-            catalog = catalogState.catalog,
-            menuSections = menuState.sections,
-            builderViewModel = builderViewModel,
-            onCustomCombo = {
-                builderViewModel.prepareCustomDraftIfNeeded()
-                mode = AdventureMode.Builder
-            },
-            onOpenSingle = { activity ->
-                builderViewModel.replaceItems(listOf(activity.defaultDraft), 0.0)
-                mode = AdventureMode.Builder
-            },
-            onOpenPackage = { packageModel ->
-                builderViewModel.replacePackage(packageModel, menuState.sections)
-                mode = AdventureMode.Builder
-            },
-        )
+    BrandScreen(
+        theme = AdventureTheme,
+        modifier = modifier,
+    ) {
+        when (mode) {
+            AdventureMode.Catalog -> AdventureCatalogContent(
+                isLoading = catalogState.isLoading,
+                catalog = catalogState.catalog,
+                menuSections = menuState.sections,
+                builderViewModel = builderViewModel,
+                onCustomCombo = {
+                    builderViewModel.prepareCustomDraftIfNeeded()
+                    mode = AdventureMode.Builder
+                },
+                onOpenSingle = { activity ->
+                    builderViewModel.replaceItems(listOf(activity.defaultDraft), 0.0)
+                    mode = AdventureMode.Builder
+                },
+                onOpenPackage = { packageModel ->
+                    builderViewModel.replacePackage(packageModel, menuState.sections)
+                    mode = AdventureMode.Builder
+                },
+            )
 
-        AdventureMode.Builder -> AdventureBuilderContent(
-            modifier = modifier,
-            viewModel = builderViewModel,
-            menuSections = menuState.sections,
-            onBack = { mode = AdventureMode.Catalog },
-            onAddFood = { showFoodPicker = true },
-            clientId = sessionState.profile.id,
-        )
+            AdventureMode.Builder -> AdventureBuilderContent(
+                viewModel = builderViewModel,
+                menuSections = menuState.sections,
+                onBack = { mode = AdventureMode.Catalog },
+                onAddFood = { showFoodPicker = true },
+                clientId = sessionState.profile.id,
+            )
+        }
     }
 }
 
@@ -2134,6 +2688,8 @@ private fun AdventureCatalogContent(
     onOpenPackage: (AdventureFeaturedPackage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val palette = LocalBrandPalette.current
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -2145,31 +2701,34 @@ private fun AdventureCatalogContent(
             title = "Construye tu combo perfecto",
             subtitle = "Actividades, paquetes destacados, comida del restaurante, horarios y premios Murco Loyalty en una sola reserva.",
             action = {
-                Button(
+                BrandPrimaryButton(
+                    theme = AdventureTheme,
                     onClick = onCustomCombo,
-                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp)
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.Add,
+                        contentDescription = null,
+                        tint = palette.onPrimary,
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("Iniciar combo personalizado")
+                    Text(
+                        text = "Iniciar combo personalizado",
+                        color = palette.onPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             },
         )
 
         if (isLoading && catalog.activities.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
+            AdventureLoadingCard()
         } else {
             AdventureSectionTitle(
                 title = "Paquetes destacados",
                 subtitle = "Combos sugeridos cargados desde Firestore.",
             )
+
             if (catalog.activePackagesSorted.isEmpty()) {
                 AdventureEmptyState(
                     title = "No hay paquetes destacados",
@@ -2184,7 +2743,7 @@ private fun AdventureCatalogContent(
                         menuSections = menuSections,
                         reward = builderViewModel.packageRewardPresentation(
                             packageModel,
-                            menuSections
+                            menuSections,
                         ),
                         onClick = { onOpenPackage(packageModel) },
                     )
@@ -2195,6 +2754,7 @@ private fun AdventureCatalogContent(
                 title = "Actividades individuales",
                 subtitle = "Reserva una actividad o úsala como base para tu combo.",
             )
+
             catalog.activeActivitiesSorted.forEach { activity ->
                 SingleActivityCard(
                     activity = activity,
@@ -2208,10 +2768,22 @@ private fun AdventureCatalogContent(
                     title = "¿Necesitas algo diferente?",
                     subtitle = "Crea una combinación a medida con tiempos, personas, comida y notas del evento.",
                 )
-                OutlinedButton(onClick = onCustomCombo, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Rounded.Explore, contentDescription = null)
+
+                BrandSecondaryButton(
+                    theme = AdventureTheme,
+                    onClick = onCustomCombo,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Explore,
+                        contentDescription = null,
+                        tint = palette.primary,
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("Abrir creador de aventuras")
+                    Text(
+                        text = "Abrir creador de aventuras",
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -2226,67 +2798,103 @@ private fun FeaturedPackageCard(
     reward: RewardPresentation?,
     onClick: () -> Unit,
 ) {
-    val menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id }
+    val palette = LocalBrandPalette.current
+
+    val menuItemsById = menuSections
+        .flatMap { it.items }
+        .associateBy { it.id }
+
     val activitySubtotal = AdventurePricingEngine.estimatedSubtotal(packageModel.items, catalog)
     val foodSubtotal = packageModel.foodItems.sumOf { food ->
         (menuItemsById[food.menuItemId]?.finalPrice ?: 0.0) * food.quantity
     }
-    val total =
-        (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount).coerceAtLeast(0.0)
+
+    val total = (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount)
+        .coerceAtLeast(0.0)
+
     val foodSummary = packageModel.foodItems.joinToString(" • ") { food ->
         "${food.quantity}x ${menuItemsById[food.menuItemId]?.name ?: food.menuItemId}"
     }
 
-    AdventureCard {
+    AdventureCard(emphasized = true) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Top,
         ) {
             AdventureIconBubble(icon = Icons.Rounded.Explore)
+
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        packageModel.title,
+                        text = packageModel.title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
+                        color = palette.textPrimary,
+                        modifier = Modifier.weight(1f),
                     )
-                    packageModel.badge?.takeIf { it.isNotBlank() }
+
+                    packageModel.badge
+                        ?.takeIf { it.isNotBlank() }
                         ?.let { AdventureBadge(text = it) }
                 }
+
                 Text(
-                    packageModel.subtitle,
+                    text = packageModel.subtitle,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = palette.textSecondary,
                 )
-                if (foodSummary.isNotBlank()) Text(
-                    foodSummary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+
+                if (foodSummary.isNotBlank()) {
+                    Text(
+                        text = foodSummary,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textSecondary,
+                    )
+                }
+
                 Text(
-                    "Aventura ${activitySubtotal.priceText()}${if (foodSubtotal > 0) " • Comida ${foodSubtotal.priceText()}" else ""}",
-                    style = MaterialTheme.typography.labelMedium
+                    text = "Aventura ${activitySubtotal.priceText()}${
+                        if (foodSubtotal > 0) " • Comida ${foodSubtotal.priceText()}" else ""
+                    }",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textTertiary,
                 )
-                if (packageModel.packageDiscountAmount > 0) Text(
-                    "Descuento del paquete: ${packageModel.packageDiscountAmount.priceText()}",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelMedium
-                )
+
+                if (packageModel.packageDiscountAmount > 0) {
+                    Text(
+                        text = "Descuento del paquete: ${packageModel.packageDiscountAmount.priceText()}",
+                        color = palette.success,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+
                 reward?.let {
                     Text(
-                        "${it.badge}: ${it.message}",
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelMedium
+                        text = "${it.badge}: ${it.message}",
+                        color = palette.primary,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
         }
-        Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Desde ${total.priceText()} • Ver combo")
+
+        BrandPrimaryButton(
+            theme = AdventureTheme,
+            onClick = onClick,
+        ) {
+            Text(
+                text = "Desde ${total.priceText()} • Ver combo",
+                color = palette.onPrimary,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
@@ -2297,54 +2905,72 @@ private fun SingleActivityCard(
     reward: RewardPresentation?,
     onClick: () -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
+
     AdventureCard {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top
+            verticalAlignment = Alignment.Top,
         ) {
             AdventureIconBubble(icon = adventureIconFor(activity.activityType))
+
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 Text(
-                    activity.title,
+                    text = activity.title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
                 )
+
                 Text(
-                    activity.shortDescription,
+                    text = activity.shortDescription,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = palette.textSecondary,
                 )
+
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        "Desde ${activity.finalUnitPrice.priceText()}",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold
+                        text = "Desde ${activity.finalUnitPrice.priceText()}",
+                        color = palette.primary,
+                        fontWeight = FontWeight.Bold,
                     )
+
                     if (activity.hasDiscount) {
                         Text(
-                            "Antes ${activity.basePrice.priceText()}",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textDecoration = TextDecoration.LineThrough
+                            text = "Antes ${activity.basePrice.priceText()}",
+                            color = palette.textTertiary,
+                            textDecoration = TextDecoration.LineThrough,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
                 }
+
                 reward?.let {
                     Text(
-                        "${it.badge}: ${it.message}",
+                        text = "${it.badge}: ${it.message}",
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = palette.primary,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
         }
-        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-            Text("Reservar")
+
+        BrandSecondaryButton(
+            theme = AdventureTheme,
+            onClick = onClick,
+        ) {
+            Text(
+                text = "Reservar",
+                color = palette.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -2359,6 +2985,8 @@ private fun AdventureBuilderContent(
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalBrandPalette.current
+
     var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
     var editingFood by remember { mutableStateOf<ReservationFoodItemDraft?>(null) }
 
@@ -2387,22 +3015,40 @@ private fun AdventureBuilderContent(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = Color.Transparent,
         bottomBar = {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(palette.surface.copy(alpha = 0.92f))
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                Button(
+                BrandPrimaryButton(
+                    theme = AdventureTheme,
                     onClick = { viewModel.submit(clientId) },
                     enabled = !state.isSubmitting && state.selectedSlot != null,
-                    modifier = Modifier.fillMaxWidth(),
                 ) {
-                    if (state.isSubmitting) CircularProgressIndicator() else Icon(
-                        Icons.Rounded.CheckCircle,
-                        contentDescription = null
-                    )
+                    if (state.isSubmitting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = palette.onPrimary,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = palette.onPrimary,
+                        )
+                    }
+
                     Spacer(Modifier.width(8.dp))
-                    Text(if (state.isSubmitting) "Confirmando..." else "Confirmar reserva")
+
+                    Text(
+                        text = if (state.isSubmitting) "Confirmando..." else "Confirmar reserva",
+                        color = palette.onPrimary,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
         },
@@ -2416,47 +3062,77 @@ private fun AdventureBuilderContent(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Crear reserva",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Crear reserva",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.textPrimary,
+                    )
+                    Text(
+                        text = "Configura actividades, comida, horario y descuentos.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary,
+                    )
+                }
+
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.Rounded.Close,
-                        contentDescription = "Cerrar"
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Cerrar",
+                        tint = palette.textPrimary,
                     )
                 }
             }
 
             if (state.isLoadingCatalog || state.isLoadingAvailability || state.isLoadingRewards) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = palette.primary,
+                    trackColor = palette.stroke,
+                )
             }
 
             AdventureDateAndSlotsSection(viewModel = viewModel)
             AdventureEventSection(viewModel = viewModel)
-            AdventureActivitiesSection(viewModel = viewModel, onEditItem = { editingItem = it })
+            AdventureActivitiesSection(
+                viewModel = viewModel,
+                onEditItem = { editingItem = it },
+            )
             AdventureFoodSection(
                 viewModel = viewModel,
                 onAddFood = onAddFood,
-                onEditFood = { editingFood = it })
+                onEditFood = { editingFood = it },
+            )
             AdventureContactSection(viewModel = viewModel)
             AdventureSummarySection(viewModel = viewModel)
+
             Spacer(Modifier.height(84.dp))
         }
     }
 }
 
 @Composable
-private fun AdventureDateAndSlotsSection(viewModel: AdventureComboBuilderViewModel) {
+private fun AdventureDateAndSlotsSection(
+    viewModel: AdventureComboBuilderViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val palette = LocalBrandPalette.current
+
     AdventureCard {
-        AdventureSectionTitle("Fecha", "Elige el día de visita y luego un horario disponible.")
-        Button(
+        AdventureSectionTitle(
+            title = "Fecha",
+            subtitle = "Elige el día de visita y luego un horario disponible.",
+        )
+
+        BrandSecondaryButton(
+            theme = AdventureTheme,
             onClick = {
-                val calendar = Calendar.getInstance().apply { time = state.selectedDate }
+                val calendar = Calendar.getInstance().apply {
+                    time = state.selectedDate
+                }
+
                 DatePickerDialog(
                     context,
                     { _, year, month, day ->
@@ -2472,33 +3148,55 @@ private fun AdventureDateAndSlotsSection(viewModel: AdventureComboBuilderViewMod
                 ).show()
             },
         ) {
-            Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+            Icon(
+                imageVector = Icons.Rounded.CalendarMonth,
+                contentDescription = null,
+                tint = palette.primary,
+            )
             Spacer(Modifier.width(8.dp))
-            Text(AdventureDateHelper.shortDateText(state.selectedDate))
+            Text(
+                text = AdventureDateHelper.shortDateText(state.selectedDate),
+                color = palette.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 
     AdventureCard {
-        AdventureSectionTitle("Horarios disponibles", "Selecciona inicio o llegada preferida.")
-        if (state.isLoadingAvailability) {
-            CircularProgressIndicator()
-        } else if (state.availableSlots.isEmpty()) {
-            Text(
-                "Agrega una actividad o comida, o prueba otra fecha.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        } else {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                state.availableSlots.forEach { slot ->
-                    SlotChip(
-                        slot = slot,
-                        selected = state.selectedSlot?.startAt == slot.startAt,
-                        total = viewModel.effectiveTotal(slot),
-                        onClick = { viewModel.selectSlot(slot) },
-                    )
+        AdventureSectionTitle(
+            title = "Horarios disponibles",
+            subtitle = "Selecciona inicio o llegada preferida.",
+        )
+
+        when {
+            state.isLoadingAvailability -> {
+                CircularProgressIndicator(color = palette.primary)
+            }
+
+            state.availableSlots.isEmpty() -> {
+                Text(
+                    text = "Agrega una actividad o comida, o prueba otra fecha.",
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+
+            else -> {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    state.availableSlots.forEach { slot ->
+                        SlotChip(
+                            slot = slot,
+                            selected = state.selectedSlot?.startAt == slot.startAt,
+                            total = viewModel.effectiveTotal(slot),
+                            hasValidCombo = viewModel.hasValidCombo,
+                            totalSavings = viewModel.totalSavings,
+                            matchedPackageTitle = viewModel.matchedPackageTitle,
+                            onClick = { viewModel.selectSlot(slot) },
+                        )
+                    }
                 }
             }
         }
@@ -2510,38 +3208,58 @@ private fun SlotChip(
     slot: AdventureAvailabilitySlot,
     selected: Boolean,
     total: Double,
-    onClick: () -> Unit
+    hasValidCombo: Boolean,
+    totalSavings: Double,
+    matchedPackageTitle: String?,
+    onClick: () -> Unit,
 ) {
-    FilterChip(
+    AdventureSelectableChip(
         selected = selected,
         onClick = onClick,
-        label = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.padding(vertical = 6.dp)
-            ) {
-                Text(AdventureDateHelper.timeText(slot.startAt), fontWeight = FontWeight.Bold)
-                Text("Termina ${AdventureDateHelper.timeText(slot.endAt)}")
+    ) {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.padding(vertical = 6.dp),
+        ) {
+            Text(
+                text = AdventureDateHelper.timeText(slot.startAt),
+                fontWeight = FontWeight.Bold,
+            )
+            Text("Termina ${AdventureDateHelper.timeText(slot.endAt)}")
+            Text(
+                text = total.priceText(),
+                fontWeight = FontWeight.Bold,
+            )
+
+            if (hasValidCombo) {
                 Text(
-                    total.priceText(),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
+                    text = "Combo ${matchedPackageTitle ?: "activo"} • Ahorras ${totalSavings.priceText()}",
+                    style = MaterialTheme.typography.labelSmall,
                 )
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable
-private fun AdventureEventSection(viewModel: AdventureComboBuilderViewModel) {
+private fun AdventureEventSection(
+    viewModel: AdventureComboBuilderViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
     AdventureCard {
-        AdventureSectionTitle("Evento", "Invitados, tipo de evento y notas especiales.")
+        AdventureSectionTitle(
+            title = "Evento",
+            subtitle = "Invitados, tipo de evento y notas especiales.",
+        )
+
         CounterRow(
             title = "Invitados",
             value = state.guestCount,
             onDecrease = { viewModel.setGuestCount(state.guestCount - 1) },
-            onIncrease = { viewModel.setGuestCount(state.guestCount + 1) })
+            onIncrease = { viewModel.setGuestCount(state.guestCount + 1) },
+        )
+
         EnumDropdown(
             title = "Tipo de evento",
             current = state.eventType,
@@ -2549,37 +3267,42 @@ private fun AdventureEventSection(viewModel: AdventureComboBuilderViewModel) {
             label = { it.title },
             onSelected = viewModel::setEventType,
         )
+
         if (state.eventType == ReservationEventType.CUSTOM) {
-            OutlinedTextField(
+            AdventureOutlinedTextField(
                 value = state.customEventTitle,
                 onValueChange = viewModel::setCustomEventTitle,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Nombre del evento") })
+                label = "Nombre del evento",
+            )
         }
-        OutlinedTextField(
+
+        AdventureOutlinedTextField(
             value = state.eventNotes,
             onValueChange = viewModel::setEventNotes,
-            modifier = Modifier.fillMaxWidth(),
+            label = "Notas del evento",
             minLines = 2,
-            label = { Text("Notas del evento") })
+        )
     }
 }
 
 @Composable
 private fun AdventureActivitiesSection(
     viewModel: AdventureComboBuilderViewModel,
-    onEditItem: (AdventureReservationItemDraft) -> Unit
+    onEditItem: (AdventureReservationItemDraft) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalBrandPalette.current
+
     AdventureCard {
         AdventureSectionTitle(
-            "Actividades",
-            "Opcionales. Puedes reservar aventura, comida o ambas."
+            title = "Actividades",
+            subtitle = "Opcionales. Puedes reservar aventura, comida o ambas.",
         )
+
         if (state.items.isEmpty()) {
             Text(
-                "No hay actividades agregadas.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "No hay actividades agregadas.",
+                color = palette.textSecondary,
             )
         } else {
             state.items.forEach { item ->
@@ -2587,17 +3310,20 @@ private fun AdventureActivitiesSection(
                     item = item,
                     viewModel = viewModel,
                     onEdit = { onEditItem(item) },
-                    onDelete = { viewModel.removeItem(item.id) })
+                    onDelete = { viewModel.removeItem(item.id) },
+                )
             }
         }
+
         Row(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             viewModel.availableActivitiesToAdd.forEach { activity ->
-                AssistChip(
+                AdventureAssistChip(
+                    text = "+ ${activity.title}",
                     onClick = { viewModel.addItem(activity.activityType) },
-                    label = { Text("+ ${activity.title}") })
+                )
             }
         }
     }
@@ -2608,37 +3334,67 @@ private fun ActivityDraftRow(
     item: AdventureReservationItemDraft,
     viewModel: AdventureComboBuilderViewModel,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
     ) {
         AdventureIconBubble(icon = adventureIconFor(item.activity))
+
         Column(modifier = Modifier.weight(1f)) {
-            Text(item.title, fontWeight = FontWeight.Bold)
             Text(
-                item.summaryText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = item.title,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary,
             )
+
+            Text(
+                text = item.summaryText,
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+
             val base = viewModel.baseAdventureSubtotal(item)
             val shown = viewModel.displayedAdventureSubtotal(item)
+
             Text(
-                if (shown < base) "${base.priceText()} → ${shown.priceText()}" else base.priceText(),
-                color = MaterialTheme.colorScheme.primary
+                text = if (shown < base) {
+                    "${base.priceText()} → ${shown.priceText()}"
+                } else {
+                    base.priceText()
+                },
+                color = palette.primary,
+                fontWeight = FontWeight.SemiBold,
             )
+
             viewModel.appliedRewardPresentation(item)?.let {
                 Text(
-                    it.message,
+                    text = it.message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = palette.primary,
                 )
             }
         }
-        IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Editar") }
-        IconButton(onClick = onDelete) { Icon(Icons.Rounded.Delete, contentDescription = "Quitar") }
+
+        IconButton(onClick = onEdit) {
+            Icon(
+                imageVector = Icons.Rounded.Edit,
+                contentDescription = "Editar",
+                tint = palette.textSecondary,
+            )
+        }
+
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Rounded.Delete,
+                contentDescription = "Quitar",
+                tint = palette.destructive,
+            )
+        }
     }
 }
 
@@ -2646,21 +3402,33 @@ private fun ActivityDraftRow(
 private fun AdventureFoodSection(
     viewModel: AdventureComboBuilderViewModel,
     onAddFood: () -> Unit,
-    onEditFood: (ReservationFoodItemDraft) -> Unit
+    onEditFood: (ReservationFoodItemDraft) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalBrandPalette.current
+
     AdventureCard {
-        AdventureSectionTitle("Comida", "Agrega platos del restaurante a la reserva.")
+        AdventureSectionTitle(
+            title = "Comida",
+            subtitle = "Agrega platos del restaurante a la reserva.",
+        )
+
         if (state.foodItems.isEmpty()) {
             Text(
-                "No hay platos agregados todavía.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                text = "No hay platos agregados todavía.",
+                color = palette.textSecondary,
             )
         } else {
             state.foodItems.forEach { item ->
-                FoodDraftRow(item = item, viewModel = viewModel, onEdit = { onEditFood(item) })
+                FoodDraftRow(
+                    item = item,
+                    viewModel = viewModel,
+                    onEdit = { onEditFood(item) },
+                )
             }
-            Divider()
+
+            HorizontalDivider(color = palette.stroke)
+
             EnumDropdown(
                 title = "Momento de servicio",
                 current = state.foodServingMoment,
@@ -2668,41 +3436,70 @@ private fun AdventureFoodSection(
                 label = { it.title },
                 onSelected = viewModel::setFoodServingMoment,
             )
+
             if (state.foodServingMoment == ReservationServingMoment.SPECIFIC_TIME) {
                 val context = LocalContext.current
-                Button(onClick = {
-                    val calendar = Calendar.getInstance().apply { time = state.foodServingTime }
-                    TimePickerDialog(
-                        context,
-                        { _, hour, minute ->
-                            val picked = Calendar.getInstance().apply {
-                                time = state.foodServingTime
-                                set(Calendar.HOUR_OF_DAY, hour)
-                                set(Calendar.MINUTE, minute)
-                            }
-                            viewModel.setFoodServingTime(picked.time)
-                        },
-                        calendar.get(Calendar.HOUR_OF_DAY),
-                        calendar.get(Calendar.MINUTE),
-                        false,
-                    ).show()
-                }) {
-                    Icon(Icons.Rounded.Schedule, contentDescription = null)
+
+                BrandSecondaryButton(
+                    theme = AdventureTheme,
+                    onClick = {
+                        val calendar = Calendar.getInstance().apply {
+                            time = state.foodServingTime
+                        }
+
+                        TimePickerDialog(
+                            context,
+                            { _, hour, minute ->
+                                val picked = Calendar.getInstance().apply {
+                                    time = state.foodServingTime
+                                    set(Calendar.HOUR_OF_DAY, hour)
+                                    set(Calendar.MINUTE, minute)
+                                }
+                                viewModel.setFoodServingTime(picked.time)
+                            },
+                            calendar.get(Calendar.HOUR_OF_DAY),
+                            calendar.get(Calendar.MINUTE),
+                            false,
+                        ).show()
+                    },
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Schedule,
+                        contentDescription = null,
+                        tint = palette.primary,
+                    )
                     Spacer(Modifier.width(8.dp))
-                    Text("Hora: ${AdventureDateHelper.timeText(state.foodServingTime)}")
+                    Text(
+                        text = "Hora: ${AdventureDateHelper.timeText(state.foodServingTime)}",
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
-            OutlinedTextField(
+
+            AdventureOutlinedTextField(
                 value = state.foodNotes,
                 onValueChange = viewModel::setFoodNotes,
-                modifier = Modifier.fillMaxWidth(),
+                label = "Notas de comida",
                 minLines = 2,
-                label = { Text("Notas de comida") })
+            )
         }
-        OutlinedButton(onClick = onAddFood, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Rounded.Restaurant, contentDescription = null)
+
+        BrandSecondaryButton(
+            theme = AdventureTheme,
+            onClick = onAddFood,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Restaurant,
+                contentDescription = null,
+                tint = palette.primary,
+            )
             Spacer(Modifier.width(8.dp))
-            Text("Agregar comida")
+            Text(
+                text = "Agregar comida",
+                color = palette.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     }
 }
@@ -2711,144 +3508,338 @@ private fun AdventureFoodSection(
 private fun FoodDraftRow(
     item: ReservationFoodItemDraft,
     viewModel: AdventureComboBuilderViewModel,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth(),
     ) {
         AdventureIconBubble(icon = Icons.Rounded.LocalDining)
+
         Column(modifier = Modifier.weight(1f)) {
-            Text(item.name, fontWeight = FontWeight.Bold)
             Text(
-                "${item.quantity} x ${item.unitPrice.priceText()}",
+                text = item.name,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "${item.quantity} x ${item.unitPrice.priceText()}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = palette.textSecondary,
             )
+
             Text(
-                viewModel.displayedFoodSubtotal(item).priceText(),
-                color = MaterialTheme.colorScheme.primary
+                text = viewModel.displayedFoodSubtotal(item).priceText(),
+                color = palette.primary,
+                fontWeight = FontWeight.SemiBold,
             )
+
             viewModel.appliedRewardPresentation(item)?.let {
                 Text(
-                    it.message,
+                    text = it.message,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = palette.primary,
                 )
             }
         }
+
         IconButton(onClick = { viewModel.decreaseFoodQuantity(item.id) }) {
             Icon(
-                Icons.Rounded.Remove,
-                contentDescription = "Menos"
+                imageVector = Icons.Rounded.Remove,
+                contentDescription = "Menos",
+                tint = palette.textSecondary,
             )
         }
+
         IconButton(onClick = { viewModel.increaseFoodQuantity(item.id) }) {
             Icon(
-                Icons.Rounded.Add,
-                contentDescription = "Más"
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Más",
+                tint = palette.primary,
             )
         }
-        IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, contentDescription = "Editar") }
+
+        IconButton(onClick = onEdit) {
+            Icon(
+                imageVector = Icons.Rounded.Edit,
+                contentDescription = "Editar",
+                tint = palette.textSecondary,
+            )
+        }
+
         IconButton(onClick = { viewModel.removeFoodItem(item.id) }) {
             Icon(
-                Icons.Rounded.Delete,
-                contentDescription = "Quitar"
+                imageVector = Icons.Rounded.Delete,
+                contentDescription = "Quitar",
+                tint = palette.destructive,
             )
         }
     }
 }
 
 @Composable
-private fun AdventureContactSection(viewModel: AdventureComboBuilderViewModel) {
+private fun AdventureContactSection(
+    viewModel: AdventureComboBuilderViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
     AdventureCard {
-        AdventureSectionTitle("Contacto", "Datos sincronizados desde tu perfil.")
+        AdventureSectionTitle(
+            title = "Contacto",
+            subtitle = "Datos sincronizados desde tu perfil.",
+        )
+
         ContactLine(Icons.Rounded.Person, "Nombre", state.clientName)
         ContactLine(Icons.Rounded.Phone, "WhatsApp", state.whatsappNumber)
         ContactLine(Icons.Rounded.Event, "Cédula", state.nationalId)
-        OutlinedTextField(
+
+        AdventureOutlinedTextField(
             value = state.notes,
             onValueChange = viewModel::setNotes,
-            modifier = Modifier.fillMaxWidth(),
+            label = "Notas generales",
             minLines = 2,
-            label = { Text("Notas generales") })
+        )
     }
 }
 
 @Composable
 private fun ContactLine(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
-    value: String
+    value: String,
 ) {
+    val palette = LocalBrandPalette.current
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = palette.primary,
+        )
+
         Column {
             Text(
-                title,
+                text = title,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = palette.textSecondary,
             )
-            Text(value.ifBlank { "No registrado" }, fontWeight = FontWeight.SemiBold)
+
+            Text(
+                text = value.ifBlank { "No registrado" },
+                fontWeight = FontWeight.SemiBold,
+                color = palette.textPrimary,
+            )
         }
     }
 }
 
 @Composable
-private fun AdventureSummarySection(viewModel: AdventureComboBuilderViewModel) {
+private fun AdventureSummarySection(
+    viewModel: AdventureComboBuilderViewModel,
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    AdventureCard {
-        AdventureSectionTitle("Resumen", "Revisa el total antes de confirmar.")
+    val breakdown = viewModel.currentPricingBreakdown
+    val palette = LocalBrandPalette.current
+
+    AdventureCard(emphasized = true) {
+        AdventureSectionTitle(
+            title = "Resumen",
+            subtitle = "Revisa el total antes de confirmar.",
+        )
+
         val slot = state.selectedSlot
+
         if (slot != null) {
             AdventurePriceRow("Aventura", slot.adventureSubtotal)
             AdventurePriceRow("Comida", slot.foodSubtotal)
-            AdventurePriceRow("Subtotal", slot.subtotal)
-            AdventurePriceRow("Descuento aventura", slot.discountAmount, negative = true)
-            if (state.rewardPreview.totalDiscount > 0) AdventurePriceRow(
-                "Murco Loyalty",
-                state.rewardPreview.totalDiscount,
-                negative = true
-            )
-            Divider()
-            AdventurePriceRow("Total", viewModel.effectiveTotal(slot), bold = true)
-        } else {
-            AdventurePriceRow("Aventura estimada", viewModel.estimatedAdventureSubtotal)
-            AdventurePriceRow("Comida estimada", viewModel.estimatedFoodSubtotal)
+            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+
+            if (breakdown.activityDiscountAmount > 0) {
+                AdventurePriceRow(
+                    label = "Descuento de actividades",
+                    amount = breakdown.activityDiscountAmount,
+                    negative = true,
+                )
+            }
+
+            if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
+                AdventurePriceRow(
+                    label = "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    amount = viewModel.comboDiscountAmount,
+                    negative = true,
+                )
+            } else if (state.items.size == 1) {
+                Text(
+                    text = "Una sola actividad no cuenta como combo. Se mantienen descuentos individuales y premios disponibles.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textSecondary,
+                )
+            }
+
+            if (state.rewardPreview.totalDiscount > 0) {
+                AdventurePriceRow(
+                    label = "Murco Loyalty",
+                    amount = state.rewardPreview.totalDiscount,
+                    negative = true,
+                )
+            }
+
+            if (viewModel.totalSavings > 0) {
+                Text(
+                    text = "Ahorro total: ${viewModel.totalSavings.priceText()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.success,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            HorizontalDivider(color = palette.stroke)
+
             AdventurePriceRow(
-                "Descuento estimado",
-                viewModel.estimatedDiscountAmount,
-                negative = true
+                label = "Total",
+                amount = viewModel.effectiveTotal(slot),
+                bold = true,
             )
-            Divider()
-            AdventurePriceRow("Total estimado", viewModel.estimatedTotal, bold = true)
+        } else {
+            AdventurePriceRow("Aventura estimada", breakdown.activitySubtotalAfterIndividualDiscounts)
+            AdventurePriceRow("Comida estimada", breakdown.foodSubtotal)
+            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+
+            if (breakdown.activityDiscountAmount > 0) {
+                AdventurePriceRow(
+                    label = "Descuento de actividades",
+                    amount = breakdown.activityDiscountAmount,
+                    negative = true,
+                )
+            }
+
+            if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
+                AdventurePriceRow(
+                    label = "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    amount = viewModel.comboDiscountAmount,
+                    negative = true,
+                )
+            }
+
+            if (state.rewardPreview.totalDiscount > 0) {
+                AdventurePriceRow(
+                    label = "Murco Loyalty",
+                    amount = state.rewardPreview.totalDiscount,
+                    negative = true,
+                )
+            }
+
+            if (viewModel.totalSavings > 0) {
+                Text(
+                    text = "Ahorro estimado: ${viewModel.totalSavings.priceText()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.success,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            HorizontalDivider(color = palette.stroke)
+
+            AdventurePriceRow(
+                label = "Total estimado",
+                amount = viewModel.estimatedTotal,
+                bold = true,
+            )
         }
+
+        if (breakdown.extraItems.isNotEmpty() && breakdown.hasValidCombo) {
+            Text(
+                text = "Actividades extra calculadas fuera del combo: ${breakdown.extraItems.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = palette.textSecondary,
+            )
+        }
+
         viewModel.activeRewardPresentations.forEach { reward ->
             Text(
-                "${reward.badge}: ${reward.message}",
-                color = MaterialTheme.colorScheme.primary,
-                style = MaterialTheme.typography.labelMedium
+                text = "${reward.badge}: ${reward.message}",
+                color = palette.primary,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
             )
         }
     }
 }
 
 @Composable
-private fun CounterRow(title: String, value: Int, onDecrease: () -> Unit, onIncrease: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("$title: $value", modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+private fun AdventurePriceRow(
+    label: String,
+    amount: Double,
+    negative: Boolean = false,
+    bold: Boolean = false,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = if (bold) palette.textPrimary else palette.textSecondary,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.weight(1f),
+        )
+
+        Text(
+            text = if (negative) "-${amount.priceText()}" else amount.priceText(),
+            color = when {
+                negative -> palette.success
+                bold -> palette.primary
+                else -> palette.textPrimary
+            },
+            fontWeight = if (bold || negative) FontWeight.Bold else FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun CounterRow(
+    title: String,
+    value: Int,
+    onDecrease: () -> Unit,
+    onIncrease: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "$title: $value",
+            modifier = Modifier.weight(1f),
+            fontWeight = FontWeight.SemiBold,
+            color = palette.textPrimary,
+        )
+
         IconButton(onClick = onDecrease) {
             Icon(
-                Icons.Rounded.Remove,
-                contentDescription = "Menos"
+                imageVector = Icons.Rounded.Remove,
+                contentDescription = "Menos",
+                tint = palette.textSecondary,
             )
         }
-        IconButton(onClick = onIncrease) { Icon(Icons.Rounded.Add, contentDescription = "Más") }
+
+        IconButton(onClick = onIncrease) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Más",
+                tint = palette.primary,
+            )
+        }
     }
 }
 
@@ -2859,26 +3850,48 @@ private fun <T> EnumDropdown(
     current: T,
     values: List<T>,
     label: (T) -> String,
-    onSelected: (T) -> Unit
+    onSelected: (T) -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
     var expanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+    ) {
         OutlinedTextField(
             value = label(current),
             onValueChange = {},
             readOnly = true,
             label = { Text(title) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            colors = adventureTextFieldColors(),
+            shape = RoundedCornerShape(AppTheme.Radius.large),
             modifier = Modifier
-                .menuAnchor()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                 .fillMaxWidth(),
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            containerColor = palette.elevatedCard,
+        ) {
             values.forEach { value ->
-                DropdownMenuItem(text = { Text(label(value)) }, onClick = {
-                    onSelected(value)
-                    expanded = false
-                })
+                DropdownMenuItem(
+                    text = {
+                        Text(
+                            text = label(value),
+                            color = palette.textPrimary,
+                        )
+                    },
+                    onClick = {
+                        onSelected(value)
+                        expanded = false
+                    },
+                )
             }
         }
     }
@@ -2889,82 +3902,124 @@ private fun AdventureItemEditorDialog(
     item: AdventureReservationItemDraft,
     config: AdventureActivityCatalogItem?,
     onDismiss: () -> Unit,
-    onSave: (AdventureReservationItemDraft) -> Unit
+    onSave: (AdventureReservationItemDraft) -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
     var draft by remember(item.id) { mutableStateOf(item) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("Guardar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
-        title = { Text(config?.title ?: item.title) },
+        confirmButton = {
+            TextButton(onClick = { onSave(draft) }) {
+                Text("Guardar", color = palette.primary)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = palette.textSecondary)
+            }
+        },
+        title = {
+            Text(
+                text = config?.title ?: item.title,
+                color = palette.textPrimary,
+            )
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (item.activity != AdventureActivityType.CAMPING) {
                     DurationSelector(
                         draft = draft,
                         options = config?.durationOptions ?: item.activity.legacyDurationOptions,
-                        onChanged = { draft = draft.copy(durationMinutes = it) })
+                        onChanged = { draft = draft.copy(durationMinutes = it) },
+                    )
                 }
+
                 when (item.activity) {
                     AdventureActivityType.OFF_ROAD -> {
                         CounterRow(
-                            "Vehículos",
-                            draft.vehicleCount,
-                            {
+                            title = "Vehículos",
+                            value = draft.vehicleCount,
+                            onDecrease = {
+                                val newVehicleCount = (draft.vehicleCount - 1).coerceAtLeast(1)
                                 draft = draft.copy(
-                                    vehicleCount = (draft.vehicleCount - 1).coerceAtLeast(1),
+                                    vehicleCount = newVehicleCount,
                                     offRoadRiderCount = draft.offRoadRiderCount.coerceAtMost(
-                                        ((draft.vehicleCount - 1).coerceAtLeast(1)) * 2
-                                    )
+                                        newVehicleCount * 2,
+                                    ),
                                 )
                             },
-                            { draft = draft.copy(vehicleCount = draft.vehicleCount + 1) })
+                            onIncrease = {
+                                draft = draft.copy(vehicleCount = draft.vehicleCount + 1)
+                            },
+                        )
+
                         CounterRow(
-                            "Personas",
-                            draft.offRoadRiderCount,
-                            {
+                            title = "Personas",
+                            value = draft.offRoadRiderCount,
+                            onDecrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount - 1).coerceAtLeast(
-                                        1
-                                    )
+                                    offRoadRiderCount = (draft.offRoadRiderCount - 1)
+                                        .coerceAtLeast(1),
                                 )
                             },
-                            {
+                            onIncrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount + 1).coerceAtMost(
-                                        draft.vehicleCount * 2
-                                    )
+                                    offRoadRiderCount = (draft.offRoadRiderCount + 1)
+                                        .coerceAtMost(draft.vehicleCount * 2),
                                 )
-                            })
+                            },
+                        )
                     }
 
                     AdventureActivityType.CAMPING -> {
                         CounterRow(
-                            "Noches",
-                            draft.nights,
-                            { draft = draft.copy(nights = (draft.nights - 1).coerceAtLeast(1)) },
-                            { draft = draft.copy(nights = draft.nights + 1) })
-                        CounterRow(
-                            "Personas",
-                            draft.peopleCount,
-                            {
-                                draft =
-                                    draft.copy(peopleCount = (draft.peopleCount - 1).coerceAtLeast(1))
+                            title = "Noches",
+                            value = draft.nights,
+                            onDecrease = {
+                                draft = draft.copy(
+                                    nights = (draft.nights - 1).coerceAtLeast(1),
+                                )
                             },
-                            { draft = draft.copy(peopleCount = draft.peopleCount + 1) })
+                            onIncrease = {
+                                draft = draft.copy(nights = draft.nights + 1)
+                            },
+                        )
+
+                        CounterRow(
+                            title = "Personas",
+                            value = draft.peopleCount,
+                            onDecrease = {
+                                draft = draft.copy(
+                                    peopleCount = (draft.peopleCount - 1).coerceAtLeast(1),
+                                )
+                            },
+                            onIncrease = {
+                                draft = draft.copy(peopleCount = draft.peopleCount + 1)
+                            },
+                        )
                     }
 
-                    else -> CounterRow(
-                        "Personas",
-                        draft.peopleCount,
-                        {
-                            draft =
-                                draft.copy(peopleCount = (draft.peopleCount - 1).coerceAtLeast(1))
-                        },
-                        { draft = draft.copy(peopleCount = draft.peopleCount + 1) })
+                    else -> {
+                        CounterRow(
+                            title = "Personas",
+                            value = draft.peopleCount,
+                            onDecrease = {
+                                draft = draft.copy(
+                                    peopleCount = (draft.peopleCount - 1).coerceAtLeast(1),
+                                )
+                            },
+                            onIncrease = {
+                                draft = draft.copy(peopleCount = draft.peopleCount + 1)
+                            },
+                        )
+                    }
                 }
             }
         },
+        containerColor = palette.elevatedCard,
+        titleContentColor = palette.textPrimary,
+        textContentColor = palette.textPrimary,
     )
 }
 
@@ -2972,17 +4027,22 @@ private fun AdventureItemEditorDialog(
 private fun DurationSelector(
     draft: AdventureReservationItemDraft,
     options: List<Int>,
-    onChanged: (Int) -> Unit
+    onChanged: (Int) -> Unit,
 ) {
     Row(
         modifier = Modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         options.distinct().sorted().forEach { minutes ->
-            FilterChip(
+            AdventureSelectableChip(
                 selected = draft.durationMinutes == minutes,
                 onClick = { onChanged(minutes) },
-                label = { Text(if (minutes >= 60) "${minutes / 60}h" else "$minutes min") })
+            ) {
+                Text(
+                    text = if (minutes >= 60) "${minutes / 60}h" else "$minutes min",
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
@@ -2991,33 +4051,255 @@ private fun DurationSelector(
 private fun FoodItemEditorDialog(
     item: ReservationFoodItemDraft,
     onDismiss: () -> Unit,
-    onSave: (ReservationFoodItemDraft) -> Unit
+    onSave: (ReservationFoodItemDraft) -> Unit,
 ) {
+    val palette = LocalBrandPalette.current
     var draft by remember(item.id) { mutableStateOf(item) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = { TextButton(onClick = { onSave(draft) }) { Text("Guardar") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
-        title = { Text("Editar comida") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(draft.name, fontWeight = FontWeight.Bold)
-                CounterRow(
-                    "Cantidad",
-                    draft.quantity,
-                    { draft = draft.copy(quantity = (draft.quantity - 1).coerceAtLeast(1)) },
-                    { draft = draft.copy(quantity = draft.quantity + 1) })
-                OutlinedTextField(
-                    value = draft.notes.orEmpty(),
-                    onValueChange = {
-                        draft = draft.copy(notes = it.trim().takeIf { value -> value.isNotEmpty() })
-                    },
-                    minLines = 2,
-                    label = { Text("Notas") })
+        confirmButton = {
+            TextButton(onClick = { onSave(draft) }) {
+                Text("Guardar", color = palette.primary)
             }
         },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar", color = palette.textSecondary)
+            }
+        },
+        title = {
+            Text(
+                text = "Editar comida",
+                color = palette.textPrimary,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = draft.name,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                CounterRow(
+                    title = "Cantidad",
+                    value = draft.quantity,
+                    onDecrease = {
+                        draft = draft.copy(
+                            quantity = (draft.quantity - 1).coerceAtLeast(1),
+                        )
+                    },
+                    onIncrease = {
+                        draft = draft.copy(quantity = draft.quantity + 1)
+                    },
+                )
+
+                AdventureOutlinedTextField(
+                    value = draft.notes.orEmpty(),
+                    onValueChange = {
+                        draft = draft.copy(
+                            notes = it.trim().takeIf { value -> value.isNotEmpty() },
+                        )
+                    },
+                    label = "Notas",
+                    minLines = 2,
+                )
+            }
+        },
+        containerColor = palette.elevatedCard,
+        titleContentColor = palette.textPrimary,
+        textContentColor = palette.textPrimary,
     )
 }
+
+/* -------------------------------------------------------------------------- */
+/* Theme adapters for this screen                                              */
+/* -------------------------------------------------------------------------- */
+
+@Composable
+private fun AdventureGradientHero(
+    title: String,
+    subtitle: String,
+    action: @Composable () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+    val shape = RoundedCornerShape(AppTheme.Radius.xLarge)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(palette.heroGradient)
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.20f),
+                shape = shape,
+            )
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = palette.onPrimary,
+        )
+
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.onPrimary.copy(alpha = 0.88f),
+        )
+
+        action()
+    }
+}
+
+@Composable
+private fun AdventureSectionTitle(
+    title: String,
+    subtitle: String? = null,
+) {
+    BrandSectionHeader(
+        theme = AdventureTheme,
+        title = title,
+        subtitle = subtitle,
+    )
+}
+
+@Composable
+private fun AdventureIconBubble(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    BrandIconBubble(
+        theme = AdventureTheme,
+        icon = icon,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun AdventureLoadingCard() {
+    val palette = LocalBrandPalette.current
+
+    AdventureCard {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = palette.primary)
+        }
+    }
+}
+
+@Composable
+private fun AdventureSelectableChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+    val shape = RoundedCornerShape(18.dp)
+
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(
+                brush = if (selected) palette.heroGradient else palette.chipGradient,
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) Color.Transparent else palette.stroke,
+                shape = shape,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val contentColor = if (selected) palette.onPrimary else palette.primary
+
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.material3.LocalContentColor provides contentColor,
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun AdventureAssistChip(
+    text: String,
+    onClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    AssistChip(
+        onClick = onClick,
+        label = {
+            Text(
+                text = text,
+                color = palette.primary,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+            containerColor = palette.primary.copy(alpha = 0.10f),
+            labelColor = palette.primary,
+        ),
+        border = androidx.compose.material3.AssistChipDefaults.assistChipBorder(
+            enabled = true,
+            borderColor = palette.stroke,
+        ),
+    )
+}
+
+@Composable
+private fun AdventureOutlinedTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    minLines: Int = 1,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.fillMaxWidth(),
+        minLines = minLines,
+        label = { Text(label) },
+        shape = RoundedCornerShape(AppTheme.Radius.large),
+        colors = adventureTextFieldColors(),
+    )
+}
+
+@Composable
+private fun adventureTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = LocalBrandPalette.current.textPrimary,
+    unfocusedTextColor = LocalBrandPalette.current.textPrimary,
+    disabledTextColor = LocalBrandPalette.current.textTertiary,
+
+    focusedContainerColor = LocalBrandPalette.current.elevatedCard,
+    unfocusedContainerColor = LocalBrandPalette.current.elevatedCard,
+    disabledContainerColor = LocalBrandPalette.current.card,
+
+    cursorColor = LocalBrandPalette.current.primary,
+
+    focusedBorderColor = LocalBrandPalette.current.primary,
+    unfocusedBorderColor = LocalBrandPalette.current.stroke,
+    disabledBorderColor = LocalBrandPalette.current.stroke.copy(alpha = 0.55f),
+
+    focusedLabelColor = LocalBrandPalette.current.primary,
+    unfocusedLabelColor = LocalBrandPalette.current.textSecondary,
+
+    focusedTrailingIconColor = LocalBrandPalette.current.primary,
+    unfocusedTrailingIconColor = LocalBrandPalette.current.textSecondary,
+)
 
 ```
 
@@ -3113,13 +4395,7 @@ fun AdventureCard(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (emphasized) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surface
-            },
-        ),
+        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = if (emphasized) 4.dp else 1.dp),
     ) {
         Column(
@@ -3214,11 +4490,22 @@ fun AdventureEmptyState(
     icon: ImageVector = Icons.Rounded.CalendarMonth,
 ) {
     AdventureCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
             AdventureIconBubble(icon = icon)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(text = body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -3350,6 +4637,7 @@ class AdventureCatalogViewModel @Inject constructor(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
 
 
+
 data class AdventureComboBuilderUiState(
     val selectedDate: Date = Date(),
     val items: List<AdventureReservationItemDraft> = emptyList(),
@@ -3358,7 +4646,7 @@ data class AdventureComboBuilderUiState(
     val customEventTitle: String = "",
     val eventNotes: String = "",
     val foodItems: List<ReservationFoodItemDraft> = emptyList(),
-    val foodServingMoment: ReservationServingMoment = ReservationServingMoment.AFTER_ACTIVITIES,
+    val foodServingMoment: ReservationServingMoment = AFTER_ACTIVITIES,
     val foodServingTime: Date = Date(),
     val foodNotes: String = "",
     val clientName: String = "",
@@ -3366,10 +4654,16 @@ data class AdventureComboBuilderUiState(
     val nationalId: String = "",
     val notes: String = "",
     val packageDiscountAmount: Double = 0.0,
+    val selectedPackageId: String? = null,
+    val selectedPackageTitle: String? = null,
     val catalog: AdventureCatalogSnapshot = AdventureCatalogSnapshot.EMPTY,
     val availableSlots: List<AdventureAvailabilitySlot> = emptyList(),
     val selectedSlot: AdventureAvailabilitySlot? = null,
-    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(RewardWalletSnapshot.empty("")),
+    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
+        RewardWalletSnapshot.empty(
+            ""
+        )
+    ),
     val isLoadingCatalog: Boolean = false,
     val isLoadingAvailability: Boolean = false,
     val isLoadingRewards: Boolean = false,
@@ -3378,6 +4672,7 @@ data class AdventureComboBuilderUiState(
     val errorMessage: String? = null,
     val successMessage: String? = null,
 )
+
 
 ```
 
@@ -3476,10 +4771,22 @@ class AdventureComboBuilderViewModel @Inject constructor(
         items: List<AdventureReservationItemDraft>,
         packageDiscountAmount: Double,
     ) {
+        val current = _uiState.value
+        val breakdown = pricingBreakdownFor(
+            current.copy(
+                items = items,
+                packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
+                selectedPackageId = null,
+                selectedPackageTitle = null,
+            )
+        )
+
         _uiState.update {
             it.copy(
                 items = items,
-                packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId,
+                selectedPackageTitle = breakdown.matchedPackageTitle,
                 selectedSlot = null,
                 createdBooking = null,
                 successMessage = null,
@@ -3501,11 +4808,21 @@ class AdventureComboBuilderViewModel @Inject constructor(
             ReservationFoodItemDraft(menuItem = menuItem, quantity = food.quantity)
         }
 
+        val seededState = _uiState.value.copy(
+            items = packageModel.items,
+            foodItems = foodItems,
+            selectedPackageId = packageModel.id,
+            selectedPackageTitle = packageModel.title,
+        )
+        val breakdown = pricingBreakdownFor(seededState)
+
         _uiState.update {
             it.copy(
                 items = packageModel.items,
                 foodItems = foodItems,
-                packageDiscountAmount = packageModel.packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId ?: packageModel.id,
+                selectedPackageTitle = breakdown.matchedPackageTitle ?: packageModel.title,
                 selectedSlot = null,
                 createdBooking = null,
                 successMessage = null,
@@ -3623,6 +4940,8 @@ class AdventureComboBuilderViewModel @Inject constructor(
             return
         }
 
+        val pricingBreakdown = pricingBreakdownFor(state)
+
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -3644,7 +4963,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                 eventNotes = state.eventNotes.trim().takeIf { it.isNotEmpty() },
                 items = state.items,
                 foodReservation = buildFoodDraft(state),
-                packageDiscountAmount = state.packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = pricingBreakdown.comboDiscountAmount,
                 loyaltyDiscountAmount = state.rewardPreview.totalDiscount,
                 appliedRewards = state.rewardPreview.appliedRewards,
                 notes = state.notes.trim().takeIf { it.isNotEmpty() },
@@ -3692,31 +5011,28 @@ class AdventureComboBuilderViewModel @Inject constructor(
         get() = _uiState.value.foodItems.sumOf { it.subtotal }.adventureRoundMoney()
 
     val estimatedDiscountAmount: Double
-        get() {
-            val state = _uiState.value
-            val activityDiscount =
-                AdventurePricingEngine.estimatedDiscountAmount(state.items, state.catalog)
-            return (activityDiscount + state.packageDiscountAmount + state.rewardPreview.totalDiscount).adventureRoundMoney()
-        }
+        get() = currentPricingBreakdown.totalSavings.adventureRoundMoney()
 
     val estimatedTotal: Double
-        get() {
-            val state = _uiState.value
-            val plan = AdventurePlanner.buildPlan(
-                day = state.selectedDate,
-                startAt = AdventureDateHelper.dateOn(state.selectedDate, 7, 0),
-                items = state.items,
-                foodReservation = buildFoodDraft(state),
-                packageDiscountAmount = state.packageDiscountAmount,
-                catalog = state.catalog,
-            )
-            val base = plan?.totalAmount
-                ?: (estimatedAdventureSubtotal + estimatedFoodSubtotal - state.packageDiscountAmount).coerceAtLeast(
-                    0.0
-                )
-            return (base - state.rewardPreview.totalDiscount).coerceAtLeast(0.0)
-                .adventureRoundMoney()
-        }
+        get() = currentPricingBreakdown.finalTotal.adventureRoundMoney()
+
+    val currentPricingBreakdown: ExperienceComboPricingBreakdown
+        get() = pricingBreakdownFor(_uiState.value)
+
+    val hasValidCombo: Boolean
+        get() = currentPricingBreakdown.hasValidCombo
+
+    val subtotalBeforeComboAndLoyalty: Double
+        get() = currentPricingBreakdown.subtotalBeforeComboAndLoyalty.adventureRoundMoney()
+
+    val totalSavings: Double
+        get() = currentPricingBreakdown.totalSavings.adventureRoundMoney()
+
+    val comboDiscountAmount: Double
+        get() = currentPricingBreakdown.comboDiscountAmount.adventureRoundMoney()
+
+    val matchedPackageTitle: String?
+        get() = currentPricingBreakdown.matchedPackageTitle
 
     val activeRewardPresentations: List<RewardPresentation>
         get() = _uiState.value.rewardPreview.appliedRewards.map {
@@ -3792,11 +5108,14 @@ class AdventureComboBuilderViewModel @Inject constructor(
         projectedRewardResult(item, quantity).totalDiscount.adventureRoundMoney()
 
     private fun updateItems(items: List<AdventureReservationItemDraft>) {
-        val correctedDiscount = bestMatchingPackageDiscount(items)
+        val state = _uiState.value
+        val breakdown = pricingBreakdownFor(state.copy(items = items))
         _uiState.update {
             it.copy(
                 items = items,
-                packageDiscountAmount = correctedDiscount,
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId,
+                selectedPackageTitle = breakdown.matchedPackageTitle,
                 selectedSlot = null,
             )
         }
@@ -3814,32 +5133,6 @@ class AdventureComboBuilderViewModel @Inject constructor(
         requestRewardPreview()
         refreshAvailability()
     }
-
-    private fun bestMatchingPackageDiscount(items: List<AdventureReservationItemDraft>): Double {
-        if (items.size <= 1) return 0.0
-        val state = _uiState.value
-        val activityKey = items
-            .map { keyForActivityPackageMatch(it) }
-            .sorted()
-        return state.catalog.activePackagesSorted
-            .filter { it.items.size > 1 }
-            .firstOrNull { packageModel ->
-                packageModel.items.map { keyForActivityPackageMatch(it) }.sorted() == activityKey
-            }
-            ?.packageDiscountAmount
-            ?.coerceAtLeast(0.0)
-            ?: 0.0
-    }
-
-    private fun keyForActivityPackageMatch(item: AdventureReservationItemDraft): String =
-        listOf(
-            item.activity.rawValue,
-            item.durationMinutes,
-            item.peopleCount,
-            item.vehicleCount,
-            item.offRoadRiderCount,
-            item.nights,
-        ).joinToString("|")
 
     private fun refreshAvailability() {
         val state = _uiState.value
@@ -3865,7 +5158,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                     date = _uiState.value.selectedDate,
                     items = _uiState.value.items,
                     foodReservation = buildFoodDraft(_uiState.value),
-                    packageDiscountAmount = _uiState.value.packageDiscountAmount,
+                    packageDiscountAmount = pricingBreakdownFor(_uiState.value).comboDiscountAmount,
                 )
             }.onSuccess { slots ->
                 _uiState.update { current ->
@@ -3913,7 +5206,15 @@ class AdventureComboBuilderViewModel @Inject constructor(
                         state.copy(
                             catalog = catalog,
                             items = validItems,
-                            packageDiscountAmount = if (validItems.size > 1) state.packageDiscountAmount else 0.0,
+                            packageDiscountAmount = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).comboDiscountAmount,
+                            selectedPackageId = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).matchedPackageId,
+                            selectedPackageTitle = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).matchedPackageTitle,
                             isLoadingCatalog = false,
                             errorMessage = null,
                         )
@@ -4024,6 +5325,16 @@ class AdventureComboBuilderViewModel @Inject constructor(
             .sumOf { it.amount }
             .adventureRoundMoney()
 
+    private fun pricingBreakdownFor(state: AdventureComboBuilderUiState): ExperienceComboPricingBreakdown =
+        ExperienceComboPricingPolicy.calculate(
+            items = state.items,
+            foodReservation = buildFoodDraft(state),
+            catalog = state.catalog,
+            featuredPackages = state.catalog.activePackagesSorted,
+            preferredPackageId = state.selectedPackageId,
+            loyaltyDiscountAmount = state.rewardPreview.totalDiscount,
+        )
+
     private fun buildFoodDraft(state: AdventureComboBuilderUiState): ReservationFoodDraft? {
         if (state.foodItems.isEmpty()) return null
         return ReservationFoodDraft(
@@ -4053,6 +5364,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
         _uiState.update(transform)
     }
 }
+
 
 ```
 
@@ -4120,6 +5432,32 @@ class DeveloperBypassSessionRepository @Inject constructor() : SessionRepositori
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/FirebaseAuthErrorExtensions.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
+
+
+private val terminalSessionErrorCodes = setOf(
+    "ERROR_USER_DISABLED",
+    "ERROR_USER_NOT_FOUND",
+    "ERROR_USER_TOKEN_EXPIRED",
+    "ERROR_INVALID_USER_TOKEN",
+)
+
+fun Throwable.isFirebaseSessionInvalidOrDisabled(): Boolean {
+    val authException = generateSequence(this as Throwable?) { it.cause }
+        .filterIsInstance<FirebaseAuthException>()
+        .firstOrNull()
+        ?: return false
+
+    return authException.errorCode in terminalSessionErrorCodes
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/FirebaseAuthenticationRepository.kt
 
 ```kotlin
@@ -4133,14 +5471,12 @@ class FirebaseAuthenticationRepository @Inject constructor(
 
     override fun currentUser(): AuthenticatedUser? {
         val user = auth.currentUser ?: return null
-        val googleProviderUid =
-            user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = user.uid,
             email = user.email.orEmpty(),
             displayName = user.displayName.orEmpty(),
-            appleUserIdentifier = googleProviderUid,
+            appleUserIdentifier = user.googleProviderUid(),
         )
     }
 
@@ -4149,34 +5485,56 @@ class FirebaseAuthenticationRepository @Inject constructor(
     ): AuthenticatedUser {
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         val authResult = auth.signInWithCredential(credential).awaitResult()
-        val firebaseUser =
-            requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
-        val googleProviderUid =
-            firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+
+        val firebaseUser = requireNotNull(authResult.user) {
+            "Firebase auth returned a null user after Google sign in."
+        }
 
         return AuthenticatedUser(
             uid = firebaseUser.uid,
             email = firebaseUser.email.orEmpty(),
             displayName = firebaseUser.displayName.orEmpty(),
-            appleUserIdentifier = googleProviderUid,
+            appleUserIdentifier = firebaseUser.googleProviderUid(),
         )
     }
 
     override suspend fun reauthenticateCurrentUser(
         googleIdToken: String,
     ) {
-        val user = requireNotNull(auth.currentUser) { "No authenticated user found." }
+        val user = requireNotNull(auth.currentUser) {
+            "No authenticated user found."
+        }
+
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         user.reauthenticate(credential).awaitResult()
     }
 
+    override suspend fun verifyCurrentUserIsStillValid() {
+        val user = auth.currentUser ?: return
+
+        user.reload().awaitResult()
+
+        val refreshedUser = auth.currentUser ?: return
+        refreshedUser.getIdToken(true).awaitResult()
+    }
+
     override suspend fun deleteCurrentUser() {
-        val user = requireNotNull(auth.currentUser) { "No authenticated user to delete." }
+        val user = requireNotNull(auth.currentUser) {
+            "No authenticated user to delete."
+        }
+
         user.delete().awaitResult()
     }
 
     override fun signOut() {
         auth.signOut()
+    }
+
+    private fun FirebaseUser.googleProviderUid(): String {
+        return providerData
+            .firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }
+            ?.uid
+            .orEmpty()
     }
 }
 
@@ -4339,6 +5697,7 @@ class SessionRepository @Inject constructor(
                     TAG,
                     "sessionState() tick -> auth.currentUser.uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
                 )
+
                 resolveLatestSessionState()
             }
             .distinctUntilChanged()
@@ -4347,18 +5706,33 @@ class SessionRepository @Inject constructor(
     override suspend fun refresh() {
         Log.d(
             TAG,
-            "refresh() requested -> current uid before reload=${auth.currentUser?.uid}"
+            "refresh() requested -> current uid before verify=${auth.currentUser?.uid}"
         )
 
-        runCatching {
-            auth.currentUser?.reload()?.awaitResult()
-        }.onSuccess {
+        val result = runCatching {
+            authenticationRepository.verifyCurrentUserIsStillValid()
+        }
+
+        result.onSuccess {
             Log.d(
                 TAG,
-                "refresh() reload success -> current uid after reload=${auth.currentUser?.uid}"
+                "refresh() verify success -> current uid after verify=${auth.currentUser?.uid}"
             )
-        }.onFailure { error ->
-            Log.e(TAG, "refresh() reload failure", error)
+        }
+
+        result.onFailure { error ->
+            if (error.isFirebaseSessionInvalidOrDisabled()) {
+                forceSignOut(
+                    reason = "refresh() detected disabled/deleted/expired Firebase user. Closing session.",
+                    error = error,
+                )
+            } else {
+                Log.w(
+                    TAG,
+                    "refresh() verify failed but it is not a terminal auth error. Keeping local session.",
+                    error,
+                )
+            }
         }
 
         refreshRequests.emit(Unit)
@@ -4370,6 +5744,7 @@ class SessionRepository @Inject constructor(
                 TAG,
                 "AuthStateListener -> uid=${firebaseAuth.currentUser?.uid}, email=${firebaseAuth.currentUser?.email}"
             )
+
             trySend(firebaseAuth.currentUser).isSuccess
         }
 
@@ -4379,6 +5754,7 @@ class SessionRepository @Inject constructor(
             TAG,
             "authUserFlow initial emit -> uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
         )
+
         trySend(auth.currentUser).isSuccess
 
         awaitClose {
@@ -4388,44 +5764,58 @@ class SessionRepository @Inject constructor(
 
     private suspend fun resolveLatestSessionState(): SessionState {
         val firebaseUser = auth.currentUser
+
         if (firebaseUser == null) {
-            Log.d(TAG, "resolveLatestSessionState -> Unauthenticated (firebaseUser=null)")
+            Log.d(TAG, "resolveLatestSessionState -> Unauthenticated because firebaseUser=null")
             return SessionState.Unauthenticated
         }
 
+        val verifiedFirebaseUser = verifyOrCloseSession(firebaseUser)
+            ?: return SessionState.Unauthenticated
+
         Log.d(
             TAG,
-            "resolveLatestSessionState -> firebaseUser uid=${firebaseUser.uid}, email=${firebaseUser.email}, displayName=${firebaseUser.displayName}"
+            "resolveLatestSessionState -> verified uid=${verifiedFirebaseUser.uid}, email=${verifiedFirebaseUser.email}"
         )
 
         val currentUser = authenticationRepository.currentUser()
             ?: AuthenticatedUser(
-                uid = firebaseUser.uid,
-                email = firebaseUser.email.orEmpty(),
-                displayName = firebaseUser.displayName.orEmpty(),
+                uid = verifiedFirebaseUser.uid,
+                email = verifiedFirebaseUser.email.orEmpty(),
+                displayName = verifiedFirebaseUser.displayName.orEmpty(),
                 appleUserIdentifier = "",
             )
 
-        Log.d(
-            TAG,
-            "resolveLatestSessionState -> currentUser uid=${currentUser.uid}, email=${currentUser.email}, displayName=${currentUser.displayName}, appleUserIdentifier=${currentUser.appleUserIdentifier}"
-        )
+        val destination = runCatching {
+            resolveSessionUseCase.execute(currentUser)
+        }.getOrElse { error ->
+            if (error.isFirebaseSessionInvalidOrDisabled()) {
+                forceSignOut(
+                    reason = "resolveLatestSessionState detected invalid Firebase session while resolving profile.",
+                    error = error,
+                )
 
-        val destination = resolveSessionUseCase.execute(currentUser)
+                return SessionState.Unauthenticated
+            }
 
-        when (destination) {
+            throw error
+        }
+
+        return when (destination) {
             SessionDestination.SignedOut -> {
                 Log.d(TAG, "resolveLatestSessionState -> destination=SignedOut")
-                return SessionState.Unauthenticated
+                SessionState.Unauthenticated
             }
 
             is SessionDestination.NeedsProfile -> {
                 val profile = destination.profile
+
                 Log.d(
                     TAG,
-                    "resolveLatestSessionState -> destination=NeedsProfile, profileExists=${profile != null}, profileIsComplete=${profile?.isComplete}, profileId=${profile?.id}, profileEmail=${profile?.email}"
+                    "resolveLatestSessionState -> destination=NeedsProfile, profileExists=${profile != null}, profileIsComplete=${profile?.isComplete}"
                 )
-                return SessionState.NeedsProfileCompletion(
+
+                SessionState.NeedsProfileCompletion(
                     user = destination.user,
                     existingProfile = destination.profile,
                 )
@@ -4434,12 +5824,61 @@ class SessionRepository @Inject constructor(
             is SessionDestination.Authenticated -> {
                 Log.d(
                     TAG,
-                    "resolveLatestSessionState -> destination=Authenticated, profileId=${destination.profile.id}, profileEmail=${destination.profile.email}, profileIsComplete=${destination.profile.isComplete}"
+                    "resolveLatestSessionState -> destination=Authenticated, profileId=${destination.profile.id}, profileIsComplete=${destination.profile.isComplete}"
                 )
-                return SessionState.Authenticated(
+
+                SessionState.Authenticated(
                     profile = destination.profile,
                 )
             }
+        }
+    }
+
+    private suspend fun verifyOrCloseSession(
+        firebaseUser: FirebaseUser,
+    ): FirebaseUser? {
+        val result = runCatching {
+            authenticationRepository.verifyCurrentUserIsStillValid()
+        }
+
+        if (result.isSuccess) {
+            return auth.currentUser
+        }
+
+        val error = result.exceptionOrNull()
+
+        if (error != null && error.isFirebaseSessionInvalidOrDisabled()) {
+            forceSignOut(
+                reason = "verifyOrCloseSession detected disabled/deleted/expired Firebase user uid=${firebaseUser.uid}.",
+                error = error,
+            )
+
+            return null
+        }
+
+        Log.w(
+            TAG,
+            "verifyOrCloseSession failed with non-terminal error. Keeping session to avoid logging out due to network/transient issue.",
+            error,
+        )
+
+        return auth.currentUser
+    }
+
+    private fun forceSignOut(
+        reason: String,
+        error: Throwable? = null,
+    ) {
+        Log.w(TAG, reason, error)
+
+        runCatching {
+            authenticationRepository.signOut()
+        }.onFailure { signOutError ->
+            Log.e(
+                TAG,
+                "forceSignOut -> signOut failed, but session will still resolve as unauthenticated soon.",
+                signOutError
+            )
         }
     }
 }
@@ -4487,6 +5926,8 @@ interface AuthenticationRepositoriable {
     suspend fun reauthenticateCurrentUser(
         googleIdToken: String,
     )
+
+    suspend fun verifyCurrentUserIsStillValid()
 
     suspend fun deleteCurrentUser()
 
@@ -5344,9 +6785,24 @@ fun AuthGateRoute(
     authenticatedContent: @Composable (SessionState.Authenticated) -> Unit,
 ) {
     val sessionState = viewModel.sessionState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    LaunchedEffect(sessionState) {
-        Log.d("AltosAuthGate", "AuthGateRoute -> sessionState=$sessionState")
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.verifySessionNow()
+            }
+        }
+
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    LaunchedEffect(sessionState.value) {
+        Log.d("AltosAuthGate", "AuthGateRoute -> sessionState=${sessionState.value}")
     }
 
     when (val state = sessionState.value) {
@@ -5414,9 +6870,26 @@ class AuthGateViewModel @Inject constructor(
             initialValue = SessionState.Loading,
         )
 
+    init {
+        startSessionGuard()
+    }
+
     fun refreshSession() {
         viewModelScope.launch {
             sessionRepositoriable.refresh()
+        }
+    }
+
+    fun verifySessionNow() {
+        refreshSession()
+    }
+
+    private fun startSessionGuard() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(60_000)
+                sessionRepositoriable.refresh()
+            }
         }
     }
 }
@@ -5866,10 +7339,428 @@ interface AdventureBookingsRepositoriable {
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/AdventureBookingsUiState.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/view/BookingsScreen.kt
 
 ```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
+
+
+private enum class ReservationFilter(val title: String) {
+    UPCOMING("Próximas"),
+    PAST("Pasadas"),
+    CANCELLED("Canceladas"),
+}
+
+private sealed interface UnifiedReservation {
+    val id: String
+    val title: String
+    val subtitle: String
+    val date: Date
+    val total: Double
+    val statusText: String
+    val isCancelled: Boolean
+    val isCompleted: Boolean
+
+    data class RestaurantOrder(val order: Order) : UnifiedReservation {
+        override val id: String = "restaurant-${order.id}"
+        override val title: String = "Pedido restaurante"
+        override val subtitle: String = "${order.totalItems} item(s) • Mesa ${order.tableNumber}"
+        override val date: Date = order.createdAt
+        override val total: Double = order.totalAmount
+        override val statusText: String = order.status.title
+        override val isCancelled: Boolean = order.status == OrderStatus.CANCELED
+        override val isCompleted: Boolean = order.status == OrderStatus.COMPLETED
+    }
+
+    data class ExperienceBooking(val booking: AdventureBooking) : UnifiedReservation {
+        override val id: String = "experience-${booking.id}"
+        override val title: String = booking.visitTypeTitle
+        override val subtitle: String =
+            "${booking.eventDisplayTitle} • ${booking.guestCount} invitado(s)"
+        override val date: Date = booking.startAt
+        override val total: Double = booking.totalAmount
+        override val statusText: String = booking.status.title
+        override val isCancelled: Boolean = booking.status == AdventureBookingStatus.CANCELED
+        override val isCompleted: Boolean = booking.status == AdventureBookingStatus.COMPLETED
+    }
+}
+
+@Composable
+fun BookingsScreen(
+    modifier: Modifier = Modifier,
+    sessionState: SessionState.Authenticated,
+    ordersViewModel: OrdersViewModel = hiltViewModel(),
+    adventureBookingsViewModel: AdventureBookingsViewModel = hiltViewModel(),
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    val ordersState by ordersViewModel.uiState.collectAsStateWithLifecycle()
+    val adventureState by adventureBookingsViewModel.uiState.collectAsStateWithLifecycle()
+
+    var selectedFilter by remember { mutableStateOf(ReservationFilter.UPCOMING) }
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        ordersViewModel.syncProfile(sessionState.profile)
+        adventureBookingsViewModel.onAppear(sessionState.profile)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { adventureBookingsViewModel.onDisappear() }
+    }
+
+    val allReservations = remember(
+        ordersState.orders,
+        adventureState.allBookings,
+    ) {
+        ordersState.orders.map(UnifiedReservation::RestaurantOrder) +
+                adventureState.allBookings.map(UnifiedReservation::ExperienceBooking)
+    }
+
+    val now = Date()
+
+    val upcomingCount = allReservations.count {
+        !it.isCancelled && !it.isCompleted && !it.date.before(now)
+    }
+
+    val pastCount = allReservations.count {
+        !it.isCancelled && (it.isCompleted || it.date.before(now))
+    }
+
+    val cancelledCount = allReservations.count {
+        it.isCancelled
+    }
+
+    val filtered = allReservations
+        .filter { item ->
+            when (selectedFilter) {
+                ReservationFilter.UPCOMING ->
+                    !item.isCancelled && !item.isCompleted && !item.date.before(now)
+
+                ReservationFilter.PAST ->
+                    !item.isCancelled && (item.isCompleted || item.date.before(now))
+
+                ReservationFilter.CANCELLED ->
+                    item.isCancelled
+            }
+        }
+        .sortedWith(
+            if (
+                selectedFilter == ReservationFilter.PAST ||
+                selectedFilter == ReservationFilter.CANCELLED
+            ) {
+                compareByDescending<UnifiedReservation> { it.date.time }
+            } else {
+                compareBy<UnifiedReservation> { it.date.time }
+            }
+        )
+
+    val grouped = filtered.groupBy {
+        AdventureDateHelper.dayKey(
+            AdventureDateHelper.startOfDay(it.date)
+        )
+    }
+
+    BrandScreen(
+        theme = theme,
+        modifier = modifier,
+    ) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = 20.dp,
+                bottom = 30.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            item {
+                BrandSectionHeader(
+                    theme = theme,
+                    title = "Reservas",
+                    subtitle = "Tu agenda completa: pedidos del restaurante y experiencias en un solo lugar.",
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    NeutralMetricTile(
+                        title = "Próximas",
+                        value = upcomingCount.toString(),
+                        icon = Icons.Rounded.Schedule,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    NeutralMetricTile(
+                        title = "Pasadas",
+                        value = pastCount.toString(),
+                        icon = Icons.Rounded.CheckCircle,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    NeutralMetricTile(
+                        title = "Canceladas",
+                        value = cancelledCount.toString(),
+                        icon = Icons.Rounded.Close,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ReservationFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = selectedFilter == filter,
+                            onClick = { selectedFilter = filter },
+                            label = {
+                                Text(
+                                    text = filter.title,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = palette.card,
+                                labelColor = palette.textSecondary,
+                                selectedContainerColor = palette.primary,
+                                selectedLabelColor = palette.onPrimary,
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selectedFilter == filter,
+                                borderColor = palette.stroke,
+                                selectedBorderColor = palette.primary,
+                                borderWidth = 1.dp,
+                                selectedBorderWidth = 1.dp,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            if (filtered.isEmpty()) {
+                item {
+                    NeutralEmptyState(
+                        title = "No hay reservas en ${selectedFilter.title.lowercase()}",
+                        body = "Cuando hagas pedidos o reserves experiencias, aparecerán aquí agrupadas por fecha.",
+                        icon = Icons.Rounded.CalendarMonth,
+                    )
+                }
+            } else {
+                grouped.forEach { (dayKey, reservations) ->
+                    item(key = dayKey) {
+                        BrandSectionHeader(
+                            theme = theme,
+                            title = reservations.firstOrNull()
+                                ?.date
+                                ?.formatBookingsDate()
+                                .orEmpty(),
+                            subtitle = "${reservations.size} movimiento(s)",
+                        )
+                    }
+
+                    items(
+                        items = reservations,
+                        key = { it.id },
+                    ) { reservation ->
+                        UnifiedReservationCard(
+                            reservation = reservation,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UnifiedReservationCard(
+    reservation: UnifiedReservation,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = when (reservation) {
+                    is UnifiedReservation.RestaurantOrder -> Icons.Rounded.Restaurant
+                    is UnifiedReservation.ExperienceBooking -> Icons.Rounded.Explore
+                },
+                size = 48.dp,
+                contentDescription = null,
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = reservation.title,
+                    color = palette.textPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = reservation.subtitle,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BrandBadge(
+                        theme = theme,
+                        title = reservation.statusText,
+                        selected = reservation.isCompleted || reservation.isCancelled,
+                    )
+
+                    Text(
+                        text = AdventureDateHelper.timeText(reservation.date),
+                        color = palette.textTertiary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(
+                    text = reservation.total.premiumMoney(),
+                    color = palette.primary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun NeutralMetricTile(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier.appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 38.dp,
+            contentDescription = null,
+        )
+
+        Text(
+            text = value,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold,
+        )
+
+        Text(
+            text = title,
+            color = palette.textSecondary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun NeutralEmptyState(
+    title: String,
+    body: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = theme,
+                emphasized = true,
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 58.dp,
+            contentDescription = null,
+        )
+
+        Text(
+            text = title,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+        )
+
+        Text(
+            text = body,
+            color = palette.textSecondary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+private fun Date.formatBookingsDate(): String {
+    val formatter = SimpleDateFormat("EEEE d 'de' MMMM", Locale("es", "EC"))
+
+    return formatter.format(this).replaceFirstChar {
+        if (it.isLowerCase()) {
+            it.titlecase(Locale("es", "EC"))
+        } else {
+            it.toString()
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/viewmodel/AdventureBookingsUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel
 
 
 enum class AdventureReservationTimelineFilter(
@@ -6067,10 +7958,10 @@ data class AdventureBookingsUiState(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/AdventureBookingsViewModel.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/viewmodel/AdventureBookingsViewModel.kt
 
 ```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel
 
 
 @HiltViewModel
@@ -6240,1100 +8131,6 @@ class AdventureBookingsViewModel @Inject constructor(
                     }
                 }
         }
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/view/AdventureBookingsScreen.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AdventureBookingsScreen(
-    sessionState: SessionState.Authenticated,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-    viewModel: AdventureBookingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsState()
-
-    var bookingToCancel by remember { mutableStateOf<AdventureBooking?>(null) }
-
-    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
-        viewModel.onAppear(sessionState.profile)
-    }
-
-    DisposableEffect(Unit) {
-        onDispose { viewModel.onDisappear() }
-    }
-
-    state.errorMessage?.let { message ->
-        AlertDialog(
-            onDismissRequest = viewModel::dismissMessage,
-            confirmButton = {
-                TextButton(onClick = viewModel::dismissMessage) {
-                    Text("OK")
-                }
-            },
-            title = { Text("Mensaje") },
-            text = { Text(message) },
-        )
-    }
-
-    state.successMessage?.let { message ->
-        AlertDialog(
-            onDismissRequest = viewModel::dismissMessage,
-            confirmButton = {
-                TextButton(onClick = viewModel::dismissMessage) {
-                    Text("OK")
-                }
-            },
-            title = { Text("Listo") },
-            text = { Text(message) },
-        )
-    }
-
-    bookingToCancel?.let { booking ->
-        AlertDialog(
-            onDismissRequest = { bookingToCancel = null },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.cancelBooking(booking)
-                        bookingToCancel = null
-                    },
-                ) {
-                    Text("Cancelar reserva")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { bookingToCancel = null }) {
-                    Text("Volver")
-                }
-            },
-            title = { Text("¿Cancelar reserva?") },
-            text = {
-                Text(
-                    "La reserva quedará cancelada y se liberarán los premios Murco Loyalty reservados para esta reserva.",
-                )
-            },
-        )
-    }
-
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Reservas de aventura") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar")
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(
-                start = 16.dp,
-                end = 16.dp,
-                top = 12.dp,
-                bottom = 28.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (state.isLoading) {
-                item {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            item {
-                AdventureBookingsHero(state = state)
-            }
-
-            item {
-                AdventureBookingsControlsCard(
-                    state = state,
-                    onTimelineSelected = viewModel::setTimelineFilter,
-                    onStatusSelected = viewModel::setStatusFilter,
-                    onSortSelected = viewModel::setSortOrder,
-                )
-            }
-
-            if (!state.errorMessage.isNullOrBlank()) {
-                item {
-                    InlineMessageCard(
-                        title = "No se pudieron cargar tus reservas",
-                        body = state.errorMessage.orEmpty(),
-                        icon = Icons.Rounded.Warning,
-                    )
-                }
-            }
-
-            if (!state.isLoading && state.displayedBookings.isEmpty()) {
-                item {
-                    EmptyAdventureBookingsCard(state = state)
-                }
-            }
-
-            state.groupedBookings.forEach { group ->
-                item(key = "header-${group.id}") {
-                    DateGroupHeader(group = group)
-                }
-
-                items(
-                    count = group.bookings.size,
-                    key = { index -> group.bookings[index].id },
-                ) { index ->
-                    val booking = group.bookings[index]
-
-                    AdventureBookingCard(
-                        booking = booking,
-                        isCancelling = state.cancellingBookingId == booking.id,
-                        onCancel = { bookingToCancel = booking },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdventureBookingsHero(
-    state: AdventureBookingsUiState,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.tertiary,
-                        ),
-                    ),
-                )
-                .padding(20.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    IconBubble(
-                        icon = Icons.Rounded.CalendarMonth,
-                        strong = true,
-                    )
-
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = "Tu historial completo",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-
-                        Text(
-                            text = "Actuales, futuras y pasadas; filtradas por estado y ordenadas por fecha.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MetricPill("Total", state.totalCount.toString())
-                    MetricPill("Actuales", state.currentCount.toString())
-                    MetricPill("Futuras", state.futureCount.toString())
-                    MetricPill("Pasadas", state.pastCount.toString())
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AdventureBookingsControlsCard(
-    state: AdventureBookingsUiState,
-    onTimelineSelected: (AdventureReservationTimelineFilter) -> Unit,
-    onStatusSelected: (AdventureReservationStatusFilter) -> Unit,
-    onSortSelected: (AdventureReservationSortOrder) -> Unit,
-) {
-    var sortExpanded by remember { mutableStateOf(false) }
-
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            SectionTitle(
-                icon = Icons.Rounded.FilterList,
-                title = "Herramientas",
-                subtitle = "Filtra por tiempo, estado y orden de fecha.",
-            )
-
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AdventureReservationTimelineFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = state.selectedTimelineFilter == filter,
-                        onClick = { onTimelineSelected(filter) },
-                        label = { Text(filter.title) },
-                    )
-                }
-            }
-
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AdventureReservationStatusFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = state.selectedStatusFilter == filter,
-                        onClick = { onStatusSelected(filter) },
-                        label = { Text(filter.title) },
-                    )
-                }
-            }
-
-            Box {
-                OutlinedButton(
-                    onClick = { sortExpanded = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Rounded.Sort, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        text = state.sortOrder.title,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null)
-                }
-
-                DropdownMenu(
-                    expanded = sortExpanded,
-                    onDismissRequest = { sortExpanded = false },
-                ) {
-                    AdventureReservationSortOrder.entries.forEach { option ->
-                        DropdownMenuItem(
-                            text = { Text(option.title) },
-                            onClick = {
-                                sortExpanded = false
-                                onSortSelected(option)
-                            },
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DateGroupHeader(
-    group: AdventureBookingsDateGroup,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = group.title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold,
-            )
-            Text(
-                text = "${group.bookings.size} reserva(s)",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        SuggestionChip(
-            onClick = {},
-            label = { Text(AdventureDateHelper.shortDateText(group.date)) },
-            icon = {
-                Icon(
-                    Icons.Rounded.CalendarMonth,
-                    contentDescription = null,
-                )
-            },
-        )
-    }
-}
-
-@Composable
-private fun AdventureBookingCard(
-    booking: AdventureBooking,
-    isCancelling: Boolean,
-    onCancel: () -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                IconBubble(
-                    icon = bookingIcon(booking),
-                    strong = false,
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Text(
-                        text = booking.visitTypeTitle,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-
-                    Text(
-                        text = booking.eventDisplayTitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-
-                    Text(
-                        text = "${AdventureDateHelper.timeText(booking.startAt)} - ${
-                            AdventureDateHelper.timeText(
-                                booking.endAt
-                            )
-                        }",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                StatusBadge(status = booking.status)
-            }
-
-            Divider()
-
-            if (booking.items.isNotEmpty()) {
-                BookingSubsection(
-                    title = "Actividades",
-                    icon = Icons.Rounded.Explore,
-                ) {
-                    booking.items.forEach { item ->
-                        Text(
-                            text = "• ${item.title}: ${item.summaryText}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            booking.foodReservation?.takeIf { !it.isEmpty }?.let { food ->
-                BookingFoodSection(food = food)
-            }
-
-            if (booking.appliedRewards.isNotEmpty()) {
-                BookingSubsection(
-                    title = "Premios aplicados",
-                    icon = Icons.Rounded.CheckCircle,
-                ) {
-                    booking.appliedRewards.forEach { reward ->
-                        Text(
-                            text = "• ${reward.title}: -${reward.amount.priceText()}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                }
-            }
-
-            booking.notes?.takeIf { it.isNotBlank() }?.let { notes ->
-                InlineNote(text = notes)
-            }
-
-            PriceSummary(booking = booking)
-
-            AnimatedVisibility(visible = booking.canBeCancelled) {
-                OutlinedButton(
-                    onClick = onCancel,
-                    enabled = !isCancelling,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Rounded.Cancel, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (isCancelling) "Cancelando..." else "Cancelar reserva")
-                }
-            }
-
-            if (booking.status == AdventureBookingStatus.COMPLETED) {
-                CompletionInfo(text = "Reserva completada")
-            }
-
-            if (booking.status == AdventureBookingStatus.CANCELED) {
-                CompletionInfo(text = "Reserva cancelada")
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookingFoodSection(
-    food: ReservationFoodDraft,
-) {
-    BookingSubsection(
-        title = "Comida",
-        icon = Icons.Rounded.LocalDining,
-    ) {
-        food.items.forEach { item ->
-            Text(
-                text = "• ${item.quantity}x ${item.name}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        Text(
-            text = "Servicio: ${food.servingMoment.title}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-        )
-
-        food.notes?.takeIf { it.isNotBlank() }?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun PriceSummary(
-    booking: AdventureBooking,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SummaryRow("Aventura", booking.adventureSubtotal.priceText())
-        SummaryRow("Comida", booking.foodSubtotal.priceText())
-
-        if (booking.discountAmount > 0.0) {
-            SummaryRow("Descuento aventura", "-${booking.discountAmount.priceText()}")
-        }
-
-        if (booking.loyaltyDiscountAmount > 0.0) {
-            SummaryRow("Murco Loyalty", "-${booking.loyaltyDiscountAmount.priceText()}")
-        }
-
-        Divider()
-
-        SummaryRow(
-            title = "Total",
-            value = booking.totalAmount.priceText(),
-            bold = true,
-        )
-    }
-}
-
-@Composable
-private fun SummaryRow(
-    title: String,
-    value: String,
-    bold: Boolean = false,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = if (bold) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.weight(1f))
-
-        Text(
-            text = value,
-            style = if (bold) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
-            fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.SemiBold,
-            color = if (bold) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
-    }
-}
-
-@Composable
-private fun BookingSubsection(
-    title: String,
-    icon: ImageVector,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            content = content,
-        )
-    }
-}
-
-@Composable
-private fun EmptyAdventureBookingsCard(
-    state: AdventureBookingsUiState,
-) {
-    InlineMessageCard(
-        title = "No hay reservas para mostrar",
-        body = when {
-            state.totalCount == 0 -> "Cuando crees una reserva de aventura, comida o evento aparecerá aquí."
-            else -> "Cambia los filtros para ver otras reservas."
-        },
-        icon = Icons.Rounded.Event,
-    )
-}
-
-@Composable
-private fun InlineMessageCard(
-    title: String,
-    body: String,
-    icon: ImageVector,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(18.dp),
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            IconBubble(icon = icon)
-
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = body,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatusBadge(
-    status: AdventureBookingStatus,
-) {
-    val container = when (status) {
-        AdventureBookingStatus.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
-        AdventureBookingStatus.CONFIRMED -> MaterialTheme.colorScheme.primaryContainer
-        AdventureBookingStatus.COMPLETED -> MaterialTheme.colorScheme.secondaryContainer
-        AdventureBookingStatus.CANCELED -> MaterialTheme.colorScheme.errorContainer
-    }
-
-    val content = when (status) {
-        AdventureBookingStatus.PENDING -> MaterialTheme.colorScheme.onTertiaryContainer
-        AdventureBookingStatus.CONFIRMED -> MaterialTheme.colorScheme.onPrimaryContainer
-        AdventureBookingStatus.COMPLETED -> MaterialTheme.colorScheme.onSecondaryContainer
-        AdventureBookingStatus.CANCELED -> MaterialTheme.colorScheme.onErrorContainer
-    }
-
-    Text(
-        text = status.title,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        color = content,
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(container)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    )
-}
-
-@Composable
-private fun SectionTitle(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-) {
-    Row(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        IconBubble(icon = icon)
-
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun MetricPill(
-    title: String,
-    value: String,
-) {
-    Column(
-        modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.ExtraBold,
-            color = MaterialTheme.colorScheme.onPrimary,
-        )
-
-        Text(
-            text = title,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f),
-        )
-    }
-}
-
-@Composable
-private fun IconBubble(
-    icon: ImageVector,
-    strong: Boolean = false,
-) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(
-                if (strong) {
-                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)
-                } else {
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                },
-            )
-            .padding(11.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = if (strong) {
-                MaterialTheme.colorScheme.onPrimary
-            } else {
-                MaterialTheme.colorScheme.primary
-            },
-        )
-    }
-}
-
-@Composable
-private fun InlineNote(
-    text: String,
-) {
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-            .padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            Icons.Rounded.ForkRight,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun CompletionInfo(
-    text: String,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Icon(
-            Icons.Rounded.CheckCircle,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
-
-private val AdventureBooking.canBeCancelled: Boolean
-    get() = status == AdventureBookingStatus.PENDING ||
-            status == AdventureBookingStatus.CONFIRMED
-
-private fun bookingIcon(booking: AdventureBooking): ImageVector {
-    return when {
-        booking.hasActivities -> booking.items.firstOrNull()?.activity?.bookingIcon()
-        booking.hasFoodReservation -> Icons.Rounded.LocalDining
-        else -> Icons.Rounded.Event
-    } ?: Icons.Rounded.Event
-}
-
-private fun AdventureActivityType.bookingIcon(): ImageVector {
-    return when (this) {
-        AdventureActivityType.OFF_ROAD -> Icons.Rounded.Explore
-        AdventureActivityType.PAINTBALL -> Icons.Rounded.Timeline
-        AdventureActivityType.GO_KARTS -> Icons.Rounded.Event
-        AdventureActivityType.SHOOTING_RANGE -> Icons.Rounded.AccessTime
-        AdventureActivityType.CAMPING -> Icons.Rounded.CalendarMonth
-        AdventureActivityType.EXTREME_SLIDE -> Icons.Rounded.Explore
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/view/BookingsScreen.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
-
-
-private enum class BookingsMode {
-    HOME,
-    RESTAURANT_ORDERS,
-    ADVENTURE_BOOKINGS,
-}
-
-@Composable
-fun BookingsScreen(
-    modifier: Modifier = Modifier,
-    sessionState: SessionState.Authenticated,
-    ordersViewModel: OrdersViewModel = hiltViewModel(),
-) {
-    var mode by rememberSaveable { mutableStateOf(BookingsMode.HOME) }
-    val ordersState by ordersViewModel.uiState.collectAsState()
-
-    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
-        ordersViewModel.syncProfile(sessionState.profile)
-    }
-
-    when (mode) {
-        BookingsMode.HOME -> BookingsHomeContent(
-            modifier = modifier,
-            restaurantCount = ordersState.orders.size,
-            onRestaurantOrders = { mode = BookingsMode.RESTAURANT_ORDERS },
-            onAdventureBookings = { mode = BookingsMode.ADVENTURE_BOOKINGS },
-        )
-
-        BookingsMode.RESTAURANT_ORDERS -> OrdersScreen(
-            state = ordersState,
-            onBack = { mode = BookingsMode.HOME },
-            onGroupingSelected = ordersViewModel::setGrouping,
-            onSortSelected = ordersViewModel::setSortOption,
-            onStatusSelected = ordersViewModel::setStatusFilter,
-            onDismissError = ordersViewModel::clearError,
-            modifier = modifier,
-        )
-
-        BookingsMode.ADVENTURE_BOOKINGS -> AdventureBookingsScreen(
-            sessionState = sessionState,
-            onBack = { mode = BookingsMode.HOME },
-            modifier = modifier,
-        )
-    }
-}
-
-@Composable
-private fun BookingsHomeContent(
-    restaurantCount: Int,
-    onRestaurantOrders: () -> Unit,
-    onAdventureBookings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(
-            start = 20.dp,
-            end = 20.dp,
-            top = 20.dp,
-            bottom = 28.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
-    ) {
-        item {
-            BookingsHeroCard()
-        }
-
-        item {
-            BookingEntryCard(
-                badge = "Restaurante",
-                title = "Pedidos del restaurante",
-                subtitle = "Revisa tus pedidos actuales, anteriores, estados, totales y productos.",
-                icon = Icons.Rounded.LocalDining,
-                metric = "$restaurantCount pedido(s)",
-                onClick = onRestaurantOrders,
-            )
-        }
-
-        item {
-            BookingEntryCard(
-                badge = "Aventura",
-                title = "Reservas de aventura",
-                subtitle = "Mira combos, actividades, comida, eventos, premios aplicados y reservas nocturnas.",
-                icon = Icons.Rounded.CalendarMonth,
-                metric = "Actuales y futuras",
-                onClick = onAdventureBookings,
-            )
-        }
-    }
-}
-
-@Composable
-private fun BookingsHeroCard() {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.tertiary,
-                        ),
-                    ),
-                )
-                .padding(22.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    HeroIconBubble(Icons.Rounded.ReceiptLong)
-
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        Text(
-                            text = "Gestiona tus reservas",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.onPrimary,
-                        )
-
-                        Text(
-                            text = "Pedidos del restaurante y reservas de aventura en un solo lugar, separado por experiencia.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
-                        )
-                    }
-                }
-
-                SuggestionChip(
-                    onClick = {},
-                    label = { Text("Altos del Murco") },
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Explore,
-                            contentDescription = null,
-                        )
-                    },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun BookingEntryCard(
-    badge: String,
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    metric: String,
-    onClick: () -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier.padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            SectionIconBubble(icon = icon)
-
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(7.dp),
-            ) {
-                Text(
-                    text = badge,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                )
-
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                Text(
-                    text = metric,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            Icon(
-                Icons.Rounded.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SectionIconBubble(
-    icon: ImageVector,
-) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
-            .padding(14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
-
-@Composable
-private fun HeroIconBubble(
-    icon: ImageVector,
-) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f))
-            .padding(14.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onPrimary,
-        )
     }
 }
 
@@ -7894,20 +8691,46 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     sessionState: SessionState.Authenticated? = null,
     viewModel: FeaturedFeedViewModel = hiltViewModel(),
+    menuViewModel: MenuViewModel = hiltViewModel(),
+    adventureCatalogViewModel: AdventureCatalogViewModel = hiltViewModel(),
+    onOpenRestaurant: () -> Unit = {},
+    onOpenExperiences: () -> Unit = {},
+    onOpenBookings: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
 ) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val feedState by viewModel.uiState.collectAsStateWithLifecycle()
+    val menuState by menuViewModel.uiState.collectAsStateWithLifecycle()
+    val catalogState by adventureCatalogViewModel.uiState.collectAsStateWithLifecycle()
+    val profile = sessionState?.profile
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(profile?.id, profile?.updatedAt) {
         viewModel.start()
+        menuViewModel.onAppear(profile?.nationalId)
+        adventureCatalogViewModel.onAppear()
     }
 
-    state.errorMessage?.let { message ->
+    DisposableEffect(Unit) {
+        onDispose {
+            adventureCatalogViewModel.onDisappear()
+        }
+    }
+
+    val errorMessage = feedState.errorMessage ?: menuState.errorMessage ?: catalogState.errorMessage
+    errorMessage?.let { message ->
         AlertDialog(
-            onDismissRequest = viewModel::dismissError,
-            title = { Text("No se pudo cargar destacados") },
+            onDismissRequest = {
+                viewModel.dismissError()
+                menuViewModel.clearError()
+                adventureCatalogViewModel.clearError()
+            },
+            title = { Text("No se pudo actualizar Inicio") },
             text = { Text(message) },
             confirmButton = {
-                TextButton(onClick = viewModel::dismissError) { Text("Aceptar") }
+                TextButton(onClick = {
+                    viewModel.dismissError()
+                    menuViewModel.clearError()
+                    adventureCatalogViewModel.clearError()
+                }) { Text("Aceptar") }
             },
         )
     }
@@ -7918,27 +8741,21 @@ fun HomeScreen(
         topBar = {
             LargeTopAppBar(
                 title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Altos del Murco",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                        Text(
-                            text = "Restaurante, aventura y momentos destacados",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    PremiumScreenHeader(
+                        title = PremiumAltosCopy.brand,
+                        subtitle = PremiumAltosCopy.promise,
+                    )
                 },
                 actions = {
-                    IconButton(onClick = viewModel::refresh) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar destacados")
+                    IconButton(onClick = {
+                        viewModel.refresh()
+                        menuViewModel.onAppear(profile?.nationalId)
+                        adventureCatalogViewModel.refresh()
+                    }) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar")
                     }
                 },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
+                colors = TopAppBarDefaults.largeTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
     ) { padding ->
@@ -7946,33 +8763,86 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(
-                start = 20.dp,
-                end = 20.dp,
-                top = 12.dp,
-                bottom = 28.dp,
-            ),
+            contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 30.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             item {
-                HomeSectionHeader(
-                    title = "Destacados",
-                    subtitle = "Fotos recientes del restaurante, aventura y momentos de nuestros clientes.",
-                    icon = Icons.Rounded.Star,
+                HomeHero(
+                    clientName = profile?.fullName.orEmpty(),
+                    onOpenRestaurant = onOpenRestaurant,
+                    onOpenExperiences = onOpenExperiences,
+                )
+            }
+
+            item {
+                HomeQuickActions(
+                    featuredCount = menuState.featuredItems.size,
+                    packageCount = catalogState.catalog.activePackagesSorted.size,
+                    rewardsCount = menuState.walletSnapshot.availableTemplates.count { !it.isExpired },
+                    onOpenBookings = onOpenBookings,
+                    onOpenProfile = onOpenProfile,
+                )
+            }
+
+            if (menuState.featuredItems.isNotEmpty()) {
+                item {
+                    PremiumSectionHeader(
+                        title = "Recomendados del restaurante",
+                        subtitle = "Platos destacados para pedir más rápido.",
+                        icon = Icons.Rounded.LocalDining,
+                    )
+                }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(menuState.featuredItems.take(8), key = { it.id }) { item ->
+                            FeaturedMenuHomeCard(
+                                item = item,
+                                onClick = onOpenRestaurant,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (catalogState.catalog.activePackagesSorted.isNotEmpty()) {
+                item {
+                    PremiumSectionHeader(
+                        title = "Combos de experiencias",
+                        subtitle = "Primero vendemos el plan completo; luego actividades sueltas.",
+                        icon = Icons.Rounded.Terrain,
+                    )
+                }
+                items(
+                    catalogState.catalog.activePackagesSorted.take(4),
+                    key = { it.id }) { packageModel ->
+                    ExperiencePackageHomeCard(
+                        packageModel = packageModel,
+                        subtotal = AdventurePricingEngine.estimatedSubtotal(
+                            packageModel.items,
+                            catalogState.catalog
+                        ),
+                        onClick = onOpenExperiences,
+                    )
+                }
+            }
+
+            item {
+                PremiumSectionHeader(
+                    title = "Momentos destacados",
+                    subtitle = "Fotos recientes publicadas desde ADM.",
+                    icon = Icons.Rounded.PhotoLibrary,
                 )
             }
 
             when {
-                state.shouldShowInitialPlaceholders -> {
-                    items(2) {
-                        FeaturedPostPlaceholder()
-                    }
+                feedState.shouldShowInitialPlaceholders -> {
+                    items(2) { HomePostSkeleton() }
                 }
 
-                state.shouldShowEmptyState -> {
+                feedState.shouldShowEmptyState -> {
                     item {
-                        HomeEmptyState(
-                            title = "Aún no hay publicaciones activas.",
+                        PremiumEmptyState(
+                            title = "Aún no hay publicaciones activas",
                             body = "Cuando ADM publique nuevas fotos aparecerán aquí automáticamente.",
                             icon = Icons.Rounded.PhotoLibrary,
                         )
@@ -7980,34 +8850,15 @@ fun HomeScreen(
                 }
 
                 else -> {
-                    itemsIndexed(
-                        items = state.posts,
-                        key = { _, post -> post.id },
-                    ) { _, post ->
-                        LaunchedEffect(post.id, state.posts.lastOrNull()?.id) {
+                    items(feedState.posts, key = { it.id }) { post ->
+                        PremiumFeaturedPostCard(post = post)
+                        LaunchedEffect(post.id) {
                             viewModel.loadMoreIfNeeded(post)
                         }
-
-                        FeaturedPostCard(post = post)
                     }
-
-                    if (state.isLoadingMore) {
+                    if (feedState.isLoadingMore) {
                         item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                CircularProgressIndicator(modifier = Modifier.size(22.dp))
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    text = "Cargando más",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                            CircularProgressIndicator(modifier = Modifier.padding(16.dp))
                         }
                     }
                 }
@@ -8016,402 +8867,260 @@ fun HomeScreen(
     }
 }
 
+//HomeQuickActions
+//FeaturedMenuHomeCard
+//ExperiencePackageHomeCard
+
 @Composable
-private fun HomeHeroCard(
-    displayName: String,
+private fun HomeHero(
+    clientName: String,
     onOpenRestaurant: () -> Unit,
-    onOpenAdventure: () -> Unit,
+    onOpenExperiences: () -> Unit,
 ) {
-    val title = displayName
-        .trim()
-        .takeIf { it.isNotEmpty() }
-        ?.let { "Bienvenido, ${it.firstName()}" }
-        ?: "Bienvenido"
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primary,
-                            MaterialTheme.colorScheme.secondary,
-                        ),
-                    ),
-                )
-                .padding(22.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Row(verticalAlignment = Alignment.Top) {
-                    HomeIconBubble(
-                        icon = Icons.Rounded.Home,
-                        containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Spacer(Modifier.weight(1f))
-                    HomeBadge(text = "Los Altos", inverted = true)
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    Text(
-                        text = "Restaurante y aventura en un solo lugar. Explora experiencias, revisa tus reservas y accede rápido a cada sección.",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.92f),
-                    )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(onClick = onOpenRestaurant) {
-                        Icon(Icons.Rounded.Restaurant, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Restaurante")
-                    }
-                    Button(onClick = onOpenAdventure) {
-                        Icon(Icons.Rounded.Explore, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Aventura")
-                    }
-                }
+    val greeting =
+        clientName.trim().takeIf { it.isNotEmpty() }?.let { "Hola, ${it.substringBefore(' ')}" }
+            ?: "Bienvenido"
+    PremiumGradientHero(
+        title = "$greeting. Vive Altos del Murco.",
+        subtitle = "Pide comida, reserva experiencias, arma combos con comida incluida y aprovecha premios Murco Loyalty en un solo lugar.",
+        badge = "Restaurante + Experiencias",
+        primaryAction = {
+            Button(onClick = onOpenRestaurant, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Rounded.Restaurant, contentDescription = null)
+                Spacer(Modifier.padding(4.dp))
+                Text(PremiumAltosCopy.restaurantCta)
             }
-        }
-    }
+        },
+        secondaryAction = {
+            OutlinedButton(onClick = onOpenExperiences, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Rounded.Explore, contentDescription = null)
+                Spacer(Modifier.padding(4.dp))
+                Text(PremiumAltosCopy.experiencesCta)
+            }
+        },
+    )
 }
 
 @Composable
-private fun FeaturedPostCard(post: FeaturedPost) {
-    var selectedMediaIndex by remember(post.id) { mutableIntStateOf(0) }
-    var isViewerPresented by remember(post.id) { mutableStateOf(false) }
-    val media = post.orderedMedia
-
-    if (isViewerPresented) {
-        FeaturedMediaViewer(
-            media = media,
-            selectedIndex = selectedMediaIndex,
-            onDismiss = { isViewerPresented = false },
-        )
-    }
-
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
+private fun HomeQuickActions(
+    featuredCount: Int,
+    packageCount: Int,
+    rewardsCount: Int,
+    onOpenBookings: () -> Unit,
+    onOpenProfile: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PremiumMetricTile(
+                "Platos destacados",
+                featuredCount.toString(),
+                Icons.Rounded.ForkRight,
+                Modifier.weight(1f)
+            )
+            PremiumMetricTile(
+                "Combos activos",
+                packageCount.toString(),
+                Icons.Rounded.Terrain,
+                Modifier.weight(1f)
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PremiumMetricTile(
+                "Premios",
+                rewardsCount.toString(),
+                Icons.Rounded.Sell,
+                Modifier.weight(1f)
+            )
+            Card(
+                onClick = onOpenBookings,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(
+                        alpha = 0.60f
+                    )
+                ),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PremiumIconBubble(
+                        Icons.Rounded.CalendarMonth,
+                        modifier = Modifier.height(38.dp)
+                    )
+                    Text(
+                        "Reservas",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                    Text(
+                        "Ver agenda",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        PremiumCard {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                HomeIconBubble(icon = iconFor(post.category))
-
+                PremiumIconBubble(Icons.Rounded.Star, selected = true)
                 Column(modifier = Modifier.weight(1f)) {
+                    Text("Murco Loyalty visible antes de pagar", fontWeight = FontWeight.Bold)
                     Text(
-                        text = post.category.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                    Text(
-                        text = post.createdAt.homePostDateText(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Cada descuento debe aparecer como dinero real: -$3.00, item gratis o porcentaje aplicado.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-
-                HomeBadge(text = "Nuevo")
-            }
-
-            FeaturedMediaCollage(
-                media = media,
-                onTap = { index ->
-                    selectedMediaIndex = index
-                    isViewerPresented = true
-                },
-            )
-
-            post.description?.takeIf { it.isNotBlank() }?.let { description ->
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                TextButton(onClick = onOpenProfile) { Text("Ver") }
             }
         }
     }
 }
 
 @Composable
-private fun FeaturedMediaCollage(
-    media: List<FeaturedPostMedia>,
-    onTap: (Int) -> Unit,
-) {
-    when (media.size) {
-        0 -> Unit
-
-        1 -> CollageImage(
-            item = media[0],
-            index = 0,
-            onTap = onTap,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp),
-        )
-
-        2 -> Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(250.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CollageImage(media[0], 0, onTap, Modifier
-                .weight(1f)
-                .fillMaxSize())
-            CollageImage(media[1], 1, onTap, Modifier
-                .weight(1f)
-                .fillMaxSize())
-        }
-
-        3 -> Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(280.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CollageImage(media[0], 0, onTap, Modifier
-                .weight(1f)
-                .fillMaxSize())
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                CollageImage(media[1], 1, onTap, Modifier
-                    .weight(1f)
-                    .fillMaxWidth())
-                CollageImage(media[2], 2, onTap, Modifier
-                    .weight(1f)
-                    .fillMaxWidth())
-            }
-        }
-
-        else -> Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val displayed = media.take(4)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                CollageImage(displayed[0], 0, onTap, Modifier
-                    .weight(1f)
-                    .fillMaxSize())
-                CollageImage(displayed[1], 1, onTap, Modifier
-                    .weight(1f)
-                    .fillMaxSize())
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                CollageImage(displayed[2], 2, onTap, Modifier
-                    .weight(1f)
-                    .fillMaxSize())
-                Box(modifier = Modifier
-                    .weight(1f)
-                    .fillMaxSize()) {
-                    CollageImage(displayed[3], 3, onTap, Modifier.fillMaxSize())
-                    if (media.size > 4) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(Color.Black.copy(alpha = 0.40f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = "+${media.size - 4}",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CollageImage(
-    item: FeaturedPostMedia,
-    index: Int,
-    onTap: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    RemoteBitmapImage(
-        url = item.downloadURL,
-        contentDescription = "Foto destacada ${index + 1}",
-        contentScale = ContentScale.Crop,
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .clickable { onTap(index) },
-    )
-}
-
-@Composable
-private fun FeaturedPostPlaceholder() {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(320.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
-        ),
-    ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-    }
-}
-
-@Composable
-private fun HomeSectionHeader(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-) {
-    Row(
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        HomeIconBubble(icon = icon)
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-@Composable
-private fun HomeEmptyState(
-    title: String,
-    body: String,
-    icon: ImageVector,
+private fun FeaturedMenuHomeCard(
+    item: MenuItem,
+    onClick: () -> Unit,
 ) {
     Card(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            HomeIconBubble(icon = icon)
+            PremiumIconBubble(Icons.Rounded.LocalDining)
             Text(
-                text = title,
+                item.name,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                textAlign = TextAlign.Center,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2
             )
             Text(
-                text = body,
-                style = MaterialTheme.typography.bodyMedium,
+                item.description,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (item.hasOffer) {
+                    Text(
+                        item.price.premiumMoney(),
+                        textDecoration = TextDecoration.LineThrough,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(
+                    item.finalPrice.premiumMoney(),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.ExtraBold
+                )
+            }
+            Text(
+                text = if (item.canBeOrdered) "Disponible hoy" else "No disponible hoy / reservas futuras",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (item.canBeOrdered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
         }
     }
 }
 
 @Composable
-private fun HomeIconBubble(
-    icon: ImageVector,
-    containerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-    contentColor: Color = MaterialTheme.colorScheme.primary,
+private fun ExperiencePackageHomeCard(
+    packageModel: AdventureFeaturedPackage,
+    subtotal: Double,
+    onClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .size(46.dp)
-            .clip(CircleShape)
-            .background(containerColor),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = contentColor,
+    val comboDiscount = packageModel.packageDiscountAmount.coerceAtLeast(0.0)
+    val finalTotal = (subtotal - comboDiscount).coerceAtLeast(0.0)
+    PremiumCard {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            PremiumIconBubble(Icons.Rounded.Terrain, selected = true)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    packageModel.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(packageModel.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!packageModel.badge.isNullOrBlank()) {
+                    Text(
+                        packageModel.badge,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "Subtotal ${subtotal.premiumMoney()}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (comboDiscount > 0) Text(
+                "Ahorra ${comboDiscount.premiumMoney()}",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+            Text("Desde ${finalTotal.premiumMoney()} • Reservar")
+        }
+    }
+}
+
+@Composable
+private fun PremiumFeaturedPostCard(post: FeaturedPost) {
+    PremiumCard {
+        Text(
+            "Altos del Murco",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+        post.description?.takeIf { it.isNotBlank() }?.let { description ->
+            Text(
+                description,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Text(
+            "Publicado desde ADM",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
 
 @Composable
-private fun HomeBadge(
-    text: String,
-    inverted: Boolean = false,
-) {
-    val container = if (inverted) {
-        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)
-    } else {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+private fun HomePostSkeleton() {
+    PremiumCard {
+        Text("Cargando destacados...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(90.dp))
     }
-    val content =
-        if (inverted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
-
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        fontWeight = FontWeight.Bold,
-        color = content,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(container)
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-    )
 }
-
-private fun iconFor(category: FeaturedPostCategory): ImageVector = when (category) {
-    FeaturedPostCategory.RESTAURANT -> Icons.Rounded.LocalDining
-    FeaturedPostCategory.ADVENTURE -> Icons.Rounded.Explore
-    FeaturedPostCategory.CLIENTS -> Icons.Rounded.Groups
-}
-
-private fun String.firstName(): String = trim().split(Regex("\\s+")).firstOrNull().orEmpty()
-
-private fun Date.homePostDateText(): String = postDateFormatter.format(this)
-
-private val postDateFormatter = SimpleDateFormat("d MMM yyyy • h:mm a", Locale("es", "EC"))
 
 ```
 
@@ -10704,6 +11413,176 @@ object RewardPresentationFactory {
         LoyaltyRewardScope.RESTAURANT -> true
         LoyaltyRewardScope.ADVENTURE -> includeAdventureScopedTemplates
         LoyaltyRewardScope.BOTH -> true
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/presentation/view/PremiumProfileDashboard.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.view
+
+
+@Composable
+fun PremiumProfileDashboard(
+    profile: ClientProfile,
+    stats: ProfileStats,
+    isLoading: Boolean,
+    onEditProfile: () -> Unit,
+    onOpenAccountActions: () -> Unit,
+    onOpenPreferences: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        PremiumScreenHeader(
+            title = "Perfil",
+            subtitle = "Tu identidad, nivel, beneficios y resumen de visitas.",
+        )
+
+        if (isLoading) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        ProfileIdentityCard(
+            profile = profile,
+            stats = stats,
+            onEditProfile = onEditProfile,
+        )
+
+        LoyaltyProgressCard(stats = stats)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PremiumMetricTile("Pedidos", stats.completedOrders.toString(), Icons.Rounded.ReceiptLong, Modifier.weight(1f))
+            PremiumMetricTile("Reservas", stats.completedBookings.toString(), Icons.Rounded.CalendarMonth, Modifier.weight(1f))
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PremiumMetricTile("Restaurante", stats.restaurantSpent.premiumMoney(), Icons.Rounded.LocalDining, Modifier.weight(1f))
+            PremiumMetricTile("Experiencias", stats.adventureSpent.premiumMoney(), Icons.Rounded.Star, Modifier.weight(1f))
+        }
+
+        PremiumSectionHeader(
+            title = "Beneficios activos",
+            subtitle = "Los premios disponibles deben verse antes del checkout.",
+            icon = Icons.Rounded.EmojiEvents,
+        )
+
+        val rewards = stats.wallet.availableTemplates.filterNot { it.isExpired }.take(5)
+        if (rewards.isEmpty()) {
+            PremiumCard {
+                Text("No tienes premios activos en este momento.", fontWeight = FontWeight.Bold)
+                Text("Sigue acumulando visitas y consumo para desbloquear nuevos beneficios.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            rewards.forEach { template ->
+                PremiumCard {
+                    Text(template.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = template.subtitle.ifBlank { template.displaySummary },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text("Disponible para ${template.scope.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
+        PremiumSectionHeader(
+            title = "Cuenta",
+            subtitle = "Acciones secundarias separadas de tu tablero de beneficios.",
+            icon = Icons.Rounded.Settings,
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(onClick = onOpenPreferences, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.Settings, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Preferencias")
+            }
+            OutlinedButton(onClick = onOpenAccountActions, modifier = Modifier.weight(1f)) {
+                Icon(Icons.Rounded.Person, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Cuenta")
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ProfileIdentityCard(
+    profile: ClientProfile,
+    stats: ProfileStats,
+    onEditProfile: () -> Unit,
+) {
+    PremiumCard(emphasized = true) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(74.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    imageVector = Icons.Rounded.Person,
+                    contentDescription = null,
+                    colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.size(40.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(profile.fullName.ifBlank { "Cliente Altos" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Text("Cédula ${profile.nationalId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Nivel ${stats.level.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
+            Button(onClick = onEditProfile) {
+                Icon(Icons.Rounded.Edit, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("Editar")
+            }
+        }
+        Divider()
+        Text(profile.phoneNumber.ifBlank { "Sin teléfono registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(profile.email.ifBlank { "Sin email registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun LoyaltyProgressCard(stats: ProfileStats) {
+    val nextLevel = stats.level.nextLevel
+    val progress = LoyaltyLevel.progress(stats.totalSpent).toFloat().coerceIn(0f, 1f)
+
+    PremiumCard {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            PremiumIconBubble(Icons.Rounded.EmojiEvents, selected = true)
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Murco Loyalty", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                Text("Nivel ${stats.level.title} • ${stats.points} puntos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(stats.totalSpent.premiumMoney(), fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+        }
+        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+        Text(
+            text = nextLevel?.let { "Siguiente meta: ${it.title} (${it.spendRangeText})" } ?: "Ya estás en el nivel máximo.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        stats.level.benefits.forEach { benefit ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Text(benefit, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -13568,1153 +14447,6 @@ class ClearCartDraftUseCase(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/MenuItemDetailScreen.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view
-
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun MenuItemDetailScreen(
-    item: MenuItem,
-    rewardPresentationProvider: (MenuItem, Int) -> RewardPresentation?,
-    displayedPriceProvider: (MenuItem, Int) -> Double,
-    incrementalDiscountProvider: (MenuItem, Int) -> Double,
-    onAddToCart: (MenuItem, Int, String?) -> Unit,
-    onBack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var quantity by rememberSaveable(item.id) { mutableIntStateOf(1) }
-    var notes by rememberSaveable(item.id) { mutableStateOf("") }
-
-    val safeQuantity = quantity.coerceIn(1, item.remainingQuantity.coerceAtLeast(1))
-    val baseSubtotal = item.finalPrice * safeQuantity
-    val displayedTotal = displayedPriceProvider(item, safeQuantity)
-    val incrementalDiscount = incrementalDiscountProvider(item, safeQuantity)
-    val rewardPresentation = rewardPresentationProvider(item, safeQuantity)
-
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Detalle del plato") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            DetailBottomBar(
-                canAdd = item.canBeOrdered,
-                total = displayedTotal,
-                quantity = safeQuantity,
-                onAdd = {
-                    onAddToCart(
-                        item,
-                        safeQuantity,
-                        notes.trim().takeIf { it.isNotEmpty() },
-                    )
-                },
-            )
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 142.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            item {
-                DetailHero(
-                    item = item,
-                    displayedTotal = displayedTotal,
-                    baseSubtotal = baseSubtotal,
-                    hasRewardDiscount = incrementalDiscount > 0.0,
-                )
-            }
-
-            item {
-                DetailCard(title = "Descripción") {
-                    Text(
-                        text = item.description,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            rewardPresentation?.let { reward ->
-                item {
-                    RewardDetailCard(reward = reward)
-                }
-            }
-
-            item {
-                DetailCard(title = "Cantidad") {
-                    QuantityStepper(
-                        quantity = safeQuantity,
-                        maxQuantity = item.remainingQuantity.coerceAtLeast(1),
-                        enabled = item.canBeOrdered,
-                        onQuantityChanged = { quantity = it },
-                    )
-                }
-            }
-
-            item {
-                DetailCard(title = "Notas para cocina") {
-                    OutlinedTextField(
-                        value = notes,
-                        onValueChange = { notes = it.take(220) },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 3,
-                        label = { Text("Ej. sin cebolla, más cocido, sin ají") },
-                    )
-                }
-            }
-
-            item {
-                DetailCard(title = "Total") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SummaryRow("Cantidad", "x$safeQuantity")
-                        SummaryRow("Unitario", item.finalPrice.priceLabel())
-
-                        if (incrementalDiscount > 0.0) {
-                            SummaryRow("Subtotal", baseSubtotal.priceLabel())
-                            SummaryRow("Beneficio", "-${incrementalDiscount.priceLabel()}")
-                            HorizontalDivider()
-                        }
-
-                        SummaryRow(
-                            title = "Total",
-                            value = displayedTotal.priceLabel(),
-                            emphasized = true,
-                        )
-                    }
-                }
-            }
-
-            if (!item.notes.isNullOrBlank()) {
-                item {
-                    DetailCard(title = "Notas del plato") {
-                        Text(
-                            text = item.notes.orEmpty(),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            if (item.ingredients.isNotEmpty()) {
-                item {
-                    DetailCard(title = "Ingredientes") {
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            item.ingredients.forEach { ingredient ->
-                                Surface(
-                                    shape = RoundedCornerShape(999.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                ) {
-                                    Text(
-                                        text = ingredient,
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailHero(
-    item: MenuItem,
-    displayedTotal: Double,
-    baseSubtotal: Double,
-    hasRewardDiscount: Boolean,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(270.dp)
-            .clip(RoundedCornerShape(32.dp))
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.secondary,
-                    ),
-                ),
-            )
-            .padding(22.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(66.dp)
-                    .clip(CircleShape)
-                    .background(androidx.compose.ui.graphics.Color.White.copy(alpha = 0.16f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Restaurant,
-                    contentDescription = null,
-                    tint = androidx.compose.ui.graphics.Color.White,
-                    modifier = Modifier.size(34.dp),
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = item.name,
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = androidx.compose.ui.graphics.Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (hasRewardDiscount) {
-                        Text(
-                            text = baseSubtotal.priceLabel(),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.75f),
-                            textDecoration = TextDecoration.LineThrough,
-                        )
-                    }
-
-                    Text(
-                        text = displayedTotal.priceLabel(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = androidx.compose.ui.graphics.Color.White,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
-
-                Text(
-                    text = item.stockLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.90f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailCard(
-    title: String,
-    content: @Composable ColumnScope.() -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(title = title)
-            content()
-        }
-    }
-}
-
-@Composable
-private fun QuantityStepper(
-    quantity: Int,
-    maxQuantity: Int,
-    enabled: Boolean,
-    onQuantityChanged: (Int) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(
-            enabled = enabled && quantity > 1,
-            onClick = { onQuantityChanged((quantity - 1).coerceAtLeast(1)) },
-        ) {
-            Icon(Icons.Rounded.Remove, contentDescription = "Menos")
-        }
-
-        Text(
-            text = quantity.toString(),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.ExtraBold,
-        )
-
-        IconButton(
-            enabled = enabled && quantity < maxQuantity,
-            onClick = { onQuantityChanged((quantity + 1).coerceAtMost(maxQuantity)) },
-        ) {
-            Icon(Icons.Rounded.Add, contentDescription = "Más")
-        }
-    }
-}
-
-@Composable
-private fun RewardDetailCard(reward: RewardPresentation) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = reward.badge,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = reward.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = reward.message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-        }
-    }
-}
-
-@Composable
-private fun DetailBottomBar(
-    canAdd: Boolean,
-    total: Double,
-    quantity: Int,
-    onAdd: () -> Unit,
-) {
-    Surface(shadowElevation = 10.dp) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .imePadding()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Total",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = total.priceLabel(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
-
-            Button(
-                enabled = canAdd,
-                onClick = onAdd,
-                modifier = Modifier.weight(1.45f),
-            ) {
-                Icon(Icons.Rounded.ShoppingCart, contentDescription = null)
-                Spacer(modifier = Modifier.size(8.dp))
-                Text("Añadir x$quantity")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SummaryRow(
-    title: String,
-    value: String,
-    emphasized: Boolean = false,
-) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = title,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = if (emphasized) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-            text = value,
-            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
-            style = if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
-        )
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/MenuListScreen.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view
-
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun MenuListScreen(
-    state: MenuUiState,
-    clientName: String,
-    levelTitle: String,
-    cartItemsCount: Int,
-    rewardProvider: (MenuItem) -> RewardPresentation?,
-    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
-    onCategorySelected: (String?) -> Unit,
-    onOpenItem: (MenuItem) -> Unit,
-    onOpenCart: () -> Unit,
-    onOpenOrders: () -> Unit,
-    onDismissError: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            LargeTopAppBar(
-                title = {
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Sabor de Los Altos",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Menú, promos y platos destacados",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onOpenOrders) {
-                        Icon(
-                            imageVector = Icons.Rounded.ReceiptLong,
-                            contentDescription = "Pedidos",
-                        )
-                    }
-
-                    IconButton(onClick = onOpenCart) {
-                        CartIcon(cartItemsCount = cartItemsCount)
-                    }
-                },
-                colors = TopAppBarDefaults.largeTopAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                ),
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = onOpenCart) {
-                CartIcon(cartItemsCount = cartItemsCount)
-            }
-        },
-    ) { innerPadding ->
-        when {
-            state.isLoading && state.sections.isEmpty() -> {
-                LoadingRestaurantState(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-
-            state.sections.isEmpty() -> {
-                EmptyRestaurantState(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-
-            else -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 12.dp,
-                        bottom = 104.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(22.dp),
-                ) {
-                    state.errorMessage?.let { message ->
-                        item {
-                            ErrorCard(
-                                message = message,
-                                onDismiss = onDismissError,
-                            )
-                        }
-                    }
-
-                    item {
-                        RewardsSection(
-                            isLoading = state.isLoadingRewards,
-                            templates = state.restaurantRewardTemplates,
-                            eligibleItemsProvider = eligibleItemsProvider,
-                        )
-                    }
-
-                    if (state.featuredItems.isNotEmpty()) {
-                        item {
-                            FeaturedCarousel(
-                                featuredItems = state.featuredItems,
-                                rewardProvider = rewardProvider,
-                                onOpen = onOpenItem,
-                            )
-                        }
-                    }
-
-                    item {
-                        CategorySelectorBlock(
-                            selectedCategoryId = state.selectedCategoryId,
-                            categories = state.categories,
-                            onCategorySelected = onCategorySelected,
-                        )
-                    }
-
-                    items(state.visibleSections, key = { it.id }) { section ->
-                        MenuSectionCard(
-                            section = section,
-                            rewardProvider = rewardProvider,
-                            onOpen = onOpenItem,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CartIcon(cartItemsCount: Int) {
-    BadgedBox(
-        badge = {
-            if (cartItemsCount > 0) {
-                Badge { Text(cartItemsCount.toString()) }
-            }
-        },
-    ) {
-        Icon(
-            imageVector = Icons.Rounded.ShoppingCart,
-            contentDescription = "Carrito",
-        )
-    }
-}
-
-@Composable
-private fun LoadingRestaurantState(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Cargando menú...",
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun EmptyRestaurantState(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        ElevatedCard(shape = RoundedCornerShape(28.dp)) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Restaurant,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(42.dp),
-                )
-                Text(
-                    text = "No hay platos publicados todavía",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Cuando Firestore tenga documentos en restaurant_menu_items aparecerán aquí.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HeroStatPill(title: String) {
-    Surface(
-        color = Color.White.copy(alpha = 0.14f),
-        shape = RoundedCornerShape(999.dp),
-    ) {
-        Text(
-            text = title,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            color = Color.White,
-            style = MaterialTheme.typography.labelLarge,
-        )
-    }
-}
-
-@Composable
-private fun ErrorCard(
-    message: String,
-    onDismiss: () -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(
-                text = "No se pudo actualizar",
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Cerrar")
-            }
-        }
-    }
-}
-
-@Composable
-private fun RewardsSection(
-    isLoading: Boolean,
-    templates: List<LoyaltyRewardTemplate>,
-    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(
-            title = "Tus cupones y premios",
-            subtitle = "Se aplican automáticamente en platos elegibles y al confirmar el pedido.",
-        )
-
-        if (isLoading) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-        }
-
-        if (templates.isEmpty() && !isLoading) {
-            ElevatedCard(shape = RoundedCornerShape(22.dp)) {
-                Text(
-                    text = "Todavía no tienes premios activos para restaurante.",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        } else if (templates.isNotEmpty()) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(templates, key = { it.id }) { template ->
-                    RewardCouponCard(
-                        template = template,
-                        eligibleItems = eligibleItemsProvider(template),
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun RewardCouponCard(
-    template: LoyaltyRewardTemplate,
-    eligibleItems: List<MenuItem>,
-) {
-    ElevatedCard(
-        modifier = Modifier.width(300.dp),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                    shape = RoundedCornerShape(999.dp),
-                ) {
-                    Text(
-                        text = badgeText(template),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                template.expirationText?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                    )
-                }
-            }
-
-            Text(
-                text = template.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            Text(
-                text = template.subtitle.ifBlank { template.displaySummary },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-            )
-
-            val appliesToText = when {
-                eligibleItems.isNotEmpty() -> "Aplica a: " + eligibleItems.take(3).joinToString { it.name } +
-                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
-                template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "Aplica al plato elegible más caro del pedido."
-                else -> "Aún no encontré el producto objetivo en el menú. Revisa el menuItemId del cupón."
-            }
-
-            Text(
-                text = appliesToText,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.rule.type) {
-    LoyaltyRewardRuleType.FREE_MENU_ITEM -> "Gratis"
-    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Promo"
-    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
-    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
-        -> "${(template.rule.percentage ?: 0.0).toInt()}% OFF"
-    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "Aventura"
-}
-
-@Composable
-private fun FeaturedCarousel(
-    featuredItems: List<MenuItem>,
-    rewardProvider: (MenuItem) -> RewardPresentation?,
-    onOpen: (MenuItem) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(
-            title = "Popular",
-            subtitle = "Favoritos de los clientes y platos destacados",
-        )
-
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(featuredItems, key = { it.id }) { item ->
-                FeaturedMenuCard(
-                    item = item,
-                    reward = rewardProvider(item),
-                    onClick = { onOpen(item) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FeaturedMenuCard(
-    item: MenuItem,
-    reward: RewardPresentation?,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .width(280.dp)
-            .height(220.dp)
-            .clip(RoundedCornerShape(30.dp))
-            .clickable(onClick = onClick)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.secondary,
-                    ),
-                ),
-            )
-            .padding(18.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Surface(
-                    color = Color.White.copy(alpha = 0.16f),
-                    shape = RoundedCornerShape(999.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Whatshot,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            text = "Destacado",
-                            color = Color.White,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                Text(
-                    text = item.finalPrice.priceLabel(),
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = item.name,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                Text(
-                    text = item.description,
-                    color = Color.White.copy(alpha = 0.92f),
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-
-                reward?.let {
-                    CompactRewardRibbon(reward = it, onDark = true)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategorySelectorBlock(
-    selectedCategoryId: String?,
-    categories: List<MenuCategory>,
-    onCategorySelected: (String?) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        SectionHeader(
-            title = "Explorar por categoría",
-            subtitle = "Muévete rápido entre platos, bebidas y extras.",
-        )
-
-        Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            FilterChip(
-                selected = selectedCategoryId == null,
-                onClick = { onCategorySelected(null) },
-                label = { Text("Todo") },
-            )
-
-            categories.forEach { category ->
-                FilterChip(
-                    selected = selectedCategoryId == category.id,
-                    onClick = { onCategorySelected(category.id) },
-                    label = { Text(category.title) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MenuSectionCard(
-    section: MenuSection,
-    rewardProvider: (MenuItem) -> RewardPresentation?,
-    onOpen: (MenuItem) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionHeader(title = section.category.title, subtitle = "${section.items.size} producto(s)")
-
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            section.items.forEach { item ->
-                MenuItemRowCard(
-                    item = item,
-                    reward = rewardProvider(item),
-                    onClick = { onOpen(item) },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun MenuItemRowCard(
-    item: MenuItem,
-    reward: RewardPresentation?,
-    onClick: () -> Unit,
-) {
-    ElevatedCard(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = item.canBeOrdered, onClick = onClick),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Restaurant,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                }
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = item.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.weight(1f),
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-
-                        if (item.isFeatured) {
-                            Icon(
-                                imageVector = Icons.Rounded.Star,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = item.description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (item.hasOffer) {
-                            Text(
-                                text = item.price.priceLabel(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textDecoration = TextDecoration.LineThrough,
-                            )
-                        }
-
-                        Text(
-                            text = item.finalPrice.priceLabel(),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-
-                        Text(
-                            text = "• ${item.stockLabel}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (item.canBeOrdered) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.error
-                            },
-                        )
-                    }
-                }
-            }
-
-            reward?.let {
-                CompactRewardRibbon(reward = it, onDark = false)
-            }
-
-            if (item.ingredients.isNotEmpty()) {
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    item.ingredients.take(4).forEach { ingredient ->
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                        ) {
-                            Text(
-                                text = ingredient,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CompactRewardRibbon(
-    reward: RewardPresentation,
-    onDark: Boolean,
-) {
-    val background = if (onDark) {
-        Color.White.copy(alpha = 0.14f)
-    } else {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-    }
-    val titleColor = if (onDark) Color.White else MaterialTheme.colorScheme.primary
-    val bodyColor = if (onDark) {
-        Color.White.copy(alpha = 0.92f)
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    Surface(
-        color = background,
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(
-                text = reward.badge,
-                style = MaterialTheme.typography.labelMedium,
-                color = titleColor,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = reward.message,
-                style = MaterialTheme.typography.bodySmall,
-                color = bodyColor,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            reward.amountText?.let {
-                Text(
-                    text = "Ahorro estimado: $it",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = titleColor,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SectionHeader(
-    title: String,
-    subtitle: String = "",
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.ExtraBold,
-        )
-
-        if (subtitle.isNotBlank()) {
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-internal fun Double.priceLabel(): String =
-    NumberFormat.getCurrencyInstance(Locale.US).format(this)
-
-```
-
----
-
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/RestaurantScreen.kt
 
 ```kotlin
@@ -14868,6 +14600,8 @@ fun RestaurantScreen(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart
 
 
+private val CartTheme = AppSectionTheme.Restaurant
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CartScreen(
@@ -14881,115 +14615,155 @@ fun CartScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
     val lineDiscounts = state.allocatedDiscountByCartItemId()
 
-    Scaffold(
+    BrandScreen(
+        theme = CartTheme,
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Carrito") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
-                actions = {
-                    if (!state.isEmpty) {
-                        TextButton(onClick = onClearCart) {
-                            Text("Limpiar")
-                        }
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            if (!state.isEmpty) {
-                CartBottomBar(
-                    subtotal = state.subtotal,
-                    discount = state.discount,
-                    total = state.total,
-                    isLoadingRewards = state.isLoadingRewards,
-                    canCheckout = state.canCheckout,
-                    onCheckout = onCheckout,
-                )
-            }
-        },
-    ) { innerPadding ->
-        when {
-            state.isEmpty -> {
-                EmptyCart(
-                    onBack = onBack,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-
-            else -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 12.dp,
-                        bottom = 150.dp,
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            contentColor = palette.textPrimary,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
+                        titleContentColor = palette.textPrimary,
+                        navigationIconContentColor = palette.textPrimary,
+                        actionIconContentColor = palette.primary,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    if (state.isLoadingRewards) {
-                        item {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                    }
-
-                    state.errorMessage?.let { message ->
-                        item {
-                            ErrorCardInline(
-                                message = message,
-                                onDismiss = onDismissError,
+                    title = {
+                        Text(
+                            text = "Carrito",
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Volver",
+                                tint = palette.textPrimary,
                             )
                         }
-                    }
+                    },
+                    actions = {
+                        if (!state.isEmpty) {
+                            TextButton(
+                                onClick = onClearCart,
+                                colors = TextButtonDefaults.textButtonColors(
+                                    contentColor = palette.primary,
+                                ),
+                            ) {
+                                Text(
+                                    text = "Limpiar",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    },
+                )
+            },
+            bottomBar = {
+                if (!state.isEmpty) {
+                    CartBottomBar(
+                        subtotal = state.subtotal,
+                        discount = state.discount,
+                        total = state.total,
+                        isLoadingRewards = state.isLoadingRewards,
+                        canCheckout = state.canCheckout,
+                        onCheckout = onCheckout,
+                    )
+                }
+            },
+        ) { innerPadding ->
+            when {
+                state.isEmpty -> {
+                    EmptyCart(
+                        onBack = onBack,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
 
-                    item {
-                        SectionHeader(
-                            title = "Tu pedido",
-                            subtitle = if (state.isLoadingRewards) {
-                                "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
-                            } else {
-                                "${state.totalItems} producto(s) listos para enviar."
-                            },
-                        )
-                    }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 150.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        if (state.isLoadingRewards) {
+                            item {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = palette.primary,
+                                    trackColor = palette.stroke.copy(alpha = 0.45f),
+                                )
+                            }
+                        }
 
-                    items(state.items, key = { it.id }) { item ->
-                        CartItemCard(
-                            item = item,
-                            allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
-                            rewards = state.appliedRewardPresentations(item.menuItem.id),
-                            onIncrease = { onIncrease(item.id) },
-                            onDecrease = { onDecrease(item.id) },
-                            onRemove = { onRemove(item.id) },
-                        )
-                    }
+                        state.errorMessage?.let { message ->
+                            item {
+                                ErrorCardInline(
+                                    message = message,
+                                    onDismiss = onDismissError,
+                                )
+                            }
+                        }
 
-                    if (state.appliedRewards.isNotEmpty()) {
                         item {
-                            AppliedRewardsCard(
-                                rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                            BrandSectionHeader(
+                                theme = CartTheme,
+                                title = "Tu pedido",
+                                subtitle = if (state.isLoadingRewards) {
+                                    "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
+                                } else {
+                                    "${state.totalItems} producto(s) listos para enviar."
+                                },
                             )
                         }
-                    }
 
-                    item {
-                        OrderSummaryCard(
-                            subtotal = state.subtotal,
-                            discount = state.discount,
-                            total = state.total,
-                        )
+                        items(
+                            items = state.items,
+                            key = { it.id },
+                        ) { item ->
+                            CartItemCard(
+                                item = item,
+                                allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
+                                rewards = state.appliedRewardPresentations(item.menuItem.id),
+                                onIncrease = { onIncrease(item.id) },
+                                onDecrease = { onDecrease(item.id) },
+                                onRemove = { onRemove(item.id) },
+                            )
+                        }
+
+                        if (state.appliedRewards.isNotEmpty()) {
+                            item {
+                                AppliedRewardsCard(
+                                    rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                                )
+                            }
+                        }
+
+                        item {
+                            OrderSummaryCard(
+                                subtotal = state.subtotal,
+                                discount = state.discount,
+                                total = state.total,
+                            )
+                        }
                     }
                 }
             }
@@ -15002,35 +14776,51 @@ private fun EmptyCart(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
     Box(
         modifier = modifier.padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ElevatedCard(shape = RoundedCornerShape(28.dp)) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appCardStyle(
+                    theme = CartTheme,
+                    emphasized = true,
+                ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            BrandIconBubble(
+                theme = CartTheme,
+                icon = Icons.Rounded.ShoppingCartCheckout,
+                size = 58.dp,
+            )
+
+            Text(
+                text = "Tu carrito está vacío",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "Agrega platos desde el menú para crear tu pedido.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.textSecondary,
+            )
+
+            BrandPrimaryButton(
+                theme = CartTheme,
+                onClick = onBack,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.ShoppingCartCheckout,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
                 Text(
-                    text = "Tu carrito está vacío",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
+                    text = "Volver al menú",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    text = "Agrega platos desde el menú para crear tu pedido.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = onBack) {
-                    Text("Volver al menú")
-                }
             }
         }
     }
@@ -15045,126 +14835,161 @@ private fun CartItemCard(
     onDecrease: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
     val discountedLineTotal = (item.totalPrice - allocatedDiscount).coerceAtLeast(0.0)
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(
-                    imageVector = Icons.Rounded.Restaurant,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp),
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            BrandIconBubble(
+                theme = CartTheme,
+                icon = Icons.Rounded.Restaurant,
+                size = 44.dp,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.menuItem.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
 
-                Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Unitario ${item.unitPrice.priceLabel()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+
+                if (!item.notes.isNullOrBlank()) {
                     Text(
-                        text = item.menuItem.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        text = item.notes.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.primary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                if (allocatedDiscount > 0.0) {
                     Text(
-                        text = "Unitario ${item.unitPrice.priceLabel()}",
+                        text = item.totalPrice.priceLabel(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.textTertiary,
+                        textDecoration = TextDecoration.LineThrough,
                     )
 
-                    if (!item.notes.isNullOrBlank()) {
-                        Text(
-                            text = item.notes.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                    Text(
+                        text = discountedLineTotal.priceLabel(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = palette.primary,
+                    )
 
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    if (allocatedDiscount > 0.0) {
-                        Text(
-                            text = item.totalPrice.priceLabel(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textDecoration = TextDecoration.LineThrough,
-                        )
-                        Text(
-                            text = discountedLineTotal.priceLabel(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = "-${allocatedDiscount.priceLabel()}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    } else {
-                        Text(
-                            text = item.totalPrice.priceLabel(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                    }
+                    Text(
+                        text = "-${allocatedDiscount.priceLabel()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                } else {
+                    Text(
+                        text = item.totalPrice.priceLabel(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = palette.textPrimary,
+                    )
                 }
             }
+        }
 
-            rewards.forEach { reward ->
-                CompactCartRewardRibbon(reward = reward)
-            }
+        rewards.forEach { reward ->
+            CompactCartRewardRibbon(reward = reward)
+        }
 
-            HorizontalDivider()
+        HorizontalDivider(color = palette.stroke)
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandSecondaryButton(
+                theme = CartTheme,
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
             ) {
-                OutlinedButton(onClick = onRemove) {
-                    Icon(Icons.Rounded.Delete, contentDescription = null)
-                    Spacer(modifier = Modifier.size(6.dp))
-                    Text("Quitar")
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                IconButton(onClick = onDecrease) {
-                    Icon(Icons.Rounded.Remove, contentDescription = "Menos")
-                }
-
-                Text(
-                    text = item.safeQuantity.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
+                Icon(
+                    imageVector = Icons.Rounded.Delete,
+                    contentDescription = null,
+                    tint = palette.textPrimary,
+                    modifier = Modifier.size(18.dp),
                 )
 
-                IconButton(onClick = onIncrease) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Más")
-                }
+                Spacer(modifier = Modifier.size(6.dp))
+
+                Text(
+                    text = "Quitar",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(0.35f))
+
+            IconButton(onClick = onDecrease) {
+                Icon(
+                    imageVector = Icons.Rounded.Remove,
+                    contentDescription = "Menos",
+                    tint = palette.primary,
+                )
+            }
+
+            Text(
+                text = item.safeQuantity.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            IconButton(onClick = onIncrease) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Más",
+                    tint = palette.primary,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CompactCartRewardRibbon(reward: RewardPresentation) {
+private fun CompactCartRewardRibbon(
+    reward: RewardPresentation,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
     Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        color = Color.Transparent,
         shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = palette.chipGradient,
+                shape = RoundedCornerShape(16.dp),
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -15176,7 +15001,7 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
             Icon(
                 imageVector = Icons.Rounded.LocalOffer,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = palette.primary,
                 modifier = Modifier.size(18.dp),
             )
 
@@ -15184,15 +15009,16 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
                 Text(
                     text = reward.title,
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = palette.primary,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+
                 Text(
                     text = reward.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -15202,7 +15028,7 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
                 Text(
                     text = "-$amount",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = palette.primary,
                     fontWeight = FontWeight.ExtraBold,
                 )
             }
@@ -15214,56 +15040,59 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
 private fun AppliedRewardsCard(
     rewards: List<RewardPresentation>,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(
-                title = "Premios aplicados",
-                subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
-            )
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
 
-            rewards.forEach { reward ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.LocalOffer,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = CartTheme,
+                emphasized = true,
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandSectionHeader(
+            theme = CartTheme,
+            title = "Premios aplicados",
+            subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
+        )
+
+        rewards.forEach { reward ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.LocalOffer,
+                    contentDescription = null,
+                    tint = palette.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = reward.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.Bold,
                     )
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = reward.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = reward.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
-                        )
-                    }
+                    Text(
+                        text = reward.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textSecondary,
+                    )
+                }
 
-                    reward.amountText?.let { amount ->
-                        Text(
-                            text = "-$amount",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                    }
+                reward.amountText?.let { amount ->
+                    Text(
+                        text = "-$amount",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = palette.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                 }
             }
         }
@@ -15279,7 +15108,14 @@ private fun CartBottomBar(
     canCheckout: Boolean,
     onCheckout: () -> Unit,
 ) {
-    Surface(shadowElevation = 10.dp) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Surface(
+        color = palette.surface.copy(alpha = if (darkTheme) 0.96f else 0.94f),
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -15288,7 +15124,11 @@ private fun CartBottomBar(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (isLoadingRewards) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = palette.primary,
+                    trackColor = palette.stroke.copy(alpha = 0.45f),
+                )
             }
 
             Row(
@@ -15304,14 +15144,14 @@ private fun CartBottomBar(
                             else -> "Subtotal"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.textSecondary,
                     )
 
                     if (discount > 0.0) {
                         Text(
                             text = subtotal.priceLabel(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.textTertiary,
                             textDecoration = TextDecoration.LineThrough,
                         )
                     }
@@ -15321,21 +15161,33 @@ private fun CartBottomBar(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (discount > 0.0) {
-                            MaterialTheme.colorScheme.primary
+                            palette.primary
                         } else {
-                            MaterialTheme.colorScheme.onSurface
+                            palette.textPrimary
                         },
                     )
                 }
 
-                Button(
+                BrandPrimaryButton(
+                    theme = CartTheme,
                     enabled = canCheckout,
                     onClick = onCheckout,
                     modifier = Modifier.weight(1.25f),
                 ) {
-                    Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.ShoppingCartCheckout,
+                        contentDescription = null,
+                        tint = palette.onPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Checkout")
+
+                    Text(
+                        text = "Checkout",
+                        color = palette.onPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -15347,22 +15199,29 @@ internal fun ErrorCardInline(
     message: String,
     onDismiss: () -> Unit,
 ) {
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Text(
+            text = message,
+            color = palette.destructive,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        TextButton(
+            onClick = onDismiss,
+            colors = TextButtonDefaults.textButtonColors(
+                contentColor = palette.primary,
+            ),
         ) {
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Cerrar")
-            }
+            Text("Cerrar")
         }
     }
 }
@@ -15373,24 +15232,33 @@ internal fun OrderSummaryCard(
     discount: Double,
     total: Double,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SectionHeader(title = "Resumen")
-            SummaryLine("Subtotal", subtotal.priceLabel())
-            if (discount > 0.0) {
-                SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
-            }
-            HorizontalDivider()
-            SummaryLine("Total", total.priceLabel(), emphasized = true)
+        BrandSectionHeader(
+            theme = CartTheme,
+            title = "Resumen",
+        )
+
+        SummaryLine("Subtotal", subtotal.priceLabel())
+
+        if (discount > 0.0) {
+            SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
         }
+
+        HorizontalDivider(color = palette.stroke)
+
+        SummaryLine(
+            title = "Total",
+            value = total.priceLabel(),
+            emphasized = true,
+        )
     }
 }
 
@@ -15400,18 +15268,37 @@ internal fun SummaryLine(
     value: String,
     emphasized: Boolean = false,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+    val isRewardLine = title == "Murco Loyalty"
+
     Row(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = title,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = if (emphasized) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            color = if (emphasized) palette.textPrimary else palette.textSecondary,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleMedium
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
         )
+
         Spacer(modifier = Modifier.weight(1f))
+
         Text(
             text = value,
             fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
-            style = if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
-            color = if (title == "Murco Loyalty") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            color = when {
+                emphasized -> palette.textPrimary
+                isRewardLine -> palette.primary
+                else -> palette.textPrimary
+            },
         )
     }
 }
@@ -15423,7 +15310,7 @@ internal fun SummaryLine(
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/cart/CheckoutScreen.kt
 
 ```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -15437,285 +15324,547 @@ fun CheckoutScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Scaffold(
+    val theme = AppSectionTheme.Restaurant
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    BrandScreen(
+        theme = theme,
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Confirmar pedido") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            CheckoutBottomBar(
-                total = state.total,
-                canSubmit = state.canSubmit,
-                isSubmitting = state.isSubmitting,
-                onSubmit = onSubmit,
-            )
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 132.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (state.isLoadingRewards || state.isSubmitting) {
-                item {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            state.errorMessage?.let { message ->
-                item {
-                    ErrorCardInline(
-                        message = message,
-                        onDismiss = onDismissError,
-                    )
-                }
-            }
-
-            item {
-                CheckoutClientCard(profile = profile)
-            }
-
-            item {
-                TableCard(
-                    tableNumber = state.draft.tableNumber,
-                    onTableNumberChanged = onTableNumberChanged,
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "Confirmar pedido",
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Volver",
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
+                        titleContentColor = palette.textPrimary,
+                        navigationIconContentColor = palette.textPrimary,
+                        actionIconContentColor = palette.textPrimary,
+                    ),
                 )
-            }
-
-            item {
-                CheckoutItemsCard(state = state)
-            }
-
-            if (state.rewardPreview.appliedRewards.isNotEmpty()) {
-                item {
-                    RewardsAppliedCard(
-                        rewards = state.rewardPreview.appliedRewards.map {
-                            RewardPresentation.fromAppliedReward(it)
-                        },
-                    )
-                }
-            }
-
-            item {
-                OrderSummaryCard(
-                    subtotal = state.subtotal,
-                    discount = state.discount,
+            },
+            bottomBar = {
+                CheckoutBottomBar(
+                    theme = theme,
                     total = state.total,
+                    canSubmit = state.canSubmit,
+                    isSubmitting = state.isSubmitting,
+                    onSubmit = onSubmit,
                 )
+            },
+        ) { innerPadding ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 132.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (state.isLoadingRewards || state.isSubmitting) {
+                    item {
+                        LinearProgressIndicator(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = palette.primary,
+                            trackColor = palette.stroke.copy(alpha = 0.45f),
+                        )
+                    }
+                }
+
+                state.errorMessage?.let { message ->
+                    item {
+                        ErrorCardInline(
+                            theme = theme,
+                            message = message,
+                            onDismiss = onDismissError,
+                        )
+                    }
+                }
+
+                item {
+                    CheckoutClientCard(
+                        theme = theme,
+                        profile = profile,
+                    )
+                }
+
+                item {
+                    TableCard(
+                        theme = theme,
+                        tableNumber = state.draft.tableNumber,
+                        onTableNumberChanged = onTableNumberChanged,
+                    )
+                }
+
+                item {
+                    CheckoutItemsCard(
+                        theme = theme,
+                        state = state,
+                    )
+                }
+
+                if (state.rewardPreview.appliedRewards.isNotEmpty()) {
+                    item {
+                        RewardsAppliedCard(
+                            theme = theme,
+                            rewards = state.rewardPreview.appliedRewards.map {
+                                RewardPresentation.fromAppliedReward(it)
+                            },
+                        )
+                    }
+                }
+
+                item {
+                    OrderSummaryCard(
+                        theme = theme,
+                        subtotal = state.subtotal,
+                        discount = state.discount,
+                        total = state.total,
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun CheckoutClientCard(profile: ClientProfile) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+private fun CheckoutClientCard(
+    theme: AppSectionTheme,
+    profile: ClientProfile,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            SectionHeader(
-                title = "Cliente",
-                subtitle = "Estos datos vienen de tu perfil y no se editan aquí.",
-            )
+        BrandSectionHeader(
+            theme = theme,
+            title = "Cliente",
+            subtitle = "Estos datos vienen de tu perfil y no se editan aquí.",
+        )
 
-            InfoRow(
-                icon = Icons.Rounded.Person,
-                title = "Nombre",
-                value = profile.fullName,
-            )
-            InfoRow(
-                icon = Icons.Rounded.Badge,
-                title = "Cédula",
-                value = profile.nationalId,
-            )
-        }
+        InfoRow(
+            theme = theme,
+            icon = Icons.Rounded.Person,
+            title = "Nombre",
+            value = profile.fullName,
+        )
+
+        InfoRow(
+            theme = theme,
+            icon = Icons.Rounded.Badge,
+            title = "Cédula",
+            value = profile.nationalId,
+        )
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TableCard(
+    theme: AppSectionTheme,
     tableNumber: String,
     onTableNumberChanged: (String) -> Unit,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            SectionHeader(
-                title = "Mesa",
-                subtitle = "Indica dónde debe llegar el pedido.",
-            )
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
 
-            OutlinedTextField(
-                value = tableNumber,
-                onValueChange = onTableNumberChanged,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Número o nombre de mesa") },
-                leadingIcon = {
-                    Icon(Icons.Rounded.TableRestaurant, contentDescription = null)
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Characters,
-                ),
-            )
-        }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Mesa",
+            subtitle = "Indica dónde debe llegar el pedido.",
+        )
+
+        OutlinedTextField(
+            value = tableNumber,
+            onValueChange = onTableNumberChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Número o nombre de mesa") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Rounded.TableRestaurant,
+                    contentDescription = null,
+                )
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(AppTheme.Radius.large),
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Characters,
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = palette.textPrimary,
+                unfocusedTextColor = palette.textPrimary,
+                focusedContainerColor = palette.elevatedCard,
+                unfocusedContainerColor = palette.elevatedCard,
+                disabledContainerColor = palette.card,
+                focusedBorderColor = palette.primary,
+                unfocusedBorderColor = palette.stroke,
+                focusedLabelColor = palette.primary,
+                unfocusedLabelColor = palette.textSecondary,
+                cursorColor = palette.primary,
+                focusedLeadingIconColor = palette.primary,
+                unfocusedLeadingIconColor = palette.textSecondary,
+            ),
+        )
     }
 }
 
 @Composable
-private fun CheckoutItemsCard(state: CheckoutUiState) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+private fun CheckoutItemsCard(
+    theme: AppSectionTheme,
+    state: CheckoutUiState,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(
-                title = "Productos",
-                subtitle = "${state.draft.totalItems} producto(s) seleccionados.",
-            )
+        BrandSectionHeader(
+            theme = theme,
+            title = "Productos",
+            subtitle = "${state.draft.totalItems} producto(s) seleccionados.",
+        )
 
-            state.draft.items.forEach { item ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.RestaurantMenu,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+        state.draft.items.forEachIndexed { index, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                BrandIconBubble(
+                    theme = theme,
+                    icon = Icons.Rounded.RestaurantMenu,
+                    size = 42.dp,
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.menuItem.name,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.textPrimary,
                     )
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = item.menuItem.name,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            text = "x${item.safeQuantity} • ${item.unitPrice.priceLabel()}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (!item.notes.isNullOrBlank()) {
-                            Text(
-                                text = item.notes.orEmpty(),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
 
                     Text(
-                        text = item.totalPrice.priceLabel(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Bold,
+                        text = "x${item.safeQuantity} • ${item.unitPrice.priceLabel()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textSecondary,
                     )
+
+                    if (!item.notes.isNullOrBlank()) {
+                        Text(
+                            text = item.notes.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.accent,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
                 }
 
-                HorizontalDivider()
+                Text(
+                    text = item.totalPrice.priceLabel(),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+            }
+
+            if (index != state.draft.items.lastIndex) {
+                HorizontalDivider(
+                    color = palette.stroke.copy(alpha = 0.72f),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun RewardsAppliedCard(rewards: List<RewardPresentation>) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(
-                title = "Beneficios aplicados",
-                subtitle = "Se reservarán al enviar el pedido.",
-            )
+private fun RewardsAppliedCard(
+    theme: AppSectionTheme,
+    rewards: List<RewardPresentation>,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.xLarge)
 
-            rewards.forEach { reward ->
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(
-                        imageVector = Icons.Rounded.LocalOffer,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 12.dp,
+                shape = shape,
+                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
+                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
+            )
+            .clip(shape)
+            .background(palette.chipGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = shape,
+            )
+            .padding(AppTheme.Metrics.cardPadding),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Beneficios aplicados",
+            subtitle = "Se reservarán al enviar el pedido.",
+        )
+
+        rewards.forEach { reward ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                BrandIconBubble(
+                    theme = theme,
+                    icon = Icons.Rounded.LocalOffer,
+                    size = 42.dp,
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = reward.title,
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.Bold,
                     )
-                    Column(modifier = Modifier.weight(1f)) {
+
+                    Text(
+                        text = reward.message,
+                        color = palette.textSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                reward.amountText?.let { amount ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(palette.heroGradient)
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
                         Text(
-                            text = reward.title,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = reward.message,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    }
-                    reward.amountText?.let {
-                        Text(
-                            text = "-$it",
+                            text = "-$amount",
                             fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = palette.onPrimary,
+                            style = MaterialTheme.typography.labelMedium,
                         )
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun OrderSummaryCard(
+    theme: AppSectionTheme,
+    subtotal: Double,
+    discount: Double,
+    total: Double,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = theme,
+                emphasized = false,
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Resumen",
+            subtitle = "Revisa el total antes de enviar tu pedido.",
+        )
+
+        SummaryLine(
+            label = "Subtotal",
+            value = subtotal.priceLabel(),
+            labelColor = palette.textSecondary,
+            valueColor = palette.textPrimary,
+        )
+
+        if (discount > 0.0) {
+            SummaryLine(
+                label = "Beneficios",
+                value = "-${discount.priceLabel()}",
+                labelColor = palette.textSecondary,
+                valueColor = palette.success,
+            )
+        }
+
+        HorizontalDivider(
+            color = palette.stroke.copy(alpha = 0.72f),
+        )
+
+        SummaryLine(
+            label = "Total",
+            value = total.priceLabel(),
+            labelColor = palette.textPrimary,
+            valueColor = palette.textPrimary,
+            emphasized = true,
+        )
+    }
+}
+
+@Composable
+fun SummaryLine(
+    label: String,
+    value: String,
+    labelColor: Color,
+    valueColor: Color,
+    emphasized: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = labelColor,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleMedium
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Medium,
+        )
+
+        Text(
+            text = value,
+            color = valueColor,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
+        )
     }
 }
 
 @Composable
 private fun InfoRow(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    theme: AppSectionTheme,
+    icon: ImageVector,
     title: String,
     value: String,
 ) {
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 42.dp,
         )
+
         Column {
             Text(
                 text = title,
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = palette.textSecondary,
             )
+
             Text(
                 text = value.ifBlank { "Sin registrar" },
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
+                color = palette.textPrimary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ErrorCardInline(
+    theme: AppSectionTheme,
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(palette.destructive.copy(alpha = if (darkTheme) 0.18f else 0.10f))
+            .border(
+                width = 1.dp,
+                color = palette.destructive.copy(alpha = 0.35f),
+                shape = shape,
+            )
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.WarningAmber,
+            contentDescription = null,
+            tint = palette.destructive,
+        )
+
+        Text(
+            text = message,
+            modifier = Modifier.weight(1f),
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+        )
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Cerrar",
+                tint = palette.textSecondary,
             )
         }
     }
@@ -15723,12 +15872,36 @@ private fun InfoRow(
 
 @Composable
 private fun CheckoutBottomBar(
+    theme: AppSectionTheme,
     total: Double,
     canSubmit: Boolean,
     isSubmitting: Boolean,
     onSubmit: () -> Unit,
 ) {
-    Surface(shadowElevation = 10.dp) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(
+        topStart = AppTheme.Radius.xLarge,
+        topEnd = AppTheme.Radius.xLarge,
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 18.dp,
+                shape = shape,
+                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.30f else 0.12f),
+                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.30f else 0.12f),
+            )
+            .clip(shape)
+            .background(palette.cardGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = shape,
+            ),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -15742,17 +15915,20 @@ private fun CheckoutBottomBar(
                 Text(
                     text = "Total",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.textSecondary,
                 )
+
                 Text(
                     text = total.priceLabel(),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
+                    color = palette.textPrimary,
                 )
             }
 
-            Button(
-                enabled = canSubmit,
+            BrandPrimaryButton(
+                theme = theme,
+                enabled = canSubmit && !isSubmitting,
                 onClick = onSubmit,
                 modifier = Modifier.weight(1.35f),
             ) {
@@ -15760,13 +15936,1850 @@ private fun CheckoutBottomBar(
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
+                        color = palette.onPrimary,
+                        trackColor = Color.Transparent,
                     )
                 } else {
-                    Icon(Icons.Rounded.CheckCircle, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        tint = palette.onPrimary,
+                    )
                 }
+
                 Spacer(modifier = Modifier.size(8.dp))
-                Text(if (isSubmitting) "Enviando..." else "Enviar pedido")
+
+                Text(
+                    text = if (isSubmitting) "Enviando..." else "Enviar pedido",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
             }
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/menu/MenuItemDetailScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu
+
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun MenuItemDetailScreen(
+    item: MenuItem,
+    rewardPresentationProvider: (MenuItem, Int) -> RewardPresentation?,
+    displayedPriceProvider: (MenuItem, Int) -> Double,
+    incrementalDiscountProvider: (MenuItem, Int) -> Double,
+    onAddToCart: (MenuItem, Int, String?) -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Restaurant
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    var quantity by rememberSaveable(item.id) { mutableIntStateOf(1) }
+    var notes by rememberSaveable(item.id) { mutableStateOf("") }
+
+    val maxQuantity = item.remainingQuantity.coerceAtLeast(1)
+    val safeQuantity = quantity.coerceIn(1, maxQuantity)
+
+    LaunchedEffect(safeQuantity, maxQuantity) {
+        if (quantity != safeQuantity) {
+            quantity = safeQuantity
+        }
+    }
+
+    val baseSubtotal = item.finalPrice * safeQuantity
+    val displayedTotal = displayedPriceProvider(item, safeQuantity)
+    val incrementalDiscount = incrementalDiscountProvider(item, safeQuantity)
+    val rewardPresentation = rewardPresentationProvider(item, safeQuantity)
+
+    BrandScreen(
+        theme = theme,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            contentColor = palette.textPrimary,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "Detalle del plato",
+                            color = palette.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Volver",
+                                tint = palette.textPrimary,
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
+                        navigationIconContentColor = palette.textPrimary,
+                        titleContentColor = palette.textPrimary,
+                        actionIconContentColor = palette.textPrimary,
+                    ),
+                )
+            },
+            bottomBar = {
+                DetailBottomBar(
+                    theme = theme,
+                    canAdd = item.canBeOrdered,
+                    total = displayedTotal,
+                    quantity = safeQuantity,
+                    onAdd = {
+                        onAddToCart(
+                            item,
+                            safeQuantity,
+                            notes.trim().takeIf { it.isNotEmpty() },
+                        )
+                    },
+                )
+            },
+        ) { innerPadding ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = 12.dp,
+                    bottom = 142.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+            ) {
+                item {
+                    DetailHero(
+                        theme = theme,
+                        item = item,
+                        displayedTotal = displayedTotal,
+                        baseSubtotal = baseSubtotal,
+                        hasRewardDiscount = incrementalDiscount > 0.0,
+                    )
+                }
+
+                item {
+                    DetailCard(
+                        theme = theme,
+                        title = "Descripción",
+                    ) {
+                        Text(
+                            text = item.description,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = palette.textSecondary,
+                            lineHeight = 22.sp,
+                        )
+                    }
+                }
+
+                rewardPresentation?.let { reward ->
+                    item {
+                        RewardDetailCard(
+                            theme = theme,
+                            reward = reward,
+                        )
+                    }
+                }
+
+                item {
+                    DetailCard(
+                        theme = theme,
+                        title = "Cantidad",
+                    ) {
+                        QuantityStepper(
+                            theme = theme,
+                            quantity = safeQuantity,
+                            maxQuantity = maxQuantity,
+                            enabled = item.canBeOrdered,
+                            onQuantityChanged = { quantity = it },
+                        )
+                    }
+                }
+
+                item {
+                    DetailCard(
+                        theme = theme,
+                        title = "Notas para cocina",
+                    ) {
+                        OutlinedTextField(
+                            value = notes,
+                            onValueChange = { notes = it.take(220) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 3,
+                            label = {
+                                Text("Ej. sin cebolla, más cocido, sin ají")
+                            },
+                            shape = RoundedCornerShape(AppTheme.Radius.large),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = palette.textPrimary,
+                                unfocusedTextColor = palette.textPrimary,
+                                focusedLabelColor = palette.primary,
+                                unfocusedLabelColor = palette.textSecondary,
+                                cursorColor = palette.primary,
+                                focusedBorderColor = palette.primary,
+                                unfocusedBorderColor = palette.stroke,
+                                focusedContainerColor = palette.elevatedCard,
+                                unfocusedContainerColor = palette.elevatedCard,
+                            ),
+                        )
+
+                        Text(
+                            text = "${notes.length}/220",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.textTertiary,
+                            modifier = Modifier.align(Alignment.End),
+                        )
+                    }
+                }
+
+                item {
+                    DetailCard(
+                        theme = theme,
+                        title = "Total",
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SummaryRow(
+                                theme = theme,
+                                title = "Cantidad",
+                                value = "x$safeQuantity",
+                            )
+
+                            SummaryRow(
+                                theme = theme,
+                                title = "Unitario",
+                                value = item.finalPrice.priceLabel(),
+                            )
+
+                            if (incrementalDiscount > 0.0) {
+                                SummaryRow(
+                                    theme = theme,
+                                    title = "Subtotal",
+                                    value = baseSubtotal.priceLabel(),
+                                )
+
+                                SummaryRow(
+                                    theme = theme,
+                                    title = "Beneficio",
+                                    value = "-${incrementalDiscount.priceLabel()}",
+                                    valueColor = palette.success,
+                                )
+
+                                HorizontalDivider(
+                                    color = palette.stroke,
+                                    thickness = 1.dp,
+                                )
+                            }
+
+                            SummaryRow(
+                                theme = theme,
+                                title = "Total",
+                                value = displayedTotal.priceLabel(),
+                                emphasized = true,
+                            )
+                        }
+                    }
+                }
+
+                if (!item.notes.isNullOrBlank()) {
+                    item {
+                        DetailCard(
+                            theme = theme,
+                            title = "Notas del plato",
+                        ) {
+                            Text(
+                                text = item.notes.orEmpty(),
+                                color = palette.textSecondary,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+
+                if (item.ingredients.isNotEmpty()) {
+                    item {
+                        DetailCard(
+                            theme = theme,
+                            title = "Ingredientes",
+                        ) {
+                            FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                item.ingredients.forEach { ingredient ->
+                                    IngredientChip(
+                                        theme = theme,
+                                        title = ingredient,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailHero(
+    theme: AppSectionTheme,
+    item: MenuItem,
+    displayedTotal: Double,
+    baseSubtotal: Double,
+    hasRewardDiscount: Boolean,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(280.dp)
+            .clip(RoundedCornerShape(32.dp))
+            .background(palette.heroGradient)
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(32.dp),
+            )
+            .padding(22.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(190.dp)
+                .align(Alignment.TopEnd)
+                .offset(x = 62.dp, y = (-56).dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.08f)),
+        )
+
+        Box(
+            modifier = Modifier
+                .size(150.dp)
+                .align(Alignment.BottomStart)
+                .offset(x = (-58).dp, y = 52.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.06f)),
+        )
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                BrandIconBubble(
+                    theme = theme,
+                    icon = Icons.Rounded.Restaurant,
+                    size = 66.dp,
+                    contentDescription = null,
+                )
+
+                BrandBadge(
+                    theme = theme,
+                    title = if (item.canBeOrdered) "Disponible" else "No disponible",
+                    selected = item.canBeOrdered,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = item.name,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (hasRewardDiscount) {
+                        Text(
+                            text = baseSubtotal.priceLabel(),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = palette.onPrimary.copy(alpha = 0.72f),
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                    }
+
+                    Text(
+                        text = displayedTotal.priceLabel(),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = palette.onPrimary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
+
+                Text(
+                    text = item.stockLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.onPrimary.copy(alpha = 0.88f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailCard(
+    theme: AppSectionTheme,
+    title: String,
+    emphasized: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = theme,
+                emphasized = emphasized,
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        RestaurantSectionHeader(
+            theme = theme,
+            title = title,
+        )
+
+        content()
+    }
+}
+
+@Composable
+private fun QuantityStepper(
+    theme: AppSectionTheme,
+    quantity: Int,
+    maxQuantity: Int,
+    enabled: Boolean,
+    onQuantityChanged: (Int) -> Unit,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        QuantityButton(
+            theme = theme,
+            enabled = enabled && quantity > 1,
+            icon = Icons.Rounded.Remove,
+            contentDescription = "Menos",
+            onClick = { onQuantityChanged((quantity - 1).coerceAtLeast(1)) },
+        )
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = quantity.toString(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.ExtraBold,
+            )
+
+            Text(
+                text = "Máx. $maxQuantity",
+                style = MaterialTheme.typography.labelSmall,
+                color = palette.textTertiary,
+            )
+        }
+
+        QuantityButton(
+            theme = theme,
+            enabled = enabled && quantity < maxQuantity,
+            icon = Icons.Rounded.Add,
+            contentDescription = "Más",
+            onClick = { onQuantityChanged((quantity + 1).coerceAtMost(maxQuantity)) },
+        )
+    }
+}
+
+@Composable
+private fun QuantityButton(
+    theme: AppSectionTheme,
+    enabled: Boolean,
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    IconButton(
+        enabled = enabled,
+        onClick = onClick,
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                if (enabled) {
+                    palette.chipGradient
+                } else {
+                    Brush.linearGradient(
+                        listOf(
+                            palette.stroke.copy(alpha = 0.25f),
+                            palette.stroke.copy(alpha = 0.12f),
+                        )
+                    )
+                },
+            )
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = CircleShape,
+            ),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = if (enabled) palette.primary else palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun RewardDetailCard(
+    theme: AppSectionTheme,
+    reward: RewardPresentation,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppTheme.Radius.xLarge))
+            .background(palette.chipGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = RoundedCornerShape(AppTheme.Radius.xLarge),
+            )
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = Icons.Rounded.Redeem,
+                size = 42.dp,
+                contentDescription = null,
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = reward.badge,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = palette.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+
+                Text(
+                    text = reward.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        Text(
+            text = reward.message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textSecondary,
+            lineHeight = 20.sp,
+        )
+    }
+}
+
+@Composable
+private fun DetailBottomBar(
+    theme: AppSectionTheme,
+    canAdd: Boolean,
+    total: Double,
+    quantity: Int,
+    onAdd: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Surface(
+        color = palette.surface.copy(alpha = if (darkTheme) 0.96f else 0.94f),
+        tonalElevation = 0.dp,
+        shadowElevation = 14.dp,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "Total",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = palette.textSecondary,
+                )
+
+                Text(
+                    text = total.priceLabel(),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+
+            BrandPrimaryButton(
+                theme = theme,
+                enabled = canAdd,
+                onClick = onAdd,
+                modifier = Modifier.weight(1.45f),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.ShoppingCart,
+                    contentDescription = null,
+                    tint = palette.onPrimary,
+                )
+
+                Spacer(modifier = Modifier.size(8.dp))
+
+                Text(
+                    text = "Añadir x$quantity",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryRow(
+    theme: AppSectionTheme,
+    title: String,
+    value: String,
+    emphasized: Boolean = false,
+    valueColor: Color? = null,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            color = if (emphasized) palette.textPrimary else palette.textSecondary,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleMedium
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        Text(
+            text = value,
+            color = valueColor ?: if (emphasized) palette.primary else palette.textPrimary,
+            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+        )
+    }
+}
+
+@Composable
+private fun IngredientChip(
+    theme: AppSectionTheme,
+    title: String,
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Surface(
+        shape = RoundedCornerShape(999.dp),
+        color = Color.Transparent,
+        border = BorderStroke(
+            width = 1.dp,
+            color = palette.stroke,
+        ),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier
+                .background(palette.chipGradient)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            color = palette.primary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun RestaurantSectionHeader(
+    theme: AppSectionTheme,
+    title: String,
+    subtitle: String = "",
+) {
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp)
+                    .height(8.dp)
+                    .clip(CircleShape)
+                    .background(palette.heroGradient),
+            )
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.ExtraBold,
+            )
+        }
+
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.textSecondary,
+            )
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/presentation/view/menu/MenuListScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu
+
+
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    ExperimentalLayoutApi::class,
+)
+@Composable
+fun MenuListScreen(
+    state: MenuUiState,
+    clientName: String,
+    levelTitle: String,
+    cartItemsCount: Int,
+    rewardProvider: (MenuItem) -> RewardPresentation?,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
+    onCategorySelected: (String?) -> Unit,
+    onOpenItem: (MenuItem) -> Unit,
+    onOpenCart: () -> Unit,
+    onOpenOrders: () -> Unit,
+    onDismissError: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Restaurant
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    BrandScreen(
+        theme = theme,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            topBar = {
+                LargeTopAppBar(
+                    title = {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "Sabor de Los Altos",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = palette.textPrimary,
+                            )
+
+                            Text(
+                                text = "Menú, promos y platos destacados",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = palette.textSecondary,
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = onOpenOrders) {
+                            Icon(
+                                imageVector = Icons.Rounded.ReceiptLong,
+                                contentDescription = "Pedidos",
+                                tint = palette.textPrimary,
+                            )
+                        }
+
+                        IconButton(onClick = onOpenCart) {
+                            CartIcon(cartItemsCount = cartItemsCount)
+                        }
+                    },
+                    colors = TopAppBarDefaults.largeTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = palette.background.copy(alpha = 0.92f),
+                        titleContentColor = palette.textPrimary,
+                        actionIconContentColor = palette.textPrimary,
+                    ),
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(
+                    onClick = onOpenCart,
+                    containerColor = palette.primary,
+                    contentColor = palette.onPrimary,
+                ) {
+                    CartIcon(cartItemsCount = cartItemsCount)
+                }
+            },
+        ) { innerPadding ->
+            when {
+                state.isLoading && state.sections.isEmpty() -> {
+                    LoadingRestaurantState(
+                        theme = theme,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
+
+                state.sections.isEmpty() -> {
+                    EmptyRestaurantState(
+                        theme = theme,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
+
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 112.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(22.dp),
+                    ) {
+                        item {
+                            RestaurantHeroCard(
+                                clientName = clientName,
+                                levelTitle = levelTitle,
+                                cartItemsCount = cartItemsCount,
+                                onOpenCart = onOpenCart,
+                                onOpenOrders = onOpenOrders,
+                            )
+                        }
+
+                        state.errorMessage?.let { message ->
+                            item {
+                                ErrorCard(
+                                    theme = theme,
+                                    message = message,
+                                    onDismiss = onDismissError,
+                                )
+                            }
+                        }
+
+                        item {
+                            RewardsSection(
+                                theme = theme,
+                                isLoading = state.isLoadingRewards,
+                                templates = state.restaurantRewardTemplates,
+                                eligibleItemsProvider = eligibleItemsProvider,
+                            )
+                        }
+
+                        if (state.featuredItems.isNotEmpty()) {
+                            item {
+                                FeaturedCarousel(
+                                    theme = theme,
+                                    featuredItems = state.featuredItems,
+                                    rewardProvider = rewardProvider,
+                                    onOpen = onOpenItem,
+                                )
+                            }
+                        }
+
+                        item {
+                            CategorySelectorBlock(
+                                theme = theme,
+                                selectedCategoryId = state.selectedCategoryId,
+                                categories = state.categories,
+                                onCategorySelected = onCategorySelected,
+                            )
+                        }
+
+                        items(
+                            items = state.visibleSections,
+                            key = { it.id },
+                        ) { section ->
+                            MenuSectionCard(
+                                theme = theme,
+                                section = section,
+                                rewardProvider = rewardProvider,
+                                onOpen = onOpenItem,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CartIcon(cartItemsCount: Int) {
+    val palette = LocalBrandPalette.current
+
+    BadgedBox(
+        badge = {
+            if (cartItemsCount > 0) {
+                Badge(
+                    containerColor = palette.accent,
+                    contentColor = Color.White,
+                ) {
+                    Text(cartItemsCount.toString())
+                }
+            }
+        },
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.ShoppingCart,
+            contentDescription = "Carrito",
+            tint = palette.textPrimary,
+        )
+    }
+}
+
+@Composable
+private fun RestaurantHeroCard(
+    clientName: String,
+    levelTitle: String,
+    cartItemsCount: Int,
+    onOpenCart: () -> Unit,
+    onOpenOrders: () -> Unit,
+) {
+    val theme = AppSectionTheme.Restaurant
+    val palette = AppTheme.palette(theme, LocalBrandDarkTheme.current)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(AppTheme.Radius.xLarge))
+            .background(palette.heroGradient)
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(AppTheme.Radius.xLarge),
+            )
+            .padding(18.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    modifier = Modifier.size(54.dp),
+                    color = Color.White.copy(alpha = 0.15f),
+                    shape = CircleShape,
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.18f),
+                    ),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Rounded.Restaurant,
+                            contentDescription = null,
+                            tint = Color.White,
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        text = if (clientName.isBlank()) {
+                            "Bienvenido a Altos"
+                        } else {
+                            "Hola, $clientName"
+                        },
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = levelTitle.ifBlank { "Explora platos, cupones y pedidos" },
+                        color = Color.White.copy(alpha = 0.88f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                HeroStatPill(title = "$cartItemsCount en carrito")
+
+                HeroStatPill(title = "Promos activas")
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .clickable(onClick = onOpenCart),
+                    color = Color.White.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.18f),
+                    ),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Ver carrito",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                Surface(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp)
+                        .clickable(onClick = onOpenOrders),
+                    color = Color.White.copy(alpha = 0.11f),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.14f),
+                    ),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Mis pedidos",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LoadingRestaurantState(
+    theme: AppSectionTheme,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalBrandPalette.current
+
+    Box(
+        modifier = modifier.padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appCardStyle(theme),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = Icons.Rounded.Restaurant,
+                size = 54.dp,
+            )
+
+            Text(
+                text = "Cargando menú...",
+                style = MaterialTheme.typography.titleMedium,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = palette.primary,
+                trackColor = palette.stroke,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptyRestaurantState(
+    theme: AppSectionTheme,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalBrandPalette.current
+
+    Box(
+        modifier = modifier.padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appCardStyle(theme, emphasized = true),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = Icons.Rounded.Restaurant,
+                size = 58.dp,
+            )
+
+            Text(
+                text = "No hay platos publicados todavía",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "Cuando Firestore tenga documentos en restaurant_menu_items aparecerán aquí.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.textSecondary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeroStatPill(title: String) {
+    Surface(
+        color = Color.White.copy(alpha = 0.14f),
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = Color.White.copy(alpha = 0.12f),
+        ),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            color = Color.White,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun ErrorCard(
+    theme: AppSectionTheme,
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(palette.destructive.copy(alpha = 0.12f))
+            .border(
+                width = 1.dp,
+                color = palette.destructive.copy(alpha = 0.28f),
+                shape = RoundedCornerShape(24.dp),
+            )
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "No se pudo actualizar",
+                color = palette.destructive,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.weight(1f),
+            )
+
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Cerrar",
+                    tint = palette.destructive,
+                )
+            }
+        }
+
+        Text(
+            text = message,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
+private fun RewardsSection(
+    theme: AppSectionTheme,
+    isLoading: Boolean,
+    templates: List<LoyaltyRewardTemplate>,
+    eligibleItemsProvider: (LoyaltyRewardTemplate) -> List<MenuItem>,
+) {
+    val palette = LocalBrandPalette.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Tus cupones y premios",
+            subtitle = "Se aplican automáticamente en platos elegibles y al confirmar el pedido.",
+        )
+
+        if (isLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth(),
+                color = palette.primary,
+                trackColor = palette.stroke,
+            )
+        }
+
+        if (templates.isEmpty() && !isLoading) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .appCardStyle(theme),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BrandIconBubble(
+                        theme = theme,
+                        icon = Icons.Rounded.LocalOffer,
+                        size = 42.dp,
+                    )
+
+                    Text(
+                        text = "Todavía no tienes premios activos para restaurante.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = palette.textSecondary,
+                    )
+                }
+            }
+        } else if (templates.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(
+                    items = templates,
+                    key = { it.id },
+                ) { template ->
+                    RewardCouponCard(
+                        theme = theme,
+                        template = template,
+                        eligibleItems = eligibleItemsProvider(template),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RewardCouponCard(
+    theme: AppSectionTheme,
+    template: LoyaltyRewardTemplate,
+    eligibleItems: List<MenuItem>,
+) {
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = Modifier
+            .width(310.dp)
+            .appCardStyle(theme, emphasized = true),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            BrandBadge(
+                theme = theme,
+                title = badgeText(template),
+                selected = true,
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            template.expirationText?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = palette.textTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Text(
+            text = template.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = palette.textPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Text(
+            text = template.subtitle.ifBlank { template.displaySummary },
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.textSecondary,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        val appliesToText = when {
+            eligibleItems.isNotEmpty() -> {
+                "Aplica a: " +
+                        eligibleItems.take(3).joinToString { it.name } +
+                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
+            }
+
+            template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> {
+                "Aplica al plato elegible más caro del pedido."
+            }
+
+            else -> {
+                "Aún no encontré el producto objetivo en el menú. Revisa el menuItemId del cupón."
+            }
+        }
+
+        Text(
+            text = appliesToText,
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.primary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.rule.type) {
+    LoyaltyRewardRuleType.FREE_MENU_ITEM -> "Gratis"
+    LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Promo"
+
+    LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
+    LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
+        -> "${(template.rule.percentage ?: 0.0).toInt()}% OFF"
+
+    LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "Aventura"
+}
+
+@Composable
+private fun FeaturedCarousel(
+    theme: AppSectionTheme,
+    featuredItems: List<MenuItem>,
+    rewardProvider: (MenuItem) -> RewardPresentation?,
+    onOpen: (MenuItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Popular",
+            subtitle = "Favoritos de los clientes y platos destacados.",
+        )
+
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            items(
+                items = featuredItems,
+                key = { it.id },
+            ) { item ->
+                FeaturedMenuCard(
+                    theme = theme,
+                    item = item,
+                    reward = rewardProvider(item),
+                    onClick = { onOpen(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedMenuCard(
+    theme: AppSectionTheme,
+    item: MenuItem,
+    reward: RewardPresentation?,
+    onClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Box(
+        modifier = Modifier
+            .width(286.dp)
+            .height(226.dp)
+            .clip(RoundedCornerShape(30.dp))
+            .clickable(onClick = onClick)
+            .background(palette.heroGradient)
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.15f),
+                shape = RoundedCornerShape(30.dp),
+            )
+            .padding(18.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = Color.White.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(999.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = Color.White.copy(alpha = 0.14f),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Whatshot,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
+
+                        Text(
+                            text = "Destacado",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Text(
+                    text = item.finalPrice.priceLabel(),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = item.name,
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = item.description,
+                    color = Color.White.copy(alpha = 0.90f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                reward?.let {
+                    CompactRewardRibbon(
+                        reward = it,
+                        onDark = true,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CategorySelectorBlock(
+    theme: AppSectionTheme,
+    selectedCategoryId: String?,
+    categories: List<MenuCategory>,
+    onCategorySelected: (String?) -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Explorar por categoría",
+            subtitle = "Muévete rápido entre platos, bebidas y extras.",
+        )
+
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            RestaurantFilterChip(
+                title = "Todo",
+                selected = selectedCategoryId == null,
+                onClick = { onCategorySelected(null) },
+            )
+
+            categories.forEach { category ->
+                RestaurantFilterChip(
+                    title = category.title,
+                    selected = selectedCategoryId == category.id,
+                    onClick = { onCategorySelected(category.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RestaurantFilterChip(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) palette.primary else palette.card,
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (selected) Color.Transparent else palette.stroke,
+        ),
+    ) {
+        Text(
+            text = title,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            color = if (selected) palette.onPrimary else palette.textPrimary,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun MenuSectionCard(
+    theme: AppSectionTheme,
+    section: MenuSection,
+    rewardProvider: (MenuItem) -> RewardPresentation?,
+    onOpen: (MenuItem) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        BrandSectionHeader(
+            theme = theme,
+            title = section.category.title,
+            subtitle = "${section.items.size} producto(s)",
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            section.items.forEach { item ->
+                MenuItemRowCard(
+                    theme = theme,
+                    item = item,
+                    reward = rewardProvider(item),
+                    onClick = { onOpen(item) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MenuItemRowCard(
+    theme: AppSectionTheme,
+    item: MenuItem,
+    reward: RewardPresentation?,
+    onClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(
+                enabled = item.canBeOrdered,
+                onClick = onClick,
+            )
+            .appListRowStyle(theme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(palette.chipGradient)
+                    .border(
+                        width = 1.dp,
+                        color = palette.stroke,
+                        shape = RoundedCornerShape(18.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Restaurant,
+                    contentDescription = null,
+                    tint = palette.primary,
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = palette.textPrimary,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    if (item.isFeatured) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = null,
+                            tint = palette.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+
+                Text(
+                    text = item.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.textSecondary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (item.hasOffer) {
+                        Text(
+                            text = item.price.priceLabel(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = palette.textTertiary,
+                            textDecoration = TextDecoration.LineThrough,
+                        )
+                    }
+
+                    Text(
+                        text = item.finalPrice.priceLabel(),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = palette.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+
+                    Text(
+                        text = "• ${item.stockLabel}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (item.canBeOrdered) {
+                            palette.textSecondary
+                        } else {
+                            palette.destructive
+                        },
+                    )
+                }
+            }
+        }
+
+        reward?.let {
+            CompactRewardRibbon(
+                reward = it,
+                onDark = false,
+            )
+        }
+
+        if (item.ingredients.isNotEmpty()) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item.ingredients.take(4).forEach { ingredient ->
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = palette.chipGradientColorFallback(),
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = palette.stroke,
+                        ),
+                    ) {
+                        Text(
+                            text = ingredient,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = palette.textSecondary,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactRewardRibbon(
+    reward: RewardPresentation,
+    onDark: Boolean,
+) {
+    val palette = LocalBrandPalette.current
+
+    val background = if (onDark) {
+        Color.White.copy(alpha = 0.14f)
+    } else {
+        palette.primary.copy(alpha = 0.08f)
+    }
+
+    val border = if (onDark) {
+        Color.White.copy(alpha = 0.12f)
+    } else {
+        palette.primary.copy(alpha = 0.14f)
+    }
+
+    val titleColor = if (onDark) {
+        Color.White
+    } else {
+        palette.primary
+    }
+
+    val bodyColor = if (onDark) {
+        Color.White.copy(alpha = 0.90f)
+    } else {
+        palette.textSecondary
+    }
+
+    Surface(
+        color = background,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = border,
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = reward.badge,
+                style = MaterialTheme.typography.labelMedium,
+                color = titleColor,
+                fontWeight = FontWeight.ExtraBold,
+            )
+
+            Text(
+                text = reward.message,
+                style = MaterialTheme.typography.bodySmall,
+                color = bodyColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            reward.amountText?.let {
+                Text(
+                    text = "Ahorro estimado: $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = titleColor,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+private fun BrandPalette.chipGradientColorFallback(): Color {
+    return primary.copy(alpha = 0.08f)
+}
+
+internal fun Double.priceLabel(): String {
+    return NumberFormat.getCurrencyInstance(Locale.US).format(this)
+}
+
+@Composable
+internal fun SectionHeader(title: String, subtitle: String = "") {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold,
+        )
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -15786,76 +17799,97 @@ fun OrderSuccessScreen(
     order: Order,
     onBackToRestaurant: () -> Unit,
     onOpenOrders: () -> Unit,
-    modifier: Modifier = Modifier,
+    modifier: Modifier = Modifier
 ) {
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Button(
-                    onClick = onOpenOrders,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Rounded.ReceiptLong, contentDescription = null)
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text("Ver mis pedidos")
-                }
+    val theme = AppSectionTheme.Restaurant
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
 
-                OutlinedButton(
-                    onClick = onBackToRestaurant,
-                    modifier = Modifier.fillMaxWidth(),
+    Box(
+        modifier = modifier.fillMaxSize(),
+    ) {
+        BrandScreenBackground(
+            theme = theme,
+            modifier = Modifier.matchParentSize(),
+        )
+
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(palette.background.copy(alpha = 0.96f))
+                        .navigationBarsPadding()
+                        .padding(
+                            start = 16.dp,
+                            top = 12.dp,
+                            end = 16.dp,
+                            bottom = 16.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Icon(Icons.Rounded.Restaurant, contentDescription = null)
-                    Spacer(modifier = Modifier.size(8.dp))
-                    Text("Volver al restaurante")
+                    BrandPrimaryButton(
+                        theme = theme,
+                        onClick = onOpenOrders,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        RestaurantButtonContent(
+                            icon = Icons.Rounded.ReceiptLong,
+                            text = "Ver mis pedidos",
+                            tint = palette.onPrimary,
+                        )
+                    }
+
+                    BrandSecondaryButton(
+                        theme = theme,
+                        onClick = onBackToRestaurant,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        RestaurantButtonContent(
+                            icon = Icons.Rounded.Restaurant,
+                            text = "Volver al restaurante",
+                            tint = palette.textPrimary,
+                        )
+                    }
                 }
-            }
-        },
-    ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(20.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            ElevatedCard(
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.elevatedCardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
+            },
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(20.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Column(
-                    modifier = Modifier.padding(26.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 440.dp)
+                        .appCardStyle(
+                            theme = theme,
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(18.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(92.dp)
+                            .size(94.dp)
                             .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.primary,
-                                        MaterialTheme.colorScheme.secondary,
-                                    ),
-                                ),
+                            .background(palette.heroGradient)
+                            .border(
+                                width = 1.dp,
+                                color = Color.White.copy(alpha = 0.18f),
+                                shape = CircleShape,
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.CheckCircle,
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(52.dp),
+                            tint = palette.onPrimary,
+                            modifier = Modifier.size(54.dp),
                         )
                     }
 
@@ -15866,43 +17900,87 @@ fun OrderSuccessScreen(
                         Text(
                             text = "Pedido enviado",
                             style = MaterialTheme.typography.headlineSmall,
+                            color = palette.textPrimary,
                             fontWeight = FontWeight.ExtraBold,
+                            textAlign = TextAlign.Center,
                         )
+
                         Text(
                             text = "Tu pedido fue registrado y aparecerá en tiempo real para el equipo de Altos del Murco.",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.textSecondary,
+                            textAlign = TextAlign.Center,
                         )
                     }
 
-                    ElevatedCard(
-                        shape = RoundedCornerShape(24.dp),
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(AppTheme.Radius.large))
+                            .background(palette.cardGradient)
+                            .border(
+                                width = 1.dp,
+                                color = palette.stroke,
+                                shape = RoundedCornerShape(AppTheme.Radius.large),
+                            )
+                            .padding(18.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Column(
-                            modifier = Modifier.padding(18.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            SummaryLine("Código", "#${order.id.takeLast(6).uppercase()}")
-                            SummaryLine("Mesa", order.tableNumber)
-                            SummaryLine("Productos", order.totalItems.toString())
-                            SummaryLine("Total", order.totalAmount.priceLabel(), emphasized = true)
-                        }
+                        SummaryLine("Código", "#${order.id.takeLast(6).uppercase()}")
+                        SummaryLine("Mesa", order.tableNumber)
+                        SummaryLine("Productos", order.totalItems.toString())
+                        SummaryLine(
+                            label = "Total",
+                            value = order.totalAmount.priceLabel(),
+                            labelColor = palette.textSecondary,
+                            valueColor = palette.textPrimary,
+                        )
                     }
 
                     if (order.appliedRewards.isNotEmpty()) {
                         Text(
                             text = "Beneficios reservados: ${order.appliedRewards.size}",
-                            color = MaterialTheme.colorScheme.primary,
+                            color = palette.accent,
+                            style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(palette.chipGradient)
+                                .border(
+                                    width = 1.dp,
+                                    color = palette.stroke,
+                                    shape = CircleShape,
+                                )
+                                .padding(horizontal = 14.dp, vertical = 9.dp),
                         )
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun RestaurantButtonContent(
+    icon: ImageVector,
+    text: String,
+    tint: Color,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(20.dp),
+    )
+
+    Spacer(modifier = Modifier.size(8.dp))
+
+    Text(
+        text = text,
+        color = tint,
+        fontWeight = FontWeight.SemiBold,
+    )
 }
 
 ```
@@ -15915,6 +17993,8 @@ fun OrderSuccessScreen(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order
 
 
+private val RestaurantTheme = AppSectionTheme.Restaurant
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OrdersScreen(
@@ -15926,67 +18006,125 @@ fun OrdersScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Scaffold(
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    BrandScreen(
+        theme = RestaurantTheme,
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Mis pedidos") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        Text(
+                            text = "Mis pedidos",
+                            color = palette.textPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Volver",
+                                tint = palette.textPrimary,
+                            )
+                        }
+                    },
+//                    colors = CenterAlignedTopAppBarDefaults.centerAlignedTopAppBarColors(
+//                        containerColor = Color.Transparent,
+//                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
+//                        navigationIconContentColor = palette.textPrimary,
+//                        titleContentColor = palette.textPrimary,
+//                        actionIconContentColor = palette.textPrimary,
+//                    ),
+                )
+            },
+        ) { innerPadding ->
+            LazyOrdersContent(
+                state = state,
+                innerPadding = innerPadding,
+                onGroupingSelected = onGroupingSelected,
+                onSortSelected = onSortSelected,
+                onStatusSelected = onStatusSelected,
+                onDismissError = onDismissError,
             )
-        },
-    ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            if (state.isLoading) {
-                item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
-            }
+        }
+    }
+}
 
-            state.errorMessage?.let { message ->
-                item {
-                    ErrorCardInline(
-                        message = message,
-                        onDismiss = onDismissError,
-                    )
-                }
-            }
+@Composable
+private fun LazyOrdersContent(
+    state: OrdersUiState,
+    innerPadding: PaddingValues,
+    onGroupingSelected: (OrdersGroupingOption) -> Unit,
+    onSortSelected: (OrdersSortOption) -> Unit,
+    onStatusSelected: (OrderStatus?) -> Unit,
+    onDismissError: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
 
+    androidx.compose.foundation.lazy.LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(innerPadding),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            end = 16.dp,
+            top = 12.dp,
+            bottom = 28.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        if (state.isLoading) {
             item {
-                OrdersControlsCard(
-                    state = state,
-                    onGroupingSelected = onGroupingSelected,
-                    onSortSelected = onSortSelected,
-                    onStatusSelected = onStatusSelected,
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = palette.accent,
+                    trackColor = palette.stroke.copy(alpha = 0.45f),
                 )
             }
+        }
 
-            if (state.visibleOrders.isEmpty()) {
+        state.errorMessage?.let { message ->
+            item {
+                ErrorCardInline(
+                    message = message,
+                    onDismiss = onDismissError,
+                )
+            }
+        }
+
+        item {
+            OrdersControlsCard(
+                state = state,
+                onGroupingSelected = onGroupingSelected,
+                onSortSelected = onSortSelected,
+                onStatusSelected = onStatusSelected,
+            )
+        }
+
+        if (state.visibleOrders.isEmpty()) {
+            item {
+                EmptyOrdersCard()
+            }
+        } else {
+            val groups = groupOrders(state)
+
+            groups.forEach { (title, orders) ->
                 item {
-                    EmptyOrdersCard()
+                    BrandSectionHeader(
+                        theme = RestaurantTheme,
+                        title = title,
+                        subtitle = "${orders.size} pedido(s)",
+                    )
                 }
-            } else {
-                val groups = groupOrders(state)
-                groups.forEach { (title, orders) ->
-                    item {
-                        SectionHeader(
-                            title = title,
-                            subtitle = "${orders.size} pedido(s)",
-                        )
-                    }
 
-                    items(orders, key = { it.id }) { order ->
-                        OrderCard(order = order)
-                    }
-                }
+                items(orders, key = { it.id }) { order -> OrderCard(order = order) }
             }
         }
     }
@@ -16000,57 +18138,115 @@ private fun OrdersControlsCard(
     onSortSelected: (OrdersSortOption) -> Unit,
     onStatusSelected: (OrderStatus?) -> Unit,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = RestaurantTheme,
+                emphasized = true,
+            ),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        BrandSectionHeader(
+            theme = RestaurantTheme,
+            title = "Herramientas",
+            subtitle = "Agrupa, filtra y ordena tus pedidos.",
+        )
+
+        SingleChoiceSegmentedButtonRow(
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            SectionHeader(
-                title = "Herramientas",
-                subtitle = "Agrupa, filtra y ordena tus pedidos.",
-            )
-
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                OrdersGroupingOption.entries.forEachIndexed { index, option ->
-                    SegmentedButton(
-                        selected = state.grouping == option,
-                        onClick = { onGroupingSelected(option) },
-                        shape = SegmentedButtonDefaults.itemShape(
-                            index = index,
-                            count = OrdersGroupingOption.entries.size,
-                        ),
-                    ) {
-                        Text(option.title)
-                    }
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = state.statusFilter == null,
-                    onClick = { onStatusSelected(null) },
-                    label = { Text("Todos") },
-                )
-                OrderStatus.entries.forEach { status ->
-                    FilterChip(
-                        selected = state.statusFilter == status,
-                        onClick = { onStatusSelected(status) },
-                        label = { Text(status.title) },
+            OrdersGroupingOption.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = state.grouping == option,
+                    onClick = { onGroupingSelected(option) },
+                    shape = SegmentedButtonDefaults.itemShape(
+                        index = index,
+                        count = OrdersGroupingOption.entries.size,
+                    ),
+                    colors = SegmentedButtonDefaults.colors(
+                        activeContainerColor = palette.primary,
+                        activeContentColor = palette.onPrimary,
+                        inactiveContainerColor = palette.elevatedCard,
+                        inactiveContentColor = palette.textSecondary,
+                        activeBorderColor = Color.Transparent,
+                        inactiveBorderColor = palette.stroke,
+                    ),
+                ) {
+                    Text(
+                        text = option.title,
+                        fontWeight = if (state.grouping == option) {
+                            FontWeight.Bold
+                        } else {
+                            FontWeight.SemiBold
+                        },
                     )
                 }
             }
-
-            SortDropdown(
-                selected = state.sortOption,
-                onSelected = onSortSelected,
-            )
         }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            RestaurantFilterChip(
+                selected = state.statusFilter == null,
+                label = "Todos",
+                onClick = { onStatusSelected(null) },
+            )
+
+            OrderStatus.entries.forEach { status ->
+                RestaurantFilterChip(
+                    selected = state.statusFilter == status,
+                    label = status.title,
+                    onClick = { onStatusSelected(status) },
+                )
+            }
+        }
+
+        SortDropdown(
+            selected = state.sortOption,
+            onSelected = onSortSelected,
+        )
     }
+}
+
+@Composable
+private fun RestaurantFilterChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+            )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            containerColor = palette.card,
+            labelColor = palette.textSecondary,
+            selectedContainerColor = palette.primary,
+            selectedLabelColor = palette.onPrimary,
+        ),
+        border = FilterChipDefaults.filterChipBorder(
+            enabled = true,
+            selected = selected,
+            borderColor = palette.stroke,
+            selectedBorderColor = Color.Transparent,
+        ),
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -16060,6 +18256,10 @@ private fun SortDropdown(
     onSelected: (OrdersSortOption) -> Unit,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -16072,17 +18272,50 @@ private fun SortDropdown(
             modifier = Modifier
                 .fillMaxWidth()
                 .menuAnchor(),
-            label = { Text("Ordenar") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            label = {
+                Text("Ordenar")
+            },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(
+                    expanded = expanded,
+                )
+            },
+            shape = shape,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = palette.textPrimary,
+                unfocusedTextColor = palette.textPrimary,
+                focusedLabelColor = palette.primary,
+                unfocusedLabelColor = palette.textSecondary,
+                focusedBorderColor = palette.primary,
+                unfocusedBorderColor = palette.stroke,
+                focusedContainerColor = palette.elevatedCard,
+                unfocusedContainerColor = palette.elevatedCard,
+                cursorColor = palette.primary,
+            ),
         )
 
         ExposedDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            containerColor = palette.elevatedCard,
         ) {
             OrdersSortOption.entries.forEach { option ->
                 DropdownMenuItem(
-                    text = { Text(option.title) },
+                    text = {
+                        Text(
+                            text = option.title,
+                            color = if (option == selected) {
+                                palette.primary
+                            } else {
+                                palette.textPrimary
+                            },
+                            fontWeight = if (option == selected) {
+                                FontWeight.Bold
+                            } else {
+                                FontWeight.Normal
+                            },
+                        )
+                    },
                     onClick = {
                         expanded = false
                         onSelected(option)
@@ -16095,134 +18328,177 @@ private fun SortDropdown(
 
 @Composable
 private fun EmptyOrdersCard() {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ElevatedCard(shape = RoundedCornerShape(24.dp)) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.ReceiptLong,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = "No hay pedidos para mostrar",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Cuando envíes pedidos aparecerán aquí en tiempo real.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appCardStyle(
+                    theme = RestaurantTheme,
+                    emphasized = true,
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BrandIconBubble(
+                theme = RestaurantTheme,
+                icon = Icons.Rounded.ReceiptLong,
+                size = 56.dp,
+            )
+
+            Text(
+                text = "No hay pedidos para mostrar",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "Cuando envíes pedidos aparecerán aquí en tiempo real.",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
 }
 
 @Composable
 private fun OrderCard(order: Order) {
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = RestaurantTheme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+        Row(
+            verticalAlignment = Alignment.Top,
         ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Pedido #${order.id.takeLast(6).uppercase()}",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                    Text(
-                        text = "${order.totalItems} producto(s) • Mesa ${order.tableNumber}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                StatusPill(order.status)
-            }
-
-            HorizontalDivider()
-
-            order.items.take(3).forEach { item ->
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Icon(
-                        imageVector = Icons.Rounded.RestaurantMenu,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "${item.quantity}x ${item.name}",
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        if (!item.notes.isNullOrBlank()) {
-                            Text(
-                                text = item.notes.orEmpty(),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                    Text(
-                        text = item.totalPrice.priceLabel(),
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            }
-
-            if (order.items.size > 3) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(
-                    text = "+${order.items.size - 3} producto(s) más",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            HorizontalDivider()
-
-            Row {
-                Text(
-                    text = order.createdAt.shortDateTime(),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = order.totalAmount.priceLabel(),
+                    text = "Pedido #${order.id.takeLast(6).uppercase()}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = "${order.totalItems} producto(s) • Mesa ${order.tableNumber}",
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
+
+            StatusPill(order.status)
+        }
+
+        HorizontalDivider(
+            color = palette.stroke.copy(alpha = 0.75f),
+        )
+
+        order.items.take(3).forEach { item ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                BrandIconBubble(
+                    theme = RestaurantTheme,
+                    icon = Icons.Rounded.RestaurantMenu,
+                    size = 36.dp,
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "${item.quantity}x ${item.name}",
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.textPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+
+                    if (!item.notes.isNullOrBlank()) {
+                        Text(
+                            text = item.notes.orEmpty(),
+                            color = palette.textSecondary,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+
+                Text(
+                    text = item.totalPrice.priceLabel(),
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        if (order.items.size > 3) {
+            Text(
+                text = "+${order.items.size - 3} producto(s) más",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        HorizontalDivider(
+            color = palette.stroke.copy(alpha = 0.75f),
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = order.createdAt.shortDateTime(),
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Spacer(modifier = Modifier.weight(1f))
+
+            Text(
+                text = order.totalAmount.priceLabel(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.primary,
+            )
         }
     }
 }
 
 @Composable
 private fun StatusPill(status: OrderStatus) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
     val color = when (status) {
-        OrderStatus.PENDING -> MaterialTheme.colorScheme.tertiary
-        OrderStatus.CONFIRMED -> MaterialTheme.colorScheme.primary
-        OrderStatus.PREPARING -> MaterialTheme.colorScheme.secondary
-        OrderStatus.COMPLETED -> MaterialTheme.colorScheme.outline
-        OrderStatus.CANCELED -> MaterialTheme.colorScheme.error
+        OrderStatus.PENDING -> palette.warning
+        OrderStatus.CONFIRMED -> palette.primary
+        OrderStatus.PREPARING -> palette.accent
+        OrderStatus.COMPLETED -> palette.success
+        OrderStatus.CANCELED -> palette.destructive
     }
 
     Surface(
-        color = color.copy(alpha = 0.12f),
+        color = color.copy(alpha = if (darkTheme) 0.18f else 0.12f),
         shape = RoundedCornerShape(999.dp),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
     ) {
         Text(
             text = status.title,
@@ -16246,8 +18522,12 @@ private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
     }
 }
 
-private fun Date.shortDateTime(): String =
-    SimpleDateFormat("dd MMM yyyy, HH:mm", Locale("es", "EC")).format(this)
+private fun Date.shortDateTime(): String {
+    return SimpleDateFormat(
+        "dd MMM yyyy, HH:mm",
+        Locale("es", "EC"),
+    ).format(this)
+}
 
 ```
 
@@ -17779,10 +20059,10 @@ private enum class TopLevelDestination(
         label = "Restaurante",
         icon = { Icon(Icons.Rounded.Restaurant, contentDescription = null) },
     ),
-    ADVENTURE(
-        route = "adventure",
-        label = "Aventura",
-        icon = { Icon(Icons.Rounded.Explore, contentDescription = null) },
+    EXPERIENCES(
+        route = "experiences",
+        label = "Experiencias",
+        icon = { Icon(Icons.Rounded.Terrain, contentDescription = null) },
     ),
     BOOKINGS(
         route = "bookings",
@@ -17805,18 +20085,15 @@ fun AltosMainShell(
     val navController = rememberNavController()
     val destinations = TopLevelDestination.entries
     val navBackStackEntry by navController.currentBackStackEntryAsState()
-    val currentDestination = navBackStackEntry?.destination
+    val currentRoute = navBackStackEntry?.destination?.route
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
             NavigationBar {
                 destinations.forEach { destination ->
-                    val selected =
-                        currentDestination?.hierarchy?.any { it.route == destination.route } == true
-
                     NavigationBarItem(
-                        selected = selected,
+                        selected = currentRoute == destination.route,
                         onClick = { navController.navigateTopLevel(destination.route) },
                         icon = destination.icon,
                         label = { Text(destination.label) },
@@ -17831,12 +20108,18 @@ fun AltosMainShell(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(TopLevelDestination.HOME.route) {
-                HomeScreen(sessionState = sessionState)
+                HomeScreen(
+                    sessionState = sessionState,
+                    onOpenRestaurant = { navController.navigateTopLevel(TopLevelDestination.RESTAURANT.route) },
+                    onOpenExperiences = { navController.navigateTopLevel(TopLevelDestination.EXPERIENCES.route) },
+                    onOpenBookings = { navController.navigateTopLevel(TopLevelDestination.BOOKINGS.route) },
+                    onOpenProfile = { navController.navigateTopLevel(TopLevelDestination.PROFILE.route) },
+                )
             }
             composable(TopLevelDestination.RESTAURANT.route) {
                 RestaurantScreen(sessionState = sessionState)
             }
-            composable(TopLevelDestination.ADVENTURE.route) {
+            composable(TopLevelDestination.EXPERIENCES.route) {
                 AdventureScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.BOOKINGS.route) {
@@ -17854,13 +20137,16 @@ fun AltosMainShell(
 }
 
 private fun NavHostController.navigateTopLevel(route: String) {
-    navigate(route) {
-        popUpTo(graph.findStartDestination().id) {
-            saveState = true
-        }
-        restoreState = true
-        launchSingleTop = true
-    }
+    navigate(
+        route = route,
+        navOptions = navOptions {
+            popUpTo(graph.findStartDestination().id) {
+                saveState = true
+            }
+            restoreState = true
+            launchSingleTop = true
+        },
+    )
 }
 
 ```
@@ -17902,6 +20188,414 @@ fun AltosPlaceholderCard(
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/theme/AltosTheme.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.theme
+
+
+enum class AppSectionTheme {
+    Neutral,
+    Adventure,
+    Restaurant;
+
+    val watermarkAssetName: String?
+        get() = when (this) {
+            Neutral -> null
+            Adventure -> "theme_adventure_mark"
+            Restaurant -> "theme_restaurant_mark"
+        }
+}
+
+data class BrandPalette(
+    val primary: Color,
+    val secondary: Color,
+    val accent: Color,
+    val onPrimary: Color,
+
+    val background: Color,
+    val surface: Color,
+    val card: Color,
+    val elevatedCard: Color,
+    val stroke: Color,
+
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val textTertiary: Color,
+
+    val success: Color,
+    val warning: Color,
+    val destructive: Color,
+
+    val shadow: Color,
+    val glow: Color,
+
+    val heroGradient: Brush,
+    val softGradient: Brush,
+    val cardGradient: Brush,
+    val chipGradient: Brush,
+)
+
+val LocalAppSectionTheme = staticCompositionLocalOf { AppSectionTheme.Neutral }
+val LocalBrandPalette = staticCompositionLocalOf {
+    AppTheme.palette(
+        theme = AppSectionTheme.Neutral,
+        darkTheme = false,
+    )
+}
+val LocalBrandDarkTheme = staticCompositionLocalOf { false }
+
+object AppTheme {
+
+    object Radius {
+        val small = 14.dp
+        val medium = 18.dp
+        val large = 22.dp
+        val xLarge = 28.dp
+    }
+
+    object Metrics {
+        val fieldHeight = 54.dp
+        val buttonHeight = 54.dp
+        val cardPadding = 16.dp
+        val sectionSpacing = 20.dp
+        val shadowRadius = 18.dp
+        val shadowY = 10.dp
+    }
+
+    fun palette(
+        theme: AppSectionTheme,
+        darkTheme: Boolean,
+    ): BrandPalette {
+        return when (theme) {
+            AppSectionTheme.Neutral -> neutralPalette(darkTheme)
+            AppSectionTheme.Adventure -> adventurePalette(darkTheme)
+            AppSectionTheme.Restaurant -> restaurantPalette(darkTheme)
+        }
+    }
+
+    private fun neutralPalette(dark: Boolean): BrandPalette {
+        val primary = adaptive(dark, 0x2F3E4F, 0xB5C2D0)
+        val secondary = adaptive(dark, 0x5F738A, 0x8FA7BF)
+        val accent = adaptive(dark, 0x6F8FB0, 0x9DB6D4)
+        val background = adaptive(dark, 0xF4F7FA, 0x0C1014)
+        val surface = adaptive(dark, 0xFFFFFF, 0x12171D)
+        val card = adaptive(dark, 0xFBFCFD, 0x151B22)
+        val elevatedCard = adaptive(dark, 0xFFFFFF, 0x19212A)
+        val stroke = adaptive(dark, 0xDDE5EC, 0x2A3542)
+        val textPrimary = adaptive(dark, 0x15202B, 0xF1F5F9)
+        val textSecondary = adaptive(dark, 0x5C6B7A, 0xA7B4C2)
+        val textTertiary = adaptive(dark, 0x8A97A5, 0x728191)
+        val success = adaptive(dark, 0x2F855A, 0x68D391)
+        val warning = adaptive(dark, 0xB7791F, 0xF6AD55)
+        val destructive = adaptive(dark, 0xC53030, 0xFC8181)
+        val glow = adaptive(dark, 0x9DB6D4, 0x5D7996)
+
+        return BrandPalette(
+            primary = primary,
+            secondary = secondary,
+            accent = accent,
+            onPrimary = Color.White,
+            background = background,
+            surface = surface,
+            card = card,
+            elevatedCard = elevatedCard,
+            stroke = stroke,
+            textPrimary = textPrimary,
+            textSecondary = textSecondary,
+            textTertiary = textTertiary,
+            success = success,
+            warning = warning,
+            destructive = destructive,
+            shadow = Color.Black,
+            glow = glow,
+            heroGradient = Brush.linearGradient(listOf(primary, accent)),
+            softGradient = Brush.linearGradient(
+                listOf(
+                    background,
+                    accent.copy(alpha = if (dark) 0.10f else 0.08f),
+                )
+            ),
+            cardGradient = Brush.linearGradient(listOf(elevatedCard, card)),
+            chipGradient = Brush.linearGradient(
+                listOf(
+                    primary.copy(alpha = if (dark) 0.24f else 0.14f),
+                    accent.copy(alpha = if (dark) 0.16f else 0.08f),
+                )
+            ),
+        )
+    }
+
+    private fun adventurePalette(dark: Boolean): BrandPalette {
+        val primary = adaptive(dark, 0x2F6B3C, 0x7BCB69)
+        val secondary = adaptive(dark, 0x4D8A47, 0x9BE07C)
+        val accent = adaptive(dark, 0xA6C95A, 0xD5F08D)
+        val background = adaptive(dark, 0xF2F7F0, 0x0B140D)
+        val surface = adaptive(dark, 0xFFFFFF, 0x111B13)
+        val card = adaptive(dark, 0xF8FCF6, 0x152017)
+        val elevatedCard = adaptive(dark, 0xFFFFFF, 0x19261B)
+        val stroke = adaptive(dark, 0xD8E7D4, 0x2A3C2D)
+        val textPrimary = adaptive(dark, 0x142117, 0xEEF8EE)
+        val textSecondary = adaptive(dark, 0x5D7260, 0xA8BDAA)
+        val textTertiary = adaptive(dark, 0x839485, 0x708172)
+        val success = adaptive(dark, 0x2F855A, 0x68D391)
+        val warning = adaptive(dark, 0xB7791F, 0xF6C15A)
+        val destructive = adaptive(dark, 0xC53030, 0xFC8181)
+        val glow = adaptive(dark, 0x9FD96A, 0x59B84B)
+
+        return BrandPalette(
+            primary = primary,
+            secondary = secondary,
+            accent = accent,
+            onPrimary = Color.White,
+            background = background,
+            surface = surface,
+            card = card,
+            elevatedCard = elevatedCard,
+            stroke = stroke,
+            textPrimary = textPrimary,
+            textSecondary = textSecondary,
+            textTertiary = textTertiary,
+            success = success,
+            warning = warning,
+            destructive = destructive,
+            shadow = Color.Black,
+            glow = glow,
+            heroGradient = Brush.linearGradient(listOf(primary, secondary, accent)),
+            softGradient = Brush.linearGradient(
+                listOf(
+                    background,
+                    primary.copy(alpha = if (dark) 0.18f else 0.07f),
+                    accent.copy(alpha = if (dark) 0.10f else 0.05f),
+                )
+            ),
+            cardGradient = Brush.linearGradient(
+                listOf(
+                    elevatedCard,
+                    card,
+                    accent.copy(alpha = if (dark) 0.04f else 0.03f),
+                )
+            ),
+            chipGradient = Brush.linearGradient(
+                listOf(
+                    primary.copy(alpha = if (dark) 0.30f else 0.14f),
+                    accent.copy(alpha = if (dark) 0.18f else 0.10f),
+                )
+            ),
+        )
+    }
+
+    private fun restaurantPalette(dark: Boolean): BrandPalette {
+        val primary = adaptive(dark, 0x3E4347, 0xC2C8CE)
+        val secondary = adaptive(dark, 0x5A6066, 0x9BA3AB)
+        val accent = adaptive(dark, 0x8B7D67, 0xC5B79E)
+        val background = adaptive(dark, 0xF3F2F0, 0x0D0F11)
+        val surface = adaptive(dark, 0xFCFBFA, 0x14171A)
+        val card = adaptive(dark, 0xF7F5F3, 0x1A1E22)
+        val elevatedCard = adaptive(dark, 0xFFFFFF, 0x20252A)
+        val stroke = adaptive(dark, 0xD8D4CE, 0x333940)
+        val textPrimary = adaptive(dark, 0x1C1F22, 0xF3F5F7)
+        val textSecondary = adaptive(dark, 0x666D74, 0xB1B8BF)
+        val textTertiary = adaptive(dark, 0x8A9096, 0x7A838C)
+        val success = adaptive(dark, 0x2F855A, 0x68D391)
+        val warning = adaptive(dark, 0x9C7B3D, 0xD6B56E)
+        val destructive = adaptive(dark, 0xC94C4C, 0xFC8181)
+        val glow = adaptive(dark, 0xA79A84, 0x7B7468)
+
+        return BrandPalette(
+            primary = primary,
+            secondary = secondary,
+            accent = accent,
+            onPrimary = Color.White,
+            background = background,
+            surface = surface,
+            card = card,
+            elevatedCard = elevatedCard,
+            stroke = stroke,
+            textPrimary = textPrimary,
+            textSecondary = textSecondary,
+            textTertiary = textTertiary,
+            success = success,
+            warning = warning,
+            destructive = destructive,
+            shadow = Color.Black,
+            glow = glow,
+            heroGradient = Brush.linearGradient(listOf(primary, secondary, accent)),
+            softGradient = Brush.linearGradient(
+                listOf(
+                    background,
+                    primary.copy(alpha = if (dark) 0.16f else 0.05f),
+                    accent.copy(alpha = if (dark) 0.10f else 0.04f),
+                )
+            ),
+            cardGradient = Brush.linearGradient(
+                listOf(
+                    elevatedCard,
+                    card,
+                    accent.copy(alpha = if (dark) 0.035f else 0.02f),
+                )
+            ),
+            chipGradient = Brush.linearGradient(
+                listOf(
+                    primary.copy(alpha = if (dark) 0.28f else 0.12f),
+                    accent.copy(alpha = if (dark) 0.14f else 0.08f),
+                )
+            ),
+        )
+    }
+
+    private fun adaptive(
+        dark: Boolean,
+        lightRgb: Long,
+        darkRgb: Long,
+    ): Color {
+        return rgb(if (dark) darkRgb else lightRgb)
+    }
+
+    private fun rgb(rgb: Long): Color {
+        return Color(0xFF000000 or rgb)
+    }
+}
+
+//@Composable
+//fun AltosTheme(
+//    themeMode: ThemeMode = ThemeMode.SYSTEM,
+//    sectionTheme: AppSectionTheme = AppSectionTheme.Neutral,
+//    content: @Composable () -> Unit,
+//) {
+//    val darkTheme = when (themeMode) {
+//        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+//        ThemeMode.LIGHT -> false
+//        ThemeMode.DARK -> true
+//    }
+//
+//    val palette = AppTheme.palette(
+//        theme = sectionTheme,
+//        darkTheme = darkTheme,
+//    )
+//
+//    val colorScheme = palette.toMaterialColorScheme(darkTheme)
+//
+//    ConfigureSystemBars(
+//        darkTheme = darkTheme,
+//        palette = palette,
+//    )
+//
+//    CompositionLocalProvider(
+//        LocalAppSectionTheme provides sectionTheme,
+//        LocalBrandPalette provides palette,
+//        LocalBrandDarkTheme provides darkTheme,
+//    ) {
+//        MaterialTheme(
+//            colorScheme = colorScheme,
+//            typography = MurcoTypography,
+//            content = content,
+//        )
+//    }
+//}
+
+fun BrandPalette.toMaterialColorScheme(
+    darkTheme: Boolean,
+): ColorScheme {
+    return if (darkTheme) {
+        darkColorScheme(
+            primary = primary,
+            onPrimary = onPrimary,
+            primaryContainer = primary.copy(alpha = 0.24f),
+            onPrimaryContainer = textPrimary,
+
+            secondary = secondary,
+            onSecondary = Color.Black,
+            secondaryContainer = secondary.copy(alpha = 0.20f),
+            onSecondaryContainer = textPrimary,
+
+            tertiary = accent,
+            onTertiary = Color.Black,
+            tertiaryContainer = accent.copy(alpha = 0.18f),
+            onTertiaryContainer = textPrimary,
+
+            background = background,
+            onBackground = textPrimary,
+            surface = surface,
+            onSurface = textPrimary,
+            surfaceVariant = card,
+            onSurfaceVariant = textSecondary,
+
+            outline = stroke,
+            outlineVariant = stroke.copy(alpha = 0.55f),
+
+            error = destructive,
+            onError = Color.White,
+        )
+    } else {
+        lightColorScheme(
+            primary = primary,
+            onPrimary = onPrimary,
+            primaryContainer = primary.copy(alpha = 0.14f),
+            onPrimaryContainer = textPrimary,
+
+            secondary = secondary,
+            onSecondary = Color.White,
+            secondaryContainer = secondary.copy(alpha = 0.12f),
+            onSecondaryContainer = textPrimary,
+
+            tertiary = accent,
+            onTertiary = Color.White,
+            tertiaryContainer = accent.copy(alpha = 0.12f),
+            onTertiaryContainer = textPrimary,
+
+            background = background,
+            onBackground = textPrimary,
+            surface = surface,
+            onSurface = textPrimary,
+            surfaceVariant = card,
+            onSurfaceVariant = textSecondary,
+
+            outline = stroke,
+            outlineVariant = stroke.copy(alpha = 0.65f),
+
+            error = destructive,
+            onError = Color.White,
+        )
+    }
+}
+
+@Composable
+fun ConfigureSystemBars(
+    darkTheme: Boolean,
+    palette: BrandPalette,
+) {
+    val view = LocalView.current
+
+    if (view.isInEditMode) return
+
+    SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
+        window.navigationBarColor = palette.background.toArgbCompat()
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !darkTheme
+        controller.isAppearanceLightNavigationBars = !darkTheme
+    }
+}
+
+private fun Color.toArgbCompat(): Int {
+    return android.graphics.Color.argb(
+        (alpha * 255).toInt(),
+        (red * 255).toInt(),
+        (green * 255).toInt(),
+        (blue * 255).toInt(),
+    )
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/theme/AppThemeViewModel.kt
 
 ```kotlin
@@ -17930,6 +20624,530 @@ class AppThemeViewModel @Inject constructor(
             appPreferencesDataSource.setThemeMode(themeMode)
         }
     }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/theme/BrandComponents.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.theme
+
+
+@Composable
+fun BrandSectionHeader(
+    theme: AppSectionTheme,
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(28.dp)
+                    .height(8.dp)
+                    .clip(CircleShape)
+                    .background(palette.heroGradient),
+            )
+
+            Text(
+                text = title,
+                color = palette.textPrimary,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+        }
+
+        if (!subtitle.isNullOrBlank()) {
+            Text(
+                text = subtitle,
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+    }
+}
+
+@Composable
+fun BrandIconBubble(
+    theme: AppSectionTheme,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp,
+    contentDescription: String? = null,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape)
+            .background(palette.chipGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = CircleShape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = palette.primary,
+            modifier = Modifier.size(size * 0.38f),
+        )
+    }
+}
+
+@Composable
+fun BrandIconBubble(
+    theme: AppSectionTheme,
+    systemImage: String,
+    modifier: Modifier = Modifier,
+    size: Dp = 48.dp,
+    contentDescription: String? = null,
+) {
+    BrandIconBubble(
+        theme = theme,
+        icon = systemImage.toMaterialIcon(),
+        modifier = modifier,
+        size = size,
+        contentDescription = contentDescription,
+    )
+}
+
+@Composable
+fun BrandBadge(
+    theme: AppSectionTheme,
+    title: String,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Text(
+        text = title,
+        color = if (selected) palette.onPrimary else palette.primary,
+        style = MaterialTheme.typography.labelMedium.copy(
+            fontWeight = FontWeight.SemiBold,
+        ),
+        modifier = modifier
+            .clip(CircleShape)
+            .background(
+                brush = if (selected) palette.heroGradient else palette.chipGradient,
+            )
+            .border(
+                width = 1.dp,
+                color = if (selected) Color.Transparent else palette.stroke,
+                shape = CircleShape,
+            )
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    )
+}
+
+@Composable
+fun BrandPrimaryButton(
+    theme: AppSectionTheme,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.985f else 1f,
+        animationSpec = tween(durationMillis = 180),
+        label = "BrandPrimaryButtonScale",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(AppTheme.Metrics.buttonHeight)
+            .scale(scale)
+            .shadow(
+                elevation = if (pressed) 10.dp else AppTheme.Metrics.shadowRadius,
+                shape = shape,
+                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.32f else 0.14f),
+                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.32f else 0.14f),
+            )
+            .clip(shape)
+            .background(
+                brush = if (enabled) palette.heroGradient else palette.cardGradient,
+            )
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = if (darkTheme) 0.06f else 0.18f),
+                shape = shape,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun BrandSecondaryButton(
+    theme: AppSectionTheme,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.988f else 1f,
+        animationSpec = tween(durationMillis = 180),
+        label = "BrandSecondaryButtonScale",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(AppTheme.Metrics.buttonHeight)
+            .scale(scale)
+            .shadow(
+                elevation = if (pressed) 8.dp else 14.dp,
+                shape = shape,
+                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
+                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
+            )
+            .clip(shape)
+            .background(palette.cardGradient)
+            .border(
+                width = 1.dp,
+                color = palette.stroke,
+                shape = shape,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = LocalIndication.current,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            content()
+        }
+    }
+}
+
+fun String.toMaterialIcon(): ImageVector {
+    return when (trim().lowercase()) {
+        "figure.hiking", "hiking" -> Icons.Filled.Hiking
+        "mountain.2", "mountain", "terrain" -> Icons.Filled.Terrain
+        "fork.knife", "restaurant", "menucard" -> Icons.Filled.Restaurant
+        "cart", "cart.fill", "bag", "basket" -> Icons.Filled.ShoppingCart
+        "person", "person.fill" -> Icons.Filled.Person
+        "calendar", "calendar.badge.clock" -> Icons.Filled.CalendarMonth
+        "photo", "photo.fill", "camera" -> Icons.Filled.Photo
+        "gift", "gift.fill", "coupon", "tag" -> Icons.Filled.Redeem
+        "ticket", "ticket.fill" -> Icons.Filled.ConfirmationNumber
+        "car", "car.fill" -> Icons.Filled.DirectionsCar
+        "atv", "quad", "offroad", "motorcycle" -> Icons.Filled.SportsMotorsports
+        "flame", "flame.fill" -> Icons.Filled.LocalFireDepartment
+        "eye", "eye.fill" -> Icons.Filled.Visibility
+        "safari", "compass", "location" -> Icons.Filled.Explore
+        else -> Icons.Filled.Star
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/theme/BrandModifiers.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.theme
+
+
+fun Modifier.appScreenStyle(
+    theme: AppSectionTheme,
+): Modifier = composed {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    this
+        .background(palette.background)
+        .background(palette.softGradient)
+}
+
+fun Modifier.appCardStyle(
+    theme: AppSectionTheme,
+    emphasized: Boolean = false,
+): Modifier = composed {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.xLarge)
+
+    this
+        .shadow(
+            elevation = AppTheme.Metrics.shadowRadius,
+            shape = shape,
+            ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.24f else 0.10f),
+            spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.24f else 0.10f),
+        )
+        .clip(shape)
+        .background(palette.cardGradient)
+        .border(
+            width = 1.dp,
+            color = palette.stroke,
+            shape = shape,
+        )
+        .drawWithContent {
+            drawContent()
+
+            if (emphasized) {
+                drawRoundRect(
+                    brush = palette.heroGradient,
+                    topLeft = Offset(16.dp.toPx(), 16.dp.toPx()),
+                    size = Size(62.dp.toPx(), 6.dp.toPx()),
+                    cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+                )
+            }
+        }
+        .padding(AppTheme.Metrics.cardPadding)
+}
+
+fun Modifier.appTextFieldStyle(
+    theme: AppSectionTheme,
+): Modifier = composed {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    this
+        .shadow(
+            elevation = 8.dp,
+            shape = shape,
+            ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.12f else 0.04f),
+            spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.12f else 0.04f),
+        )
+        .clip(shape)
+        .background(palette.elevatedCard)
+        .border(
+            width = 1.dp,
+            color = palette.stroke,
+            shape = shape,
+        )
+        .padding(horizontal = 16.dp)
+}
+
+fun Modifier.appListRowStyle(
+    theme: AppSectionTheme,
+): Modifier = composed {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    this
+        .shadow(
+            elevation = 10.dp,
+            shape = shape,
+            ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.16f else 0.06f),
+            spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.16f else 0.06f),
+        )
+        .clip(shape)
+        .background(palette.cardGradient)
+        .border(
+            width = 1.dp,
+            color = palette.stroke,
+            shape = shape,
+        )
+        .padding(horizontal = 12.dp, vertical = 10.dp)
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/theme/BrandScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.theme
+
+
+@Composable
+fun BrandScreen(
+    theme: AppSectionTheme,
+    modifier: Modifier = Modifier,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(LocalBrandPalette.current.background),
+    ) {
+        BrandScreenBackground(
+            theme = theme,
+            modifier = Modifier.matchParentSize(),
+        )
+
+        content()
+    }
+}
+
+@Composable
+fun BrandScreenBackground(
+    theme: AppSectionTheme,
+    modifier: Modifier = Modifier,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(palette.background)
+            .background(palette.softGradient),
+    ) {
+        when (theme) {
+            AppSectionTheme.Neutral -> {
+                GlowCircle(
+                    theme = theme,
+                    useSecondary = false,
+                )
+            }
+
+            AppSectionTheme.Adventure -> {
+                GlowCircle(
+                    theme = theme,
+                    useSecondary = false,
+                )
+
+                GlowCircle(
+                    theme = theme,
+                    useSecondary = true,
+                )
+            }
+
+            AppSectionTheme.Restaurant -> {
+                GlowCircle(
+                    theme = theme,
+                    useSecondary = false,
+                )
+
+                GlowCircle(
+                    theme = theme,
+                    useSecondary = true,
+                )
+            }
+        }
+
+        BrandWatermark(
+            theme = theme,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 70.dp, end = 20.dp)
+                .alpha(if (darkTheme) 0.05f else 0.08f),
+        )
+    }
+}
+
+@Composable
+private fun GlowCircle(
+    alpha: Float = 0.0f,
+    size: Int = 0,
+    blur: Int = 0,
+    x: Int = 0,
+    y: Int = 0,
+    theme: AppSectionTheme,
+    useSecondary: Boolean,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val color = if (useSecondary) palette.secondary else palette.glow
+
+    Box(
+        modifier = Modifier
+            .size(size.dp)
+            .offset(x = x.dp, y = y.dp)
+            .background(
+                color = color.copy(alpha = alpha),
+                shape = CircleShape,
+            )
+            .blur(blur.dp),
+    )
+}
+
+@Composable
+fun BrandWatermark(
+    theme: AppSectionTheme,
+    modifier: Modifier = Modifier,
+) {
+    val assetName = theme.watermarkAssetName ?: return
+    val context = LocalContext.current
+
+    val resourceId = remember(assetName) {
+        val drawableId = context.resources.getIdentifier(
+            assetName,
+            "drawable",
+            context.packageName,
+        )
+
+        if (drawableId != 0) {
+            drawableId
+        } else {
+            context.resources.getIdentifier(
+                assetName,
+                "mipmap",
+                context.packageName,
+            )
+        }
+    }
+
+    if (resourceId == 0) return
+
+    Image(
+        painter = painterResource(resourceId),
+        contentDescription = null,
+        contentScale = ContentScale.Fit,
+        modifier = modifier.size(140.dp),
+    )
 }
 
 ```
@@ -17994,9 +21212,28 @@ private val DarkColors = darkColorScheme(
     onSurface = Color.White,
 )
 
+//@Composable
+//fun AltosTheme(
+//    themeMode: ThemeMode,
+//    content: @Composable () -> Unit,
+//) {
+//    val darkTheme = when (themeMode) {
+//        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+//        ThemeMode.LIGHT -> false
+//        ThemeMode.DARK -> true
+//    }
+//
+//    MaterialTheme(
+//        colorScheme = if (darkTheme) DarkColors else LightColors,
+//        typography = MurcoTypography,
+//        content = content,
+//    )
+//}
+
 @Composable
 fun AltosTheme(
-    themeMode: ThemeMode,
+    themeMode: ThemeMode = ThemeMode.SYSTEM,
+    sectionTheme: AppSectionTheme = AppSectionTheme.Neutral,
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (themeMode) {
@@ -18005,11 +21242,29 @@ fun AltosTheme(
         ThemeMode.DARK -> true
     }
 
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = MurcoTypography,
-        content = content,
+    val palette = AppTheme.palette(
+        theme = sectionTheme,
+        darkTheme = darkTheme,
     )
+
+    val colorScheme = palette.toMaterialColorScheme(darkTheme)
+
+    ConfigureSystemBars(
+        darkTheme = darkTheme,
+        palette = palette,
+    )
+
+    CompositionLocalProvider(
+        LocalAppSectionTheme provides sectionTheme,
+        LocalBrandPalette provides palette,
+        LocalBrandDarkTheme provides darkTheme,
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MurcoTypography,
+            content = content,
+        )
+    }
 }
 
 ```
@@ -18038,6 +21293,335 @@ package com.premierdarkcoffee.tourism.altosdelmurco.util.theme
 
 
 val MurcoTypography = Typography()
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/ui/PremiumUiComponents.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.ui
+
+
+private val usdFormatter: NumberFormat = NumberFormat.getCurrencyInstance(Locale.US)
+fun Double.premiumMoney(): String = usdFormatter.format(this)
+
+object PremiumAltosCopy {
+    const val brand = "Altos del Murco"
+    const val promise = "Restaurante y experiencias de montaña"
+    const val restaurantCta = "Pedir comida"
+    const val experiencesCta = "Reservar experiencia"
+}
+
+enum class PremiumSectionTone {
+    NEUTRAL,
+    RESTAURANT,
+    EXPERIENCES,
+}
+
+@Composable
+fun PremiumScreenHeader(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.ExtraBold,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+fun PremiumSectionHeader(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        if (icon != null) {
+            PremiumIconBubble(icon = icon)
+        }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PremiumIconBubble(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+) {
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                if (selected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.primaryContainer,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+fun PremiumCard(
+    modifier: Modifier = Modifier,
+    emphasized: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ElevatedCard(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (emphasized) 8.dp else 3.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun PremiumGradientHero(
+    title: String,
+    subtitle: String,
+    badge: String,
+    primaryAction: @Composable () -> Unit,
+    secondaryAction: @Composable (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(34.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary,
+                            MaterialTheme.colorScheme.secondary,
+                        ),
+                    ),
+                )
+                .padding(22.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AssistChip(onClick = {}, label = { Text(badge) })
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White.copy(alpha = 0.18f),
+                    ) {
+                        Text(
+                            text = "ADM",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                        )
+                    }
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = Color.White,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color.White.copy(alpha = 0.92f),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(modifier = Modifier.weight(1f)) { primaryAction() }
+                    if (secondaryAction != null) {
+                        Box(modifier = Modifier.weight(1f)) { secondaryAction() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PremiumMetricTile(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PremiumIconBubble(icon = icon, modifier = Modifier.size(38.dp))
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+fun PremiumPriceRow(
+    title: String,
+    amount: Double,
+    modifier: Modifier = Modifier,
+    negative: Boolean = false,
+    bold: Boolean = false,
+) {
+    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = title,
+            style = if (bold) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = if (negative && amount > 0) "-${amount.premiumMoney()}" else amount.premiumMoney(),
+            style = if (bold) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (negative && amount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+fun PremiumRewardCard(
+    reward: RewardPresentation,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(reward.badge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                    reward.amountText?.let {
+                        Text("-$it", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Text(reward.title, fontWeight = FontWeight.Bold)
+                AnimatedVisibility(visible = !compact) {
+                    Text(
+                        text = reward.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PremiumEmptyState(
+    title: String,
+    body: String,
+    icon: ImageVector = Icons.Rounded.Info,
+    action: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    PremiumCard(modifier = modifier) {
+        PremiumIconBubble(icon = icon, selected = true)
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (action != null) {
+            Spacer(Modifier.height(2.dp))
+            action()
+        }
+    }
+}
+
+@Composable
+fun PremiumOutlineAction(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Icon(icon, contentDescription = null)
+        Spacer(Modifier.size(8.dp))
+        Text(text, fontWeight = FontWeight.Bold)
+    }
+}
 
 ```
 

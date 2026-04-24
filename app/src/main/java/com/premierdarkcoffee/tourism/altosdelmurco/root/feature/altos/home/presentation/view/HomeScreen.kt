@@ -251,6 +251,10 @@ fun HomeScreen(
     }
 }
 
+//HomeQuickActions
+//FeaturedMenuHomeCard
+//ExperiencePackageHomeCard
+
 @Composable
 private fun HomeHero(
     clientName: String,

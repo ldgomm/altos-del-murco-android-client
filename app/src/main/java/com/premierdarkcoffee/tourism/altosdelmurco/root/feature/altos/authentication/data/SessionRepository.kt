@@ -1,5 +1,6 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticatedUser
@@ -8,9 +9,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionDestination
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
-import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
-import javax.inject.Inject
-import javax.inject.Singleton
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -20,8 +19,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
-import android.util.Log
-import kotlinx.coroutines.ExperimentalCoroutinesApi
+import javax.inject.Inject
+import javax.inject.Singleton
 
 @Singleton
 class SessionRepository @Inject constructor(
@@ -47,6 +46,7 @@ class SessionRepository @Inject constructor(
                     TAG,
                     "sessionState() tick -> auth.currentUser.uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
                 )
+
                 resolveLatestSessionState()
             }
             .distinctUntilChanged()
@@ -55,18 +55,33 @@ class SessionRepository @Inject constructor(
     override suspend fun refresh() {
         Log.d(
             TAG,
-            "refresh() requested -> current uid before reload=${auth.currentUser?.uid}"
+            "refresh() requested -> current uid before verify=${auth.currentUser?.uid}"
         )
 
-        runCatching {
-            auth.currentUser?.reload()?.awaitResult()
-        }.onSuccess {
+        val result = runCatching {
+            authenticationRepository.verifyCurrentUserIsStillValid()
+        }
+
+        result.onSuccess {
             Log.d(
                 TAG,
-                "refresh() reload success -> current uid after reload=${auth.currentUser?.uid}"
+                "refresh() verify success -> current uid after verify=${auth.currentUser?.uid}"
             )
-        }.onFailure { error ->
-            Log.e(TAG, "refresh() reload failure", error)
+        }
+
+        result.onFailure { error ->
+            if (error.isFirebaseSessionInvalidOrDisabled()) {
+                forceSignOut(
+                    reason = "refresh() detected disabled/deleted/expired Firebase user. Closing session.",
+                    error = error,
+                )
+            } else {
+                Log.w(
+                    TAG,
+                    "refresh() verify failed but it is not a terminal auth error. Keeping local session.",
+                    error,
+                )
+            }
         }
 
         refreshRequests.emit(Unit)
@@ -78,6 +93,7 @@ class SessionRepository @Inject constructor(
                 TAG,
                 "AuthStateListener -> uid=${firebaseAuth.currentUser?.uid}, email=${firebaseAuth.currentUser?.email}"
             )
+
             trySend(firebaseAuth.currentUser).isSuccess
         }
 
@@ -87,6 +103,7 @@ class SessionRepository @Inject constructor(
             TAG,
             "authUserFlow initial emit -> uid=${auth.currentUser?.uid}, email=${auth.currentUser?.email}"
         )
+
         trySend(auth.currentUser).isSuccess
 
         awaitClose {
@@ -96,44 +113,58 @@ class SessionRepository @Inject constructor(
 
     private suspend fun resolveLatestSessionState(): SessionState {
         val firebaseUser = auth.currentUser
+
         if (firebaseUser == null) {
-            Log.d(TAG, "resolveLatestSessionState -> Unauthenticated (firebaseUser=null)")
+            Log.d(TAG, "resolveLatestSessionState -> Unauthenticated because firebaseUser=null")
             return SessionState.Unauthenticated
         }
 
+        val verifiedFirebaseUser = verifyOrCloseSession(firebaseUser)
+            ?: return SessionState.Unauthenticated
+
         Log.d(
             TAG,
-            "resolveLatestSessionState -> firebaseUser uid=${firebaseUser.uid}, email=${firebaseUser.email}, displayName=${firebaseUser.displayName}"
+            "resolveLatestSessionState -> verified uid=${verifiedFirebaseUser.uid}, email=${verifiedFirebaseUser.email}"
         )
 
         val currentUser = authenticationRepository.currentUser()
             ?: AuthenticatedUser(
-                uid = firebaseUser.uid,
-                email = firebaseUser.email.orEmpty(),
-                displayName = firebaseUser.displayName.orEmpty(),
+                uid = verifiedFirebaseUser.uid,
+                email = verifiedFirebaseUser.email.orEmpty(),
+                displayName = verifiedFirebaseUser.displayName.orEmpty(),
                 appleUserIdentifier = "",
             )
 
-        Log.d(
-            TAG,
-            "resolveLatestSessionState -> currentUser uid=${currentUser.uid}, email=${currentUser.email}, displayName=${currentUser.displayName}, appleUserIdentifier=${currentUser.appleUserIdentifier}"
-        )
+        val destination = runCatching {
+            resolveSessionUseCase.execute(currentUser)
+        }.getOrElse { error ->
+            if (error.isFirebaseSessionInvalidOrDisabled()) {
+                forceSignOut(
+                    reason = "resolveLatestSessionState detected invalid Firebase session while resolving profile.",
+                    error = error,
+                )
 
-        val destination = resolveSessionUseCase.execute(currentUser)
+                return SessionState.Unauthenticated
+            }
 
-        when (destination) {
+            throw error
+        }
+
+        return when (destination) {
             SessionDestination.SignedOut -> {
                 Log.d(TAG, "resolveLatestSessionState -> destination=SignedOut")
-                return SessionState.Unauthenticated
+                SessionState.Unauthenticated
             }
 
             is SessionDestination.NeedsProfile -> {
                 val profile = destination.profile
+
                 Log.d(
                     TAG,
-                    "resolveLatestSessionState -> destination=NeedsProfile, profileExists=${profile != null}, profileIsComplete=${profile?.isComplete}, profileId=${profile?.id}, profileEmail=${profile?.email}"
+                    "resolveLatestSessionState -> destination=NeedsProfile, profileExists=${profile != null}, profileIsComplete=${profile?.isComplete}"
                 )
-                return SessionState.NeedsProfileCompletion(
+
+                SessionState.NeedsProfileCompletion(
                     user = destination.user,
                     existingProfile = destination.profile,
                 )
@@ -142,12 +173,61 @@ class SessionRepository @Inject constructor(
             is SessionDestination.Authenticated -> {
                 Log.d(
                     TAG,
-                    "resolveLatestSessionState -> destination=Authenticated, profileId=${destination.profile.id}, profileEmail=${destination.profile.email}, profileIsComplete=${destination.profile.isComplete}"
+                    "resolveLatestSessionState -> destination=Authenticated, profileId=${destination.profile.id}, profileIsComplete=${destination.profile.isComplete}"
                 )
-                return SessionState.Authenticated(
+
+                SessionState.Authenticated(
                     profile = destination.profile,
                 )
             }
+        }
+    }
+
+    private suspend fun verifyOrCloseSession(
+        firebaseUser: FirebaseUser,
+    ): FirebaseUser? {
+        val result = runCatching {
+            authenticationRepository.verifyCurrentUserIsStillValid()
+        }
+
+        if (result.isSuccess) {
+            return auth.currentUser
+        }
+
+        val error = result.exceptionOrNull()
+
+        if (error != null && error.isFirebaseSessionInvalidOrDisabled()) {
+            forceSignOut(
+                reason = "verifyOrCloseSession detected disabled/deleted/expired Firebase user uid=${firebaseUser.uid}.",
+                error = error,
+            )
+
+            return null
+        }
+
+        Log.w(
+            TAG,
+            "verifyOrCloseSession failed with non-terminal error. Keeping session to avoid logging out due to network/transient issue.",
+            error,
+        )
+
+        return auth.currentUser
+    }
+
+    private fun forceSignOut(
+        reason: String,
+        error: Throwable? = null,
+    ) {
+        Log.w(TAG, reason, error)
+
+        runCatching {
+            authenticationRepository.signOut()
+        }.onFailure { signOutError ->
+            Log.e(
+                TAG,
+                "forceSignOut -> signOut failed, but session will still resolve as unauthenticated soon.",
+                signOutError
+            )
         }
     }
 }

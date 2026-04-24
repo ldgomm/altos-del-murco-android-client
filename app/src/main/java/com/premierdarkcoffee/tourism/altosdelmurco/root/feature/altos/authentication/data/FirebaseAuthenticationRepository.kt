@@ -1,6 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticatedUser
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticationRepositoriable
@@ -15,14 +16,12 @@ class FirebaseAuthenticationRepository @Inject constructor(
 
     override fun currentUser(): AuthenticatedUser? {
         val user = auth.currentUser ?: return null
-        val googleProviderUid =
-            user.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
 
         return AuthenticatedUser(
             uid = user.uid,
             email = user.email.orEmpty(),
             displayName = user.displayName.orEmpty(),
-            appleUserIdentifier = googleProviderUid,
+            appleUserIdentifier = user.googleProviderUid(),
         )
     }
 
@@ -31,33 +30,55 @@ class FirebaseAuthenticationRepository @Inject constructor(
     ): AuthenticatedUser {
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         val authResult = auth.signInWithCredential(credential).awaitResult()
-        val firebaseUser =
-            requireNotNull(authResult.user) { "Firebase auth returned a null user after Google sign in." }
-        val googleProviderUid =
-            firebaseUser.providerData.firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }?.uid.orEmpty()
+
+        val firebaseUser = requireNotNull(authResult.user) {
+            "Firebase auth returned a null user after Google sign in."
+        }
 
         return AuthenticatedUser(
             uid = firebaseUser.uid,
             email = firebaseUser.email.orEmpty(),
             displayName = firebaseUser.displayName.orEmpty(),
-            appleUserIdentifier = googleProviderUid,
+            appleUserIdentifier = firebaseUser.googleProviderUid(),
         )
     }
 
     override suspend fun reauthenticateCurrentUser(
         googleIdToken: String,
     ) {
-        val user = requireNotNull(auth.currentUser) { "No authenticated user found." }
+        val user = requireNotNull(auth.currentUser) {
+            "No authenticated user found."
+        }
+
         val credential = GoogleAuthProvider.getCredential(googleIdToken, null)
         user.reauthenticate(credential).awaitResult()
     }
 
+    override suspend fun verifyCurrentUserIsStillValid() {
+        val user = auth.currentUser ?: return
+
+        user.reload().awaitResult()
+
+        val refreshedUser = auth.currentUser ?: return
+        refreshedUser.getIdToken(true).awaitResult()
+    }
+
     override suspend fun deleteCurrentUser() {
-        val user = requireNotNull(auth.currentUser) { "No authenticated user to delete." }
+        val user = requireNotNull(auth.currentUser) {
+            "No authenticated user to delete."
+        }
+
         user.delete().awaitResult()
     }
 
     override fun signOut() {
         auth.signOut()
+    }
+
+    private fun FirebaseUser.googleProviderUid(): String {
+        return providerData
+            .firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }
+            ?.uid
+            .orEmpty()
     }
 }

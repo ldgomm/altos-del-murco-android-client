@@ -6,9 +6,11 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @HiltViewModel
@@ -24,9 +26,26 @@ class AuthGateViewModel @Inject constructor(
             initialValue = SessionState.Loading,
         )
 
+    init {
+        startSessionGuard()
+    }
+
     fun refreshSession() {
         viewModelScope.launch {
             sessionRepositoriable.refresh()
+        }
+    }
+
+    fun verifySessionNow() {
+        refreshSession()
+    }
+
+    private fun startSessionGuard() {
+        viewModelScope.launch {
+            while (isActive) {
+                delay(60_000)
+                sessionRepositoriable.refresh()
+            }
         }
     }
 }

@@ -11,6 +11,8 @@ interface AuthenticationRepositoriable {
         googleIdToken: String,
     )
 
+    suspend fun verifyCurrentUserIsStillValid()
+
     suspend fun deleteCurrentUser()
 
     fun signOut()
