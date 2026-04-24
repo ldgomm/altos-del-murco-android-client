@@ -1,4 +1,4 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel
 
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBooking
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingStatus

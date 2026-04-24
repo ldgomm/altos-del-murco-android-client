@@ -1,4 +1,4 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope

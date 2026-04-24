@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -14,8 +15,8 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Schedule
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,16 +38,17 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureBookingsViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureBookingsViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.OrdersViewModel
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumCard
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumEmptyState
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumIconBubble
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumMetricTile
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumScreenHeader
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumSectionHeader
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandBadge
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandIconBubble
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.appCardStyle
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.premiumMoney
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -81,7 +84,8 @@ private sealed interface UnifiedReservation {
     data class ExperienceBooking(val booking: AdventureBooking) : UnifiedReservation {
         override val id: String = "experience-${booking.id}"
         override val title: String = booking.visitTypeTitle
-        override val subtitle: String = "${booking.eventDisplayTitle} • ${booking.guestCount} invitado(s)"
+        override val subtitle: String =
+            "${booking.eventDisplayTitle} • ${booking.guestCount} invitado(s)"
         override val date: Date = booking.startAt
         override val total: Double = booking.totalAmount
         override val statusText: String = booking.status.title
@@ -97,8 +101,12 @@ fun BookingsScreen(
     ordersViewModel: OrdersViewModel = hiltViewModel(),
     adventureBookingsViewModel: AdventureBookingsViewModel = hiltViewModel(),
 ) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
     val ordersState by ordersViewModel.uiState.collectAsStateWithLifecycle()
     val adventureState by adventureBookingsViewModel.uiState.collectAsStateWithLifecycle()
+
     var selectedFilter by remember { mutableStateOf(ReservationFilter.UPCOMING) }
 
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
@@ -110,80 +118,171 @@ fun BookingsScreen(
         onDispose { adventureBookingsViewModel.onDisappear() }
     }
 
-    val allReservations = remember(ordersState.orders, adventureState.allBookings) {
+    val allReservations = remember(
+        ordersState.orders,
+        adventureState.allBookings,
+    ) {
         ordersState.orders.map(UnifiedReservation::RestaurantOrder) +
-            adventureState.allBookings.map(UnifiedReservation::ExperienceBooking)
+                adventureState.allBookings.map(UnifiedReservation::ExperienceBooking)
     }
+
     val now = Date()
+
+    val upcomingCount = allReservations.count {
+        !it.isCancelled && !it.isCompleted && !it.date.before(now)
+    }
+
+    val pastCount = allReservations.count {
+        !it.isCancelled && (it.isCompleted || it.date.before(now))
+    }
+
+    val cancelledCount = allReservations.count {
+        it.isCancelled
+    }
+
     val filtered = allReservations
         .filter { item ->
             when (selectedFilter) {
-                ReservationFilter.UPCOMING -> !item.isCancelled && !item.isCompleted && !item.date.before(now)
-                ReservationFilter.PAST -> !item.isCancelled && (item.isCompleted || item.date.before(now))
-                ReservationFilter.CANCELLED -> item.isCancelled
+                ReservationFilter.UPCOMING ->
+                    !item.isCancelled && !item.isCompleted && !item.date.before(now)
+
+                ReservationFilter.PAST ->
+                    !item.isCancelled && (item.isCompleted || item.date.before(now))
+
+                ReservationFilter.CANCELLED ->
+                    item.isCancelled
             }
         }
         .sortedWith(
-            if (selectedFilter == ReservationFilter.PAST || selectedFilter == ReservationFilter.CANCELLED) {
+            if (
+                selectedFilter == ReservationFilter.PAST ||
+                selectedFilter == ReservationFilter.CANCELLED
+            ) {
                 compareByDescending<UnifiedReservation> { it.date.time }
             } else {
                 compareBy<UnifiedReservation> { it.date.time }
             }
         )
 
-    val grouped = filtered.groupBy { AdventureDateHelper.dayKey(AdventureDateHelper.startOfDay(it.date)) }
+    val grouped = filtered.groupBy {
+        AdventureDateHelper.dayKey(
+            AdventureDateHelper.startOfDay(it.date)
+        )
+    }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 30.dp),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+    BrandScreen(
+        theme = theme,
+        modifier = modifier,
     ) {
-        item {
-            PremiumScreenHeader(
-                title = "Reservas",
-                subtitle = "Tu agenda completa: pedidos del restaurante y experiencias en un solo lugar.",
-            )
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                PremiumMetricTile("Próximas", allReservations.count { !it.isCancelled && !it.isCompleted && !it.date.before(now) }.toString(), Icons.Rounded.Schedule, Modifier.weight(1f))
-                PremiumMetricTile("Pasadas", allReservations.count { !it.isCancelled && (it.isCompleted || it.date.before(now)) }.toString(), Icons.Rounded.CheckCircle, Modifier.weight(1f))
-                PremiumMetricTile("Canceladas", allReservations.count { it.isCancelled }.toString(), Icons.Rounded.Close, Modifier.weight(1f))
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = 20.dp,
+                bottom = 30.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            item {
+                BrandSectionHeader(
+                    theme = theme,
+                    title = "Reservas",
+                    subtitle = "Tu agenda completa: pedidos del restaurante y experiencias en un solo lugar.",
+                )
             }
-        }
 
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ReservationFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = selectedFilter == filter,
-                        onClick = { selectedFilter = filter },
-                        label = { Text(filter.title) },
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    NeutralMetricTile(
+                        title = "Próximas",
+                        value = upcomingCount.toString(),
+                        icon = Icons.Rounded.Schedule,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    NeutralMetricTile(
+                        title = "Pasadas",
+                        value = pastCount.toString(),
+                        icon = Icons.Rounded.CheckCircle,
+                        modifier = Modifier.weight(1f),
+                    )
+
+                    NeutralMetricTile(
+                        title = "Canceladas",
+                        value = cancelledCount.toString(),
+                        icon = Icons.Rounded.Close,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
-        }
 
-        if (filtered.isEmpty()) {
             item {
-                PremiumEmptyState(
-                    title = "No hay reservas en ${selectedFilter.title.lowercase()}",
-                    body = "Cuando hagas pedidos o reserves experiencias, aparecerán aquí agrupadas por fecha.",
-                    icon = Icons.Rounded.CalendarMonth,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    ReservationFilter.entries.forEach { filter ->
+                        FilterChip(
+                            selected = selectedFilter == filter,
+                            onClick = { selectedFilter = filter },
+                            label = {
+                                Text(
+                                    text = filter.title,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = palette.card,
+                                labelColor = palette.textSecondary,
+                                selectedContainerColor = palette.primary,
+                                selectedLabelColor = palette.onPrimary,
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = selectedFilter == filter,
+                                borderColor = palette.stroke,
+                                selectedBorderColor = palette.primary,
+                                borderWidth = 1.dp,
+                                selectedBorderWidth = 1.dp,
+                            ),
+                        )
+                    }
+                }
             }
-        } else {
-            grouped.forEach { (dayKey, reservations) ->
-                item(key = dayKey) {
-                    PremiumSectionHeader(
-                        title = reservations.firstOrNull()?.date?.formatBookingsDate().orEmpty(),
-                        subtitle = "${reservations.size} movimiento(s)",
+
+            if (filtered.isEmpty()) {
+                item {
+                    NeutralEmptyState(
+                        title = "No hay reservas en ${selectedFilter.title.lowercase()}",
+                        body = "Cuando hagas pedidos o reserves experiencias, aparecerán aquí agrupadas por fecha.",
                         icon = Icons.Rounded.CalendarMonth,
                     )
                 }
-                items(reservations, key = { it.id }) { reservation ->
-                    UnifiedReservationCard(reservation)
+            } else {
+                grouped.forEach { (dayKey, reservations) ->
+                    item(key = dayKey) {
+                        BrandSectionHeader(
+                            theme = theme,
+                            title = reservations.firstOrNull()
+                                ?.date
+                                ?.formatBookingsDate()
+                                .orEmpty(),
+                            subtitle = "${reservations.size} movimiento(s)",
+                        )
+                    }
+
+                    items(
+                        items = reservations,
+                        key = { it.id },
+                    ) { reservation ->
+                        UnifiedReservationCard(
+                            reservation = reservation,
+                        )
+                    }
                 }
             }
         }
@@ -191,32 +290,174 @@ fun BookingsScreen(
 }
 
 @Composable
-private fun UnifiedReservationCard(reservation: UnifiedReservation) {
-    PremiumCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-            PremiumIconBubble(
+private fun UnifiedReservationCard(
+    reservation: UnifiedReservation,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            BrandIconBubble(
+                theme = theme,
                 icon = when (reservation) {
                     is UnifiedReservation.RestaurantOrder -> Icons.Rounded.Restaurant
                     is UnifiedReservation.ExperienceBooking -> Icons.Rounded.Explore
                 },
-                selected = reservation !is UnifiedReservation.RestaurantOrder,
+                size = 48.dp,
+                contentDescription = null,
             )
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(reservation.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-                Text(reservation.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    AssistChip(onClick = {}, label = { Text(reservation.statusText) })
-                    Text(AdventureDateHelper.timeText(reservation.date), color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = reservation.title,
+                    color = palette.textPrimary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Text(
+                    text = reservation.subtitle,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    BrandBadge(
+                        theme = theme,
+                        title = reservation.statusText,
+                        selected = reservation.isCompleted || reservation.isCancelled,
+                    )
+
+                    Text(
+                        text = AdventureDateHelper.timeText(reservation.date),
+                        color = palette.textTertiary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(reservation.total.premiumMoney(), fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+
+            Column(
+                horizontalAlignment = Alignment.End,
+            ) {
+                Text(
+                    text = reservation.total.premiumMoney(),
+                    color = palette.primary,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                )
             }
         }
     }
 }
 
+@Composable
+private fun NeutralMetricTile(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier.appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 38.dp,
+            contentDescription = null,
+        )
+
+        Text(
+            text = value,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold,
+        )
+
+        Text(
+            text = title,
+            color = palette.textSecondary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun NeutralEmptyState(
+    title: String,
+    body: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    val theme = AppSectionTheme.Neutral
+    val palette = LocalBrandPalette.current
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = theme,
+                emphasized = true,
+            ),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 58.dp,
+            contentDescription = null,
+        )
+
+        Text(
+            text = title,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+        )
+
+        Text(
+            text = body,
+            color = palette.textSecondary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
 private fun Date.formatBookingsDate(): String {
     val formatter = SimpleDateFormat("EEEE d 'de' MMMM", Locale("es", "EC"))
-    return formatter.format(this).replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("es", "EC")) else it.toString() }
+
+    return formatter.format(this).replaceFirstChar {
+        if (it.isLowerCase()) {
+            it.titlecase(Locale("es", "EC"))
+        } else {
+            it.toString()
+        }
+    }
 }

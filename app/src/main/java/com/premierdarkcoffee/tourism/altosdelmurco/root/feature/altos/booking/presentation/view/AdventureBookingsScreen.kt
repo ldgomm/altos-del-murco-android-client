@@ -77,12 +77,12 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureBookingsDateGroup
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureBookingsUiState
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureBookingsViewModel
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureReservationSortOrder
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureReservationStatusFilter
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.AdventureReservationTimelineFilter
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureBookingsDateGroup
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureBookingsUiState
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureBookingsViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureReservationSortOrder
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureReservationStatusFilter
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureReservationTimelineFilter
 import com.premierdarkcoffee.tourism.altosdelmurco.util.extrension.priceText
 
 @OptIn(ExperimentalMaterial3Api::class)
