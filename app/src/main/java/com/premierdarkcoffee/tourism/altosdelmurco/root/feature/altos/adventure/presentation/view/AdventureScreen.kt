@@ -556,6 +556,9 @@ private fun AdventureDateAndSlotsSection(viewModel: AdventureComboBuilderViewMod
                         slot = slot,
                         selected = state.selectedSlot?.startAt == slot.startAt,
                         total = viewModel.effectiveTotal(slot),
+                        hasValidCombo = viewModel.hasValidCombo,
+                        totalSavings = viewModel.totalSavings,
+                        matchedPackageTitle = viewModel.matchedPackageTitle,
                         onClick = { viewModel.selectSlot(slot) },
                     )
                 }
@@ -569,6 +572,9 @@ private fun SlotChip(
     slot: AdventureAvailabilitySlot,
     selected: Boolean,
     total: Double,
+    hasValidCombo: Boolean,
+    totalSavings: Double,
+    matchedPackageTitle: String?,
     onClick: () -> Unit
 ) {
     FilterChip(
@@ -586,6 +592,13 @@ private fun SlotChip(
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
+                if (hasValidCombo) {
+                    Text(
+                        text = "Combo ${matchedPackageTitle ?: "activo"} • Ahorras ${totalSavings.priceText()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         },
     )
@@ -861,32 +874,92 @@ private fun ContactLine(
 @Composable
 private fun AdventureSummarySection(viewModel: AdventureComboBuilderViewModel) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val breakdown = viewModel.currentPricingBreakdown
+
     AdventureCard {
         AdventureSectionTitle("Resumen", "Revisa el total antes de confirmar.")
+
         val slot = state.selectedSlot
         if (slot != null) {
             AdventurePriceRow("Aventura", slot.adventureSubtotal)
             AdventurePriceRow("Comida", slot.foodSubtotal)
-            AdventurePriceRow("Subtotal", slot.subtotal)
-            AdventurePriceRow("Descuento aventura", slot.discountAmount, negative = true)
-            if (state.rewardPreview.totalDiscount > 0) AdventurePriceRow(
-                "Murco Loyalty",
-                state.rewardPreview.totalDiscount,
-                negative = true
-            )
+            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+
+            if (breakdown.activityDiscountAmount > 0) {
+                AdventurePriceRow("Descuento de actividades", breakdown.activityDiscountAmount, negative = true)
+            }
+
+            if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
+                AdventurePriceRow(
+                    "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    viewModel.comboDiscountAmount,
+                    negative = true,
+                )
+            } else if (state.items.size == 1) {
+                Text(
+                    "Una sola actividad no cuenta como combo. Se mantienen descuentos individuales y premios disponibles.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            if (state.rewardPreview.totalDiscount > 0) {
+                AdventurePriceRow("Murco Loyalty", state.rewardPreview.totalDiscount, negative = true)
+            }
+
+            if (viewModel.totalSavings > 0) {
+                Text(
+                    "Ahorro total: ${viewModel.totalSavings.priceText()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
             Divider()
             AdventurePriceRow("Total", viewModel.effectiveTotal(slot), bold = true)
         } else {
-            AdventurePriceRow("Aventura estimada", viewModel.estimatedAdventureSubtotal)
-            AdventurePriceRow("Comida estimada", viewModel.estimatedFoodSubtotal)
-            AdventurePriceRow(
-                "Descuento estimado",
-                viewModel.estimatedDiscountAmount,
-                negative = true
-            )
+            AdventurePriceRow("Aventura estimada", breakdown.activitySubtotalAfterIndividualDiscounts)
+            AdventurePriceRow("Comida estimada", breakdown.foodSubtotal)
+            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+
+            if (breakdown.activityDiscountAmount > 0) {
+                AdventurePriceRow("Descuento de actividades", breakdown.activityDiscountAmount, negative = true)
+            }
+
+            if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
+                AdventurePriceRow(
+                    "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    viewModel.comboDiscountAmount,
+                    negative = true,
+                )
+            }
+
+            if (state.rewardPreview.totalDiscount > 0) {
+                AdventurePriceRow("Murco Loyalty", state.rewardPreview.totalDiscount, negative = true)
+            }
+
+            if (viewModel.totalSavings > 0) {
+                Text(
+                    "Ahorro estimado: ${viewModel.totalSavings.priceText()}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
             Divider()
             AdventurePriceRow("Total estimado", viewModel.estimatedTotal, bold = true)
         }
+
+        if (breakdown.extraItems.isNotEmpty() && breakdown.hasValidCombo) {
+            Text(
+                "Actividades extra calculadas fuera del combo: ${breakdown.extraItems.size}",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         viewModel.activeRewardPresentations.forEach { reward ->
             Text(
                 "${reward.badge}: ${reward.message}",
@@ -1077,3 +1150,4 @@ private fun FoodItemEditorDialog(
         },
     )
 }
+

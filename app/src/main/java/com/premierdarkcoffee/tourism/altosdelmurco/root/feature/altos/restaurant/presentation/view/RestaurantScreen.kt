@@ -13,6 +13,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.CartScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.CheckoutScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.MenuItemDetailScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.MenuListScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrderSuccessScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.order.OrdersScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.CartViewModel

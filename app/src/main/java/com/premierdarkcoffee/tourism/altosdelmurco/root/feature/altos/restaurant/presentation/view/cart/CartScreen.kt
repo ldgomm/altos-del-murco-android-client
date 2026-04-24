@@ -1,5 +1,6 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,33 +23,42 @@ import androidx.compose.material.icons.rounded.LocalOffer
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.ShoppingCartCheckout
-import androidx.compose.material3.Button
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.wear.compose.material3.TextButton
+import androidx.wear.compose.material3.TextButtonDefaults
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartItem
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.SectionHeader
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.priceLabel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.priceLabel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.CartUiState
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandIconBubble
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandPrimaryButton
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSecondaryButton
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.appCardStyle
+
+private val CartTheme = AppSectionTheme.Restaurant
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,115 +73,155 @@ fun CartScreen(
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
     val lineDiscounts = state.allocatedDiscountByCartItemId()
 
-    Scaffold(
+    BrandScreen(
+        theme = CartTheme,
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Carrito") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
-                    }
-                },
-                actions = {
-                    if (!state.isEmpty) {
-                        TextButton(onClick = onClearCart) {
-                            Text("Limpiar")
-                        }
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            if (!state.isEmpty) {
-                CartBottomBar(
-                    subtotal = state.subtotal,
-                    discount = state.discount,
-                    total = state.total,
-                    isLoadingRewards = state.isLoadingRewards,
-                    canCheckout = state.canCheckout,
-                    onCheckout = onCheckout,
-                )
-            }
-        },
-    ) { innerPadding ->
-        when {
-            state.isEmpty -> {
-                EmptyCart(
-                    onBack = onBack,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                )
-            }
-
-            else -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentPadding = PaddingValues(
-                        start = 16.dp,
-                        end = 16.dp,
-                        top = 12.dp,
-                        bottom = 150.dp,
+    ) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            contentColor = palette.textPrimary,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = Color.Transparent,
+                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
+                        titleContentColor = palette.textPrimary,
+                        navigationIconContentColor = palette.textPrimary,
+                        actionIconContentColor = palette.primary,
                     ),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    if (state.isLoadingRewards) {
-                        item {
-                            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                        }
-                    }
-
-                    state.errorMessage?.let { message ->
-                        item {
-                            ErrorCardInline(
-                                message = message,
-                                onDismiss = onDismissError,
+                    title = {
+                        Text(
+                            text = "Carrito",
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.Rounded.ArrowBack,
+                                contentDescription = "Volver",
+                                tint = palette.textPrimary,
                             )
                         }
-                    }
+                    },
+                    actions = {
+                        if (!state.isEmpty) {
+                            TextButton(
+                                onClick = onClearCart,
+                                colors = TextButtonDefaults.textButtonColors(
+                                    contentColor = palette.primary,
+                                ),
+                            ) {
+                                Text(
+                                    text = "Limpiar",
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    },
+                )
+            },
+            bottomBar = {
+                if (!state.isEmpty) {
+                    CartBottomBar(
+                        subtotal = state.subtotal,
+                        discount = state.discount,
+                        total = state.total,
+                        isLoadingRewards = state.isLoadingRewards,
+                        canCheckout = state.canCheckout,
+                        onCheckout = onCheckout,
+                    )
+                }
+            },
+        ) { innerPadding ->
+            when {
+                state.isEmpty -> {
+                    EmptyCart(
+                        onBack = onBack,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                    )
+                }
 
-                    item {
-                        SectionHeader(
-                            title = "Tu pedido",
-                            subtitle = if (state.isLoadingRewards) {
-                                "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
-                            } else {
-                                "${state.totalItems} producto(s) listos para enviar."
-                            },
-                        )
-                    }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 12.dp,
+                            bottom = 150.dp,
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        if (state.isLoadingRewards) {
+                            item {
+                                LinearProgressIndicator(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = palette.primary,
+                                    trackColor = palette.stroke.copy(alpha = 0.45f),
+                                )
+                            }
+                        }
 
-                    items(state.items, key = { it.id }) { item ->
-                        CartItemCard(
-                            item = item,
-                            allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
-                            rewards = state.appliedRewardPresentations(item.menuItem.id),
-                            onIncrease = { onIncrease(item.id) },
-                            onDecrease = { onDecrease(item.id) },
-                            onRemove = { onRemove(item.id) },
-                        )
-                    }
+                        state.errorMessage?.let { message ->
+                            item {
+                                ErrorCardInline(
+                                    message = message,
+                                    onDismiss = onDismissError,
+                                )
+                            }
+                        }
 
-                    if (state.appliedRewards.isNotEmpty()) {
                         item {
-                            AppliedRewardsCard(
-                                rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                            BrandSectionHeader(
+                                theme = CartTheme,
+                                title = "Tu pedido",
+                                subtitle = if (state.isLoadingRewards) {
+                                    "Calculando premios Murco Loyalty para ${state.totalItems} producto(s)."
+                                } else {
+                                    "${state.totalItems} producto(s) listos para enviar."
+                                },
                             )
                         }
-                    }
 
-                    item {
-                        OrderSummaryCard(
-                            subtotal = state.subtotal,
-                            discount = state.discount,
-                            total = state.total,
-                        )
+                        items(
+                            items = state.items,
+                            key = { it.id },
+                        ) { item ->
+                            CartItemCard(
+                                item = item,
+                                allocatedDiscount = lineDiscounts[item.id] ?: 0.0,
+                                rewards = state.appliedRewardPresentations(item.menuItem.id),
+                                onIncrease = { onIncrease(item.id) },
+                                onDecrease = { onDecrease(item.id) },
+                                onRemove = { onRemove(item.id) },
+                            )
+                        }
+
+                        if (state.appliedRewards.isNotEmpty()) {
+                            item {
+                                AppliedRewardsCard(
+                                    rewards = state.appliedRewards.map(RewardPresentation::fromAppliedReward),
+                                )
+                            }
+                        }
+
+                        item {
+                            OrderSummaryCard(
+                                subtotal = state.subtotal,
+                                discount = state.discount,
+                                total = state.total,
+                            )
+                        }
                     }
                 }
             }
@@ -184,35 +234,51 @@ private fun EmptyCart(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
     Box(
         modifier = modifier.padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        ElevatedCard(shape = RoundedCornerShape(28.dp)) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .appCardStyle(
+                    theme = CartTheme,
+                    emphasized = true,
+                ),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            BrandIconBubble(
+                theme = CartTheme,
+                icon = Icons.Rounded.ShoppingCartCheckout,
+                size = 58.dp,
+            )
+
+            Text(
+                text = "Tu carrito está vacío",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "Agrega platos desde el menú para crear tu pedido.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = palette.textSecondary,
+            )
+
+            BrandPrimaryButton(
+                theme = CartTheme,
+                onClick = onBack,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.ShoppingCartCheckout,
-                    contentDescription = null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
                 Text(
-                    text = "Tu carrito está vacío",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.ExtraBold,
+                    text = "Volver al menú",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.SemiBold,
                 )
-                Text(
-                    text = "Agrega platos desde el menú para crear tu pedido.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = onBack) {
-                    Text("Volver al menú")
-                }
             }
         }
     }
@@ -227,126 +293,161 @@ private fun CartItemCard(
     onDecrease: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
     val discountedLineTotal = (item.totalPrice - allocatedDiscount).coerceAtLeast(0.0)
 
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Icon(
-                    imageVector = Icons.Rounded.Restaurant,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(34.dp),
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            BrandIconBubble(
+                theme = CartTheme,
+                icon = Icons.Rounded.Restaurant,
+                size = 44.dp,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = item.menuItem.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
 
-                Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Unitario ${item.unitPrice.priceLabel()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+
+                if (!item.notes.isNullOrBlank()) {
                     Text(
-                        text = item.menuItem.name,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
+                        text = item.notes.orEmpty(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.primary,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                if (allocatedDiscount > 0.0) {
                     Text(
-                        text = "Unitario ${item.unitPrice.priceLabel()}",
+                        text = item.totalPrice.priceLabel(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.textTertiary,
+                        textDecoration = TextDecoration.LineThrough,
                     )
 
-                    if (!item.notes.isNullOrBlank()) {
-                        Text(
-                            text = item.notes.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+                    Text(
+                        text = discountedLineTotal.priceLabel(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = palette.primary,
+                    )
 
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(3.dp),
-                ) {
-                    if (allocatedDiscount > 0.0) {
-                        Text(
-                            text = item.totalPrice.priceLabel(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textDecoration = TextDecoration.LineThrough,
-                        )
-                        Text(
-                            text = discountedLineTotal.priceLabel(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            text = "-${allocatedDiscount.priceLabel()}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    } else {
-                        Text(
-                            text = item.totalPrice.priceLabel(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                    }
+                    Text(
+                        text = "-${allocatedDiscount.priceLabel()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = palette.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                } else {
+                    Text(
+                        text = item.totalPrice.priceLabel(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = palette.textPrimary,
+                    )
                 }
             }
+        }
 
-            rewards.forEach { reward ->
-                CompactCartRewardRibbon(reward = reward)
-            }
+        rewards.forEach { reward ->
+            CompactCartRewardRibbon(reward = reward)
+        }
 
-            HorizontalDivider()
+        HorizontalDivider(color = palette.stroke)
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandSecondaryButton(
+                theme = CartTheme,
+                onClick = onRemove,
+                modifier = Modifier.weight(1f),
             ) {
-                OutlinedButton(onClick = onRemove) {
-                    Icon(Icons.Rounded.Delete, contentDescription = null)
-                    Spacer(modifier = Modifier.size(6.dp))
-                    Text("Quitar")
-                }
-
-                Spacer(modifier = Modifier.weight(1f))
-
-                IconButton(onClick = onDecrease) {
-                    Icon(Icons.Rounded.Remove, contentDescription = "Menos")
-                }
-
-                Text(
-                    text = item.safeQuantity.toString(),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.ExtraBold,
+                Icon(
+                    imageVector = Icons.Rounded.Delete,
+                    contentDescription = null,
+                    tint = palette.textPrimary,
+                    modifier = Modifier.size(18.dp),
                 )
 
-                IconButton(onClick = onIncrease) {
-                    Icon(Icons.Rounded.Add, contentDescription = "Más")
-                }
+                Spacer(modifier = Modifier.size(6.dp))
+
+                Text(
+                    text = "Quitar",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Spacer(modifier = Modifier.weight(0.35f))
+
+            IconButton(onClick = onDecrease) {
+                Icon(
+                    imageVector = Icons.Rounded.Remove,
+                    contentDescription = "Menos",
+                    tint = palette.primary,
+                )
+            }
+
+            Text(
+                text = item.safeQuantity.toString(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                color = palette.textPrimary,
+            )
+
+            IconButton(onClick = onIncrease) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "Más",
+                    tint = palette.primary,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun CompactCartRewardRibbon(reward: RewardPresentation) {
+private fun CompactCartRewardRibbon(
+    reward: RewardPresentation,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
     Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+        color = Color.Transparent,
         shape = RoundedCornerShape(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = palette.chipGradient,
+                shape = RoundedCornerShape(16.dp),
+            ),
     ) {
         Row(
             modifier = Modifier
@@ -358,7 +459,7 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
             Icon(
                 imageVector = Icons.Rounded.LocalOffer,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
+                tint = palette.primary,
                 modifier = Modifier.size(18.dp),
             )
 
@@ -366,15 +467,16 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
                 Text(
                     text = reward.title,
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = palette.primary,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+
                 Text(
                     text = reward.message,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.textSecondary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -384,7 +486,7 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
                 Text(
                     text = "-$amount",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = palette.primary,
                     fontWeight = FontWeight.ExtraBold,
                 )
             }
@@ -396,56 +498,59 @@ private fun CompactCartRewardRibbon(reward: RewardPresentation) {
 private fun AppliedRewardsCard(
     rewards: List<RewardPresentation>,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(
-                title = "Premios aplicados",
-                subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
-            )
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
 
-            rewards.forEach { reward ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.LocalOffer,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(
+                theme = CartTheme,
+                emphasized = true,
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        BrandSectionHeader(
+            theme = CartTheme,
+            title = "Premios aplicados",
+            subtitle = "Estos beneficios ya se reflejan en el total del carrito.",
+        )
+
+        rewards.forEach { reward ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.LocalOffer,
+                    contentDescription = null,
+                    tint = palette.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = reward.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = palette.textPrimary,
+                        fontWeight = FontWeight.Bold,
                     )
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = reward.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = reward.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.82f),
-                        )
-                    }
+                    Text(
+                        text = reward.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = palette.textSecondary,
+                    )
+                }
 
-                    reward.amountText?.let { amount ->
-                        Text(
-                            text = "-$amount",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                    }
+                reward.amountText?.let { amount ->
+                    Text(
+                        text = "-$amount",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = palette.primary,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
                 }
             }
         }
@@ -461,7 +566,14 @@ private fun CartBottomBar(
     canCheckout: Boolean,
     onCheckout: () -> Unit,
 ) {
-    Surface(shadowElevation = 10.dp) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Surface(
+        color = palette.surface.copy(alpha = if (darkTheme) 0.96f else 0.94f),
+        tonalElevation = 8.dp,
+        shadowElevation = 12.dp,
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -470,7 +582,11 @@ private fun CartBottomBar(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (isLoadingRewards) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = palette.primary,
+                    trackColor = palette.stroke.copy(alpha = 0.45f),
+                )
             }
 
             Row(
@@ -486,14 +602,14 @@ private fun CartBottomBar(
                             else -> "Subtotal"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.textSecondary,
                     )
 
                     if (discount > 0.0) {
                         Text(
                             text = subtotal.priceLabel(),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = palette.textTertiary,
                             textDecoration = TextDecoration.LineThrough,
                         )
                     }
@@ -503,21 +619,33 @@ private fun CartBottomBar(
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.ExtraBold,
                         color = if (discount > 0.0) {
-                            MaterialTheme.colorScheme.primary
+                            palette.primary
                         } else {
-                            MaterialTheme.colorScheme.onSurface
+                            palette.textPrimary
                         },
                     )
                 }
 
-                Button(
+                BrandPrimaryButton(
+                    theme = CartTheme,
                     enabled = canCheckout,
                     onClick = onCheckout,
                     modifier = Modifier.weight(1.25f),
                 ) {
-                    Icon(Icons.Rounded.ShoppingCartCheckout, contentDescription = null)
+                    Icon(
+                        imageVector = Icons.Rounded.ShoppingCartCheckout,
+                        contentDescription = null,
+                        tint = palette.onPrimary,
+                        modifier = Modifier.size(20.dp),
+                    )
+
                     Spacer(modifier = Modifier.size(8.dp))
-                    Text("Checkout")
+
+                    Text(
+                        text = "Checkout",
+                        color = palette.onPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -529,22 +657,29 @@ internal fun ErrorCardInline(
     message: String,
     onDismiss: () -> Unit,
 ) {
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.errorContainer,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Text(
+            text = message,
+            color = palette.destructive,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        TextButton(
+            onClick = onDismiss,
+            colors = TextButtonDefaults.textButtonColors(
+                contentColor = palette.primary,
+            ),
         ) {
-            Text(
-                text = message,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            TextButton(onClick = onDismiss) {
-                Text("Cerrar")
-            }
+            Text("Cerrar")
         }
     }
 }
@@ -555,24 +690,33 @@ internal fun OrderSummaryCard(
     discount: Double,
     total: Double,
 ) {
-    ElevatedCard(
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(CartTheme),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SectionHeader(title = "Resumen")
-            SummaryLine("Subtotal", subtotal.priceLabel())
-            if (discount > 0.0) {
-                SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
-            }
-            HorizontalDivider()
-            SummaryLine("Total", total.priceLabel(), emphasized = true)
+        BrandSectionHeader(
+            theme = CartTheme,
+            title = "Resumen",
+        )
+
+        SummaryLine("Subtotal", subtotal.priceLabel())
+
+        if (discount > 0.0) {
+            SummaryLine("Murco Loyalty", "-${discount.priceLabel()}")
         }
+
+        HorizontalDivider(color = palette.stroke)
+
+        SummaryLine(
+            title = "Total",
+            value = total.priceLabel(),
+            emphasized = true,
+        )
     }
 }
 
@@ -582,18 +726,37 @@ internal fun SummaryLine(
     value: String,
     emphasized: Boolean = false,
 ) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(CartTheme, darkTheme)
+    val isRewardLine = title == "Murco Loyalty"
+
     Row(modifier = Modifier.fillMaxWidth()) {
         Text(
             text = title,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = if (emphasized) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            color = if (emphasized) palette.textPrimary else palette.textSecondary,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleMedium
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Normal,
         )
+
         Spacer(modifier = Modifier.weight(1f))
+
         Text(
             text = value,
             fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
-            style = if (emphasized) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
-            color = if (title == "Murco Loyalty") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            style = if (emphasized) {
+                MaterialTheme.typography.titleLarge
+            } else {
+                MaterialTheme.typography.bodyMedium
+            },
+            color = when {
+                emphasized -> palette.textPrimary
+                isRewardLine -> palette.primary
+                else -> palette.textPrimary
+            },
         )
     }
 }

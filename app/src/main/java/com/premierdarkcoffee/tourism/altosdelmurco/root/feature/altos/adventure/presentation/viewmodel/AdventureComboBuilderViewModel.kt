@@ -8,10 +8,11 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingRequest
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureFeaturedPackage
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventurePlanner
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventurePricingEngine
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.CreateAdventureBookingUseCase
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ExperienceComboPricingBreakdown
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ExperienceComboPricingPolicy
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.GetAdventureAvailabilityUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ObserveAdventureCatalogUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationEventType
@@ -31,7 +32,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.do
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Date
 import javax.inject.Inject
+import kotlin.coroutines.cancellation.CancellationException
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -137,10 +138,22 @@ class AdventureComboBuilderViewModel @Inject constructor(
         items: List<AdventureReservationItemDraft>,
         packageDiscountAmount: Double,
     ) {
+        val current = _uiState.value
+        val breakdown = pricingBreakdownFor(
+            current.copy(
+                items = items,
+                packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
+                selectedPackageId = null,
+                selectedPackageTitle = null,
+            )
+        )
+
         _uiState.update {
             it.copy(
                 items = items,
-                packageDiscountAmount = packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId,
+                selectedPackageTitle = breakdown.matchedPackageTitle,
                 selectedSlot = null,
                 createdBooking = null,
                 successMessage = null,
@@ -162,11 +175,21 @@ class AdventureComboBuilderViewModel @Inject constructor(
             ReservationFoodItemDraft(menuItem = menuItem, quantity = food.quantity)
         }
 
+        val seededState = _uiState.value.copy(
+            items = packageModel.items,
+            foodItems = foodItems,
+            selectedPackageId = packageModel.id,
+            selectedPackageTitle = packageModel.title,
+        )
+        val breakdown = pricingBreakdownFor(seededState)
+
         _uiState.update {
             it.copy(
                 items = packageModel.items,
                 foodItems = foodItems,
-                packageDiscountAmount = packageModel.packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId ?: packageModel.id,
+                selectedPackageTitle = breakdown.matchedPackageTitle ?: packageModel.title,
                 selectedSlot = null,
                 createdBooking = null,
                 successMessage = null,
@@ -284,6 +307,8 @@ class AdventureComboBuilderViewModel @Inject constructor(
             return
         }
 
+        val pricingBreakdown = pricingBreakdownFor(state)
+
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
@@ -305,7 +330,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                 eventNotes = state.eventNotes.trim().takeIf { it.isNotEmpty() },
                 items = state.items,
                 foodReservation = buildFoodDraft(state),
-                packageDiscountAmount = state.packageDiscountAmount.coerceAtLeast(0.0),
+                packageDiscountAmount = pricingBreakdown.comboDiscountAmount,
                 loyaltyDiscountAmount = state.rewardPreview.totalDiscount,
                 appliedRewards = state.rewardPreview.appliedRewards,
                 notes = state.notes.trim().takeIf { it.isNotEmpty() },
@@ -353,31 +378,28 @@ class AdventureComboBuilderViewModel @Inject constructor(
         get() = _uiState.value.foodItems.sumOf { it.subtotal }.adventureRoundMoney()
 
     val estimatedDiscountAmount: Double
-        get() {
-            val state = _uiState.value
-            val activityDiscount =
-                AdventurePricingEngine.estimatedDiscountAmount(state.items, state.catalog)
-            return (activityDiscount + state.packageDiscountAmount + state.rewardPreview.totalDiscount).adventureRoundMoney()
-        }
+        get() = currentPricingBreakdown.totalSavings.adventureRoundMoney()
 
     val estimatedTotal: Double
-        get() {
-            val state = _uiState.value
-            val plan = AdventurePlanner.buildPlan(
-                day = state.selectedDate,
-                startAt = AdventureDateHelper.dateOn(state.selectedDate, 7, 0),
-                items = state.items,
-                foodReservation = buildFoodDraft(state),
-                packageDiscountAmount = state.packageDiscountAmount,
-                catalog = state.catalog,
-            )
-            val base = plan?.totalAmount
-                ?: (estimatedAdventureSubtotal + estimatedFoodSubtotal - state.packageDiscountAmount).coerceAtLeast(
-                    0.0
-                )
-            return (base - state.rewardPreview.totalDiscount).coerceAtLeast(0.0)
-                .adventureRoundMoney()
-        }
+        get() = currentPricingBreakdown.finalTotal.adventureRoundMoney()
+
+    val currentPricingBreakdown: ExperienceComboPricingBreakdown
+        get() = pricingBreakdownFor(_uiState.value)
+
+    val hasValidCombo: Boolean
+        get() = currentPricingBreakdown.hasValidCombo
+
+    val subtotalBeforeComboAndLoyalty: Double
+        get() = currentPricingBreakdown.subtotalBeforeComboAndLoyalty.adventureRoundMoney()
+
+    val totalSavings: Double
+        get() = currentPricingBreakdown.totalSavings.adventureRoundMoney()
+
+    val comboDiscountAmount: Double
+        get() = currentPricingBreakdown.comboDiscountAmount.adventureRoundMoney()
+
+    val matchedPackageTitle: String?
+        get() = currentPricingBreakdown.matchedPackageTitle
 
     val activeRewardPresentations: List<RewardPresentation>
         get() = _uiState.value.rewardPreview.appliedRewards.map {
@@ -453,11 +475,14 @@ class AdventureComboBuilderViewModel @Inject constructor(
         projectedRewardResult(item, quantity).totalDiscount.adventureRoundMoney()
 
     private fun updateItems(items: List<AdventureReservationItemDraft>) {
-        val correctedDiscount = bestMatchingPackageDiscount(items)
+        val state = _uiState.value
+        val breakdown = pricingBreakdownFor(state.copy(items = items))
         _uiState.update {
             it.copy(
                 items = items,
-                packageDiscountAmount = correctedDiscount,
+                packageDiscountAmount = breakdown.comboDiscountAmount,
+                selectedPackageId = breakdown.matchedPackageId,
+                selectedPackageTitle = breakdown.matchedPackageTitle,
                 selectedSlot = null,
             )
         }
@@ -475,32 +500,6 @@ class AdventureComboBuilderViewModel @Inject constructor(
         requestRewardPreview()
         refreshAvailability()
     }
-
-    private fun bestMatchingPackageDiscount(items: List<AdventureReservationItemDraft>): Double {
-        if (items.size <= 1) return 0.0
-        val state = _uiState.value
-        val activityKey = items
-            .map { keyForActivityPackageMatch(it) }
-            .sorted()
-        return state.catalog.activePackagesSorted
-            .filter { it.items.size > 1 }
-            .firstOrNull { packageModel ->
-                packageModel.items.map { keyForActivityPackageMatch(it) }.sorted() == activityKey
-            }
-            ?.packageDiscountAmount
-            ?.coerceAtLeast(0.0)
-            ?: 0.0
-    }
-
-    private fun keyForActivityPackageMatch(item: AdventureReservationItemDraft): String =
-        listOf(
-            item.activity.rawValue,
-            item.durationMinutes,
-            item.peopleCount,
-            item.vehicleCount,
-            item.offRoadRiderCount,
-            item.nights,
-        ).joinToString("|")
 
     private fun refreshAvailability() {
         val state = _uiState.value
@@ -526,7 +525,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                     date = _uiState.value.selectedDate,
                     items = _uiState.value.items,
                     foodReservation = buildFoodDraft(_uiState.value),
-                    packageDiscountAmount = _uiState.value.packageDiscountAmount,
+                    packageDiscountAmount = pricingBreakdownFor(_uiState.value).comboDiscountAmount,
                 )
             }.onSuccess { slots ->
                 _uiState.update { current ->
@@ -574,7 +573,15 @@ class AdventureComboBuilderViewModel @Inject constructor(
                         state.copy(
                             catalog = catalog,
                             items = validItems,
-                            packageDiscountAmount = if (validItems.size > 1) state.packageDiscountAmount else 0.0,
+                            packageDiscountAmount = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).comboDiscountAmount,
+                            selectedPackageId = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).matchedPackageId,
+                            selectedPackageTitle = pricingBreakdownFor(
+                                state.copy(catalog = catalog, items = validItems)
+                            ).matchedPackageTitle,
                             isLoadingCatalog = false,
                             errorMessage = null,
                         )
@@ -685,6 +692,16 @@ class AdventureComboBuilderViewModel @Inject constructor(
             .sumOf { it.amount }
             .adventureRoundMoney()
 
+    private fun pricingBreakdownFor(state: AdventureComboBuilderUiState): ExperienceComboPricingBreakdown =
+        ExperienceComboPricingPolicy.calculate(
+            items = state.items,
+            foodReservation = buildFoodDraft(state),
+            catalog = state.catalog,
+            featuredPackages = state.catalog.activePackagesSorted,
+            preferredPackageId = state.selectedPackageId,
+            loyaltyDiscountAmount = state.rewardPreview.totalDiscount,
+        )
+
     private fun buildFoodDraft(state: AdventureComboBuilderUiState): ReservationFoodDraft? {
         if (state.foodItems.isEmpty()) return null
         return ReservationFoodDraft(
@@ -714,3 +731,4 @@ class AdventureComboBuilderViewModel @Inject constructor(
         _uiState.update(transform)
     }
 }
+

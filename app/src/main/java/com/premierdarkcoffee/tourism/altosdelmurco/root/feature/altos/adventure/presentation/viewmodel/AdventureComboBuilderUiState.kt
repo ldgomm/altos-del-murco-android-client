@@ -7,9 +7,11 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationEventType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationServingMoment
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationServingMoment.AFTER_ACTIVITIES
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardComputationResult
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import java.util.Date
+
 
 data class AdventureComboBuilderUiState(
     val selectedDate: Date = Date(),
@@ -19,7 +21,7 @@ data class AdventureComboBuilderUiState(
     val customEventTitle: String = "",
     val eventNotes: String = "",
     val foodItems: List<ReservationFoodItemDraft> = emptyList(),
-    val foodServingMoment: ReservationServingMoment = ReservationServingMoment.AFTER_ACTIVITIES,
+    val foodServingMoment: ReservationServingMoment = AFTER_ACTIVITIES,
     val foodServingTime: Date = Date(),
     val foodNotes: String = "",
     val clientName: String = "",
@@ -27,10 +29,16 @@ data class AdventureComboBuilderUiState(
     val nationalId: String = "",
     val notes: String = "",
     val packageDiscountAmount: Double = 0.0,
+    val selectedPackageId: String? = null,
+    val selectedPackageTitle: String? = null,
     val catalog: AdventureCatalogSnapshot = AdventureCatalogSnapshot.EMPTY,
     val availableSlots: List<AdventureAvailabilitySlot> = emptyList(),
     val selectedSlot: AdventureAvailabilitySlot? = null,
-    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(RewardWalletSnapshot.empty("")),
+    val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
+        RewardWalletSnapshot.empty(
+            ""
+        )
+    ),
     val isLoadingCatalog: Boolean = false,
     val isLoadingAvailability: Boolean = false,
     val isLoadingRewards: Boolean = false,
@@ -39,3 +47,4 @@ data class AdventureComboBuilderUiState(
     val errorMessage: String? = null,
     val successMessage: String? = null,
 )
+

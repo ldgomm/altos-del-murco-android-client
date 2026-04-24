@@ -7341,27 +7341,1254 @@ private fun HeroIconBubble(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/presentation/view/HomeScreen.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/data/FeaturedFeedRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.data
+
+
+@Singleton
+class FeaturedFeedRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : FeaturedFeedRepositoriable {
+
+    override fun observeLatest(limit: Int): Flow<FeaturedFeedPage> = callbackFlow {
+        val registration = baseActiveQuery()
+            .limit(limit.toLong().coerceAtLeast(1L))
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val documents = snapshot?.documents.orEmpty()
+                val posts = documents.mapNotNull { it.toFeaturedPostOrNull() }
+
+                trySend(
+                    FeaturedFeedPage(
+                        posts = posts,
+                        lastSnapshot = documents.lastOrNull(),
+                        hasMore = documents.size == limit,
+                    ),
+                ).isSuccess
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun fetchNextPage(
+        limit: Int,
+        after: DocumentSnapshot?,
+    ): FeaturedFeedPage {
+        var query: Query = baseActiveQuery().limit(limit.toLong().coerceAtLeast(1L))
+
+        if (after != null) {
+            query = query.startAfter(after)
+        }
+
+        val snapshot = query.get().awaitResult()
+        val documents = snapshot.documents
+
+        return FeaturedFeedPage(
+            posts = documents.mapNotNull { it.toFeaturedPostOrNull() },
+            lastSnapshot = documents.lastOrNull() ?: after,
+            hasMore = documents.size == limit,
+        )
+    }
+
+    private fun baseActiveQuery(): Query = firestore
+        .collection(FEATURED_POSTS_COLLECTION)
+        .whereEqualTo("isVisible", true)
+        .whereGreaterThan("expiresAt", Timestamp(Date()))
+        .orderBy("expiresAt", Query.Direction.DESCENDING)
+
+    private companion object {
+        // This is intentionally "featured_posts" because that is what the iOS app uses.
+        const val FEATURED_POSTS_COLLECTION = "featured_posts"
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/data/FeaturedPostDtoMapper.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.data
+
+
+internal fun DocumentSnapshot.toFeaturedPostOrNull(): FeaturedPost? {
+    val id = id.trim().takeIf { it.isNotEmpty() } ?: return null
+    val category = FeaturedPostCategory.fromRaw(stringValueOrNull("category")) ?: return null
+
+    val createdAt = dateValue("createdAt") ?: dateValue("created_at") ?: Date(0)
+    val updatedAt = dateValue("updatedAt") ?: dateValue("updated_at") ?: createdAt
+    val expiresAt = dateValue("expiresAt") ?: dateValue("expires_at") ?: return null
+    val isVisible = boolValue("isVisible", default = boolValue("visible", default = true))
+
+    val media = listMapValue("media")
+        .mapIndexedNotNull { index, raw -> raw.toFeaturedPostMedia(documentId = id, index = index) }
+        .sortedBy { it.position }
+
+    return FeaturedPost(
+        id = id,
+        category = category,
+        description = stringValueOrNull("description")?.takeIf { it.isNotBlank() },
+        media = media,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+        expiresAt = expiresAt,
+        isVisible = isVisible,
+    )
+}
+
+private fun Map<*, *>.toFeaturedPostMedia(
+    documentId: String,
+    index: Int,
+): FeaturedPostMedia? {
+    val downloadURL = stringValueOrNull("downloadURL")
+        ?: stringValueOrNull("downloadUrl")
+        ?: stringValueOrNull("download_url")
+        ?: stringValueOrNull("url")
+
+    val storagePath = stringValueOrNull("storagePath")
+        ?: stringValueOrNull("storage_path")
+        ?: ""
+
+    if (downloadURL.isNullOrBlank() && storagePath.isBlank()) return null
+
+    val id = stringValueOrNull("id")?.takeIf { it.isNotBlank() } ?: "$documentId-media-$index"
+
+    return FeaturedPostMedia(
+        id = id,
+        downloadURL = downloadURL?.takeIf { it.isNotBlank() },
+        storagePath = storagePath,
+        width = doubleValueOrNull("width") ?: 1.0,
+        height = doubleValueOrNull("height") ?: 1.0,
+        position = intValueOrNull("position") ?: index,
+    )
+}
+
+private fun DocumentSnapshot.stringValueOrNull(field: String): String? =
+    getString(field)?.trim()
+
+private fun DocumentSnapshot.boolValue(field: String, default: Boolean): Boolean =
+    getBoolean(field) ?: default
+
+private fun DocumentSnapshot.dateValue(field: String): Date? = when (val value = get(field)) {
+    is Timestamp -> value.toDate()
+    is Date -> value
+    else -> null
+}
+
+private fun DocumentSnapshot.listMapValue(field: String): List<Map<*, *>> =
+    (get(field) as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+
+private fun Map<*, *>.stringValueOrNull(field: String): String? =
+    (this[field] as? String)?.trim()
+
+private fun Map<*, *>.intValueOrNull(field: String): Int? = when (val value = this[field]) {
+    is Int -> value
+    is Long -> value.toInt()
+    is Double -> value.toInt()
+    is Number -> value.toInt()
+    else -> null
+}
+
+private fun Map<*, *>.doubleValueOrNull(field: String): Double? = when (val value = this[field]) {
+    is Double -> value
+    is Long -> value.toDouble()
+    is Int -> value.toDouble()
+    is Number -> value.toDouble()
+    else -> null
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/FeaturedFeedRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
+
+
+interface FeaturedFeedRepositoriable {
+    fun observeLatest(limit: Int): kotlinx.coroutines.flow.Flow<FeaturedFeedPage>
+    suspend fun fetchNextPage(limit: Int, after: DocumentSnapshot?): FeaturedFeedPage
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/HomeFeaturedPostModels.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
+
+
+private fun String.normalizedFeaturedPostKey(): String =
+    filter(Char::isLetterOrDigit).lowercase()
+
+enum class FeaturedPostCategory(
+    val rawValue: String,
+    val title: String,
+) {
+    RESTAURANT("restaurant", "Restaurante"),
+    ADVENTURE("adventure", "Aventura"),
+    CLIENTS("clients", "Clientes");
+
+    companion object {
+        fun fromRaw(rawValue: String?): FeaturedPostCategory? {
+            val key = rawValue?.normalizedFeaturedPostKey().orEmpty()
+            return entries.firstOrNull {
+                it.rawValue.normalizedFeaturedPostKey() == key || it.name.normalizedFeaturedPostKey() == key
+            }
+        }
+    }
+}
+
+data class FeaturedPostMedia(
+    val id: String,
+    val downloadURL: String?,
+    val storagePath: String,
+    val width: Double,
+    val height: Double,
+    val position: Int,
+) {
+    val aspectRatio: Double
+        get() = if (height > 0.0) width / height else 1.0
+}
+
+data class FeaturedPost(
+    val id: String,
+    val category: FeaturedPostCategory,
+    val description: String?,
+    val media: List<FeaturedPostMedia>,
+    val createdAt: Date,
+    val updatedAt: Date,
+    val expiresAt: Date,
+    val isVisible: Boolean,
+) {
+    val isExpired: Boolean
+        get() = expiresAt.time <= Date().time
+
+    val orderedMedia: List<FeaturedPostMedia>
+        get() = media.sortedBy { it.position }
+}
+
+data class FeaturedFeedPage(
+    val posts: List<FeaturedPost>,
+    val lastSnapshot: DocumentSnapshot?,
+    val hasMore: Boolean,
+)
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/HomeUseCases.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
+
+
+class ObserveLatestFeaturedPostsUseCase @Inject constructor(
+    private val repository: FeaturedFeedRepositoriable,
+) {
+    fun execute(limit: Int): Flow<FeaturedFeedPage> = repository.observeLatest(limit)
+}
+
+class FetchFeaturedPostsPageUseCase @Inject constructor(
+    private val repository: FeaturedFeedRepositoriable,
+) {
+    suspend fun execute(limit: Int, after: DocumentSnapshot?): FeaturedFeedPage =
+        repository.fetchNextPage(limit = limit, after = after)
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/presentation/view/HomeImageComponents.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.view
 
 
 @Composable
-fun HomeScreen(
+internal fun RemoteBitmapImage(
+    url: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    placeholderIcon: ImageVector = Icons.Rounded.PhotoLibrary,
+) {
+    var bitmap by remember(url) { mutableStateOf<Bitmap?>(null) }
+    var isLoading by remember(url) { mutableStateOf(false) }
+    var didFail by remember(url) { mutableStateOf(false) }
+
+    LaunchedEffect(url) {
+        bitmap = null
+        didFail = false
+        val cleanUrl = url?.trim().orEmpty()
+        if (cleanUrl.isEmpty()) {
+            didFail = true
+            return@LaunchedEffect
+        }
+
+        isLoading = true
+        val loaded = runCatching {
+            withContext(Dispatchers.IO) { HomeImageMemoryCache.load(cleanUrl) }
+        }.getOrNull()
+
+        bitmap = loaded
+        didFail = loaded == null
+        isLoading = false
+    }
+
+    Box(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            bitmap != null -> {
+                Image(
+                    bitmap = requireNotNull(bitmap).asImageBitmap(),
+                    contentDescription = contentDescription,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = contentScale,
+                )
+            }
+
+            isLoading -> CircularProgressIndicator(modifier = Modifier.size(28.dp))
+
+            didFail -> Icon(
+                imageVector = Icons.Rounded.ImageNotSupported,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
+            else -> Icon(
+                imageVector = placeholderIcon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FeaturedMediaViewer(
+    media: List<FeaturedPostMedia>,
+    selectedIndex: Int,
+    onDismiss: () -> Unit,
+) {
+    if (media.isEmpty()) return
+
+    var currentIndex by remember(media, selectedIndex) {
+        mutableIntStateOf(selectedIndex.coerceIn(0, media.lastIndex))
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+        ) {
+            ZoomableRemoteBitmapImage(
+                url = media[currentIndex].downloadURL,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            ViewerTopControls(
+                currentIndex = currentIndex,
+                total = media.size,
+                onDismiss = onDismiss,
+            )
+
+            AnimatedVisibility(
+                visible = currentIndex > 0,
+                modifier = Modifier.align(Alignment.CenterStart),
+            ) {
+                ViewerArrowButton(
+                    icon = Icons.Rounded.NavigateBefore,
+                    contentDescription = "Anterior",
+                    onClick = { currentIndex = (currentIndex - 1).coerceAtLeast(0) },
+                )
+            }
+
+            AnimatedVisibility(
+                visible = currentIndex < media.lastIndex,
+                modifier = Modifier.align(Alignment.CenterEnd),
+            ) {
+                ViewerArrowButton(
+                    icon = Icons.Rounded.NavigateNext,
+                    contentDescription = "Siguiente",
+                    onClick = { currentIndex = (currentIndex + 1).coerceAtMost(media.lastIndex) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.ViewerTopControls(
+    currentIndex: Int,
+    total: Int,
+    onDismiss: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .fillMaxWidth()
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = Color.Black.copy(alpha = 0.48f),
+            shape = RoundedCornerShape(50),
+        ) {
+            Text(
+                text = "${currentIndex + 1} / $total",
+                color = Color.White,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            )
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.48f)),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Close,
+                contentDescription = "Cerrar",
+                tint = Color.White,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ViewerArrowButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .padding(horizontal = 10.dp)
+            .size(54.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.42f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White,
+            modifier = Modifier.size(34.dp),
+        )
+    }
+}
+
+@Composable
+private fun ZoomableRemoteBitmapImage(
+    url: String?,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    var scale by remember(url) { mutableFloatStateOf(1f) }
+    var offset by remember(url) { mutableStateOf(Offset.Zero) }
+
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newScale = (scale * zoomChange).coerceIn(1f, 4f)
+        scale = newScale
+        offset = if (newScale <= 1.01f) Offset.Zero else offset + panChange
+    }
+
+    Box(
         modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .background(Color.Black)
+            .pointerInput(url) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        if (scale > 1.01f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            scale = 2f
+                        }
+                    },
+                )
+            }
+            .transformable(transformableState),
+        contentAlignment = Alignment.Center,
     ) {
-        AltosPlaceholderCard(
-            title = "Inicio",
-            body = "Este es el shell de Compose para Altos del Murco. Desde aquí el proyecto ya tiene navegación, Hilt, DataStore y Room listos para los siguientes módulos.",
+        RemoteBitmapImage(
+            url = url,
+            contentDescription = null,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offset.x
+                    translationY = offset.y
+                },
+        )
+    }
+}
+
+private object HomeImageMemoryCache {
+    private val cache = object : LruCache<String, Bitmap>(80 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
+    }
+
+    fun load(url: String): Bitmap? {
+        cache.get(url)?.let { return it }
+
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+        }
+
+        return try {
+            connection.inputStream.use { input ->
+                BitmapFactory.decodeStream(input)?.also { bitmap ->
+                    cache.put(url, bitmap)
+                }
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/presentation/view/HomeScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.view
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    sessionState: SessionState.Authenticated? = null,
+    viewModel: FeaturedFeedViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        viewModel.start()
+    }
+
+    state.errorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissError,
+            title = { Text("No se pudo cargar destacados") },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissError) { Text("Aceptar") }
+            },
+        )
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            LargeTopAppBar(
+                title = {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Altos del Murco",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                        Text(
+                            text = "Restaurante, aventura y momentos destacados",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = viewModel::refresh) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar destacados")
+                    }
+                },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
+            )
+        },
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(
+                start = 20.dp,
+                end = 20.dp,
+                top = 12.dp,
+                bottom = 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(22.dp),
+        ) {
+            item {
+                HomeSectionHeader(
+                    title = "Destacados",
+                    subtitle = "Fotos recientes del restaurante, aventura y momentos de nuestros clientes.",
+                    icon = Icons.Rounded.Star,
+                )
+            }
+
+            when {
+                state.shouldShowInitialPlaceholders -> {
+                    items(2) {
+                        FeaturedPostPlaceholder()
+                    }
+                }
+
+                state.shouldShowEmptyState -> {
+                    item {
+                        HomeEmptyState(
+                            title = "Aún no hay publicaciones activas.",
+                            body = "Cuando ADM publique nuevas fotos aparecerán aquí automáticamente.",
+                            icon = Icons.Rounded.PhotoLibrary,
+                        )
+                    }
+                }
+
+                else -> {
+                    itemsIndexed(
+                        items = state.posts,
+                        key = { _, post -> post.id },
+                    ) { _, post ->
+                        LaunchedEffect(post.id, state.posts.lastOrNull()?.id) {
+                            viewModel.loadMoreIfNeeded(post)
+                        }
+
+                        FeaturedPostCard(post = post)
+                    }
+
+                    if (state.isLoadingMore) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = "Cargando más",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeHeroCard(
+    displayName: String,
+    onOpenRestaurant: () -> Unit,
+    onOpenAdventure: () -> Unit,
+) {
+    val title = displayName
+        .trim()
+        .takeIf { it.isNotEmpty() }
+        ?.let { "Bienvenido, ${it.firstName()}" }
+        ?: "Bienvenido"
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.secondary,
+                        ),
+                    ),
+                )
+                .padding(22.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.Top) {
+                    HomeIconBubble(
+                        icon = Icons.Rounded.Home,
+                        containerColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f),
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    HomeBadge(text = "Los Altos", inverted = true)
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Text(
+                        text = "Restaurante y aventura en un solo lugar. Explora experiencias, revisa tus reservas y accede rápido a cada sección.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.92f),
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(onClick = onOpenRestaurant) {
+                        Icon(Icons.Rounded.Restaurant, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Restaurante")
+                    }
+                    Button(onClick = onOpenAdventure) {
+                        Icon(Icons.Rounded.Explore, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Aventura")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedPostCard(post: FeaturedPost) {
+    var selectedMediaIndex by remember(post.id) { mutableIntStateOf(0) }
+    var isViewerPresented by remember(post.id) { mutableStateOf(false) }
+    val media = post.orderedMedia
+
+    if (isViewerPresented) {
+        FeaturedMediaViewer(
+            media = media,
+            selectedIndex = selectedMediaIndex,
+            onDismiss = { isViewerPresented = false },
+        )
+    }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                HomeIconBubble(icon = iconFor(post.category))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = post.category.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        text = post.createdAt.homePostDateText(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                HomeBadge(text = "Nuevo")
+            }
+
+            FeaturedMediaCollage(
+                media = media,
+                onTap = { index ->
+                    selectedMediaIndex = index
+                    isViewerPresented = true
+                },
+            )
+
+            post.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FeaturedMediaCollage(
+    media: List<FeaturedPostMedia>,
+    onTap: (Int) -> Unit,
+) {
+    when (media.size) {
+        0 -> Unit
+
+        1 -> CollageImage(
+            item = media[0],
+            index = 0,
+            onTap = onTap,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp),
         )
 
+        2 -> Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(250.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CollageImage(media[0], 0, onTap, Modifier
+                .weight(1f)
+                .fillMaxSize())
+            CollageImage(media[1], 1, onTap, Modifier
+                .weight(1f)
+                .fillMaxSize())
+        }
+
+        3 -> Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(280.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CollageImage(media[0], 0, onTap, Modifier
+                .weight(1f)
+                .fillMaxSize())
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CollageImage(media[1], 1, onTap, Modifier
+                    .weight(1f)
+                    .fillMaxWidth())
+                CollageImage(media[2], 2, onTap, Modifier
+                    .weight(1f)
+                    .fillMaxWidth())
+            }
+        }
+
+        else -> Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val displayed = media.take(4)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CollageImage(displayed[0], 0, onTap, Modifier
+                    .weight(1f)
+                    .fillMaxSize())
+                CollageImage(displayed[1], 1, onTap, Modifier
+                    .weight(1f)
+                    .fillMaxSize())
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CollageImage(displayed[2], 2, onTap, Modifier
+                    .weight(1f)
+                    .fillMaxSize())
+                Box(modifier = Modifier
+                    .weight(1f)
+                    .fillMaxSize()) {
+                    CollageImage(displayed[3], 3, onTap, Modifier.fillMaxSize())
+                    if (media.size > 4) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color.Black.copy(alpha = 0.40f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "+${media.size - 4}",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollageImage(
+    item: FeaturedPostMedia,
+    index: Int,
+    onTap: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    RemoteBitmapImage(
+        url = item.downloadURL,
+        contentDescription = "Foto destacada ${index + 1}",
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable { onTap(index) },
+    )
+}
+
+@Composable
+private fun FeaturedPostPlaceholder() {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(320.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f),
+        ),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+    }
+}
+
+@Composable
+private fun HomeSectionHeader(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        HomeIconBubble(icon = icon)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeEmptyState(
+    title: String,
+    body: String,
+    icon: ImageVector,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HomeIconBubble(icon = icon)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+private fun HomeIconBubble(
+    icon: ImageVector,
+    containerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+    contentColor: Color = MaterialTheme.colorScheme.primary,
+) {
+    Box(
+        modifier = Modifier
+            .size(46.dp)
+            .clip(CircleShape)
+            .background(containerColor),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = contentColor,
+        )
+    }
+}
+
+@Composable
+private fun HomeBadge(
+    text: String,
+    inverted: Boolean = false,
+) {
+    val container = if (inverted) {
+        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+    }
+    val content =
+        if (inverted) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary
+
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = content,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(container)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+}
+
+private fun iconFor(category: FeaturedPostCategory): ImageVector = when (category) {
+    FeaturedPostCategory.RESTAURANT -> Icons.Rounded.LocalDining
+    FeaturedPostCategory.ADVENTURE -> Icons.Rounded.Explore
+    FeaturedPostCategory.CLIENTS -> Icons.Rounded.Groups
+}
+
+private fun String.firstName(): String = trim().split(Regex("\\s+")).firstOrNull().orEmpty()
+
+private fun Date.homePostDateText(): String = postDateFormatter.format(this)
+
+private val postDateFormatter = SimpleDateFormat("d MMM yyyy • h:mm a", Locale("es", "EC"))
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/presentation/viewmodel/FeaturedFeedUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.viewmodel
+
+
+data class FeaturedFeedUiState(
+    val posts: List<FeaturedPost> = emptyList(),
+    val isLoadingInitial: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
+    val errorMessage: String? = null,
+) {
+    val shouldShowInitialPlaceholders: Boolean
+        get() = isLoadingInitial && posts.isEmpty()
+
+    val shouldShowEmptyState: Boolean
+        get() = !isLoadingInitial && posts.isEmpty()
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/presentation/viewmodel/FeaturedFeedViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.viewmodel
+
+
+@HiltViewModel
+class FeaturedFeedViewModel @Inject constructor(
+    private val fetchNextPageUseCase: FetchFeaturedPostsPageUseCase,
+    private val observeLatestUseCase: ObserveLatestFeaturedPostsUseCase,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(FeaturedFeedUiState())
+    val uiState: StateFlow<FeaturedFeedUiState> = _uiState.asStateFlow()
+
+    private var observeJob: Job? = null
+    private var loadMoreJob: Job? = null
+    private var lastSnapshot: DocumentSnapshot? = null
+
+    fun start() {
+        if (observeJob?.isActive == true) return
+
+        _uiState.update {
+            it.copy(
+                isLoadingInitial = it.posts.isEmpty(),
+                errorMessage = null,
+            )
+        }
+
+        observeJob = viewModelScope.launch {
+            observeLatestUseCase.execute(PAGE_SIZE)
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingInitial = false,
+                            errorMessage = error.message ?: "No se pudo cargar destacados.",
+                        )
+                    }
+                }
+                .collectLatest { page ->
+                    lastSnapshot = page.lastSnapshot
+                    _uiState.update { current ->
+                        val merged = mergeKeepingNewest(
+                            current = current.posts,
+                            incomingTopPage = page.posts,
+                        )
+                        current.copy(
+                            posts = merged,
+                            hasMore = page.hasMore || merged.size > page.posts.size,
+                            isLoadingInitial = false,
+                            errorMessage = null,
+                        )
+                    }
+                }
+        }
+    }
+
+    fun refresh() {
+        observeJob?.cancel()
+        loadMoreJob?.cancel()
+        observeJob = null
+        loadMoreJob = null
+        lastSnapshot = null
+        _uiState.value = FeaturedFeedUiState(isLoadingInitial = true)
+        start()
+    }
+
+    fun loadMoreIfNeeded(currentPost: FeaturedPost?) {
+        val post = currentPost ?: return
+        val state = _uiState.value
+        if (state.posts.lastOrNull()?.id != post.id) return
+        if (state.isLoadingInitial || state.isLoadingMore || !state.hasMore) return
+        if (loadMoreJob?.isActive == true) return
+
+        loadMoreJob = viewModelScope.launch { loadMore() }
+    }
+
+    fun dismissError() {
+        _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    override fun onCleared() {
+        observeJob?.cancel()
+        loadMoreJob?.cancel()
+        super.onCleared()
+    }
+
+    private suspend fun loadMore() {
+        _uiState.update { it.copy(isLoadingMore = true, errorMessage = null) }
+
+        runCatching {
+            fetchNextPageUseCase.execute(PAGE_SIZE, lastSnapshot)
+        }.onSuccess { page ->
+            lastSnapshot = page.lastSnapshot
+            _uiState.update { current ->
+                current.copy(
+                    posts = mergeAppendingOlder(
+                        current = current.posts,
+                        incomingOlderPage = page.posts,
+                    ),
+                    hasMore = page.hasMore,
+                    isLoadingMore = false,
+                    errorMessage = null,
+                )
+            }
+        }.onFailure { error ->
+            _uiState.update {
+                it.copy(
+                    isLoadingMore = false,
+                    errorMessage = error.message ?: "No se pudieron cargar más destacados.",
+                )
+            }
+        }
+    }
+
+    private fun mergeKeepingNewest(
+        current: List<FeaturedPost>,
+        incomingTopPage: List<FeaturedPost>,
+    ): List<FeaturedPost> {
+        val map = current.associateBy { it.id }.toMutableMap()
+        incomingTopPage.forEach { post -> map[post.id] = post }
+        return map.values
+            .filter { !it.isExpired && it.isVisible }
+            .sortedWith(featuredPostSort)
+    }
+
+    private fun mergeAppendingOlder(
+        current: List<FeaturedPost>,
+        incomingOlderPage: List<FeaturedPost>,
+    ): List<FeaturedPost> {
+        val seen = current.mapTo(mutableSetOf()) { it.id }
+        val merged = current.toMutableList()
+
+        incomingOlderPage.forEach { post ->
+            if (!seen.contains(post.id) && !post.isExpired && post.isVisible) {
+                merged += post
+                seen += post.id
+            }
+        }
+
+        return merged.sortedWith(featuredPostSort)
+    }
+
+    private companion object {
+        const val PAGE_SIZE = 5
+
+        val featuredPostSort = compareByDescending<FeaturedPost> { it.expiresAt.time }
+            .thenByDescending { it.createdAt.time }
     }
 }
 
@@ -16233,6 +17460,27 @@ object FirebaseModule {
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/di/HomeRepositoryModule.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
+
+
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class HomeRepositoryModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindFeaturedFeedRepository(
+        repository: FeaturedFeedRepository,
+    ): FeaturedFeedRepositoriable
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/di/ProfileRepositoryModule.kt
 
 ```kotlin
@@ -16523,27 +17771,27 @@ private enum class TopLevelDestination(
 ) {
     HOME(
         route = "home",
-        label = "Home",
+        label = "Inicio",
         icon = { Icon(Icons.Rounded.Home, contentDescription = null) },
     ),
     RESTAURANT(
         route = "restaurant",
-        label = "Restaurant",
+        label = "Restaurante",
         icon = { Icon(Icons.Rounded.Restaurant, contentDescription = null) },
     ),
     ADVENTURE(
         route = "adventure",
-        label = "Adventure",
+        label = "Aventura",
         icon = { Icon(Icons.Rounded.Explore, contentDescription = null) },
     ),
     BOOKINGS(
         route = "bookings",
-        label = "Bookings",
+        label = "Reservas",
         icon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
     ),
     PROFILE(
         route = "profile",
-        label = "Profile",
+        label = "Perfil",
         icon = { Icon(Icons.Rounded.Person, contentDescription = null) },
     ),
 }
@@ -16569,15 +17817,7 @@ fun AltosMainShell(
 
                     NavigationBarItem(
                         selected = selected,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                restoreState = true
-                                launchSingleTop = true
-                            }
-                        },
+                        onClick = { navController.navigateTopLevel(destination.route) },
                         icon = destination.icon,
                         label = { Text(destination.label) },
                     )
@@ -16591,7 +17831,7 @@ fun AltosMainShell(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(TopLevelDestination.HOME.route) {
-                HomeScreen()
+                HomeScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.RESTAURANT.route) {
                 RestaurantScreen(sessionState = sessionState)
@@ -16610,6 +17850,16 @@ fun AltosMainShell(
                 )
             }
         }
+    }
+}
+
+private fun NavHostController.navigateTopLevel(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+        }
+        restoreState = true
+        launchSingleTop = true
     }
 }
 
