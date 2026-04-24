@@ -1,4 +1,4 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -33,24 +33,59 @@ class AdventureBookingsViewModel @Inject constructor(
     fun onAppear(profile: ClientProfile) {
         val cleanNationalId = profile.nationalId.filter(Char::isDigit)
         val current = _uiState.value
-        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) return
-        _uiState.update { it.copy(nationalId = cleanNationalId) }
+
+        _uiState.update {
+            it.copy(
+                nationalId = cleanNationalId,
+                now = Date(),
+            )
+        }
+
+        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) {
+            return
+        }
+
         observeBookings()
     }
 
-    fun onDateSelected(date: Date) {
-        _uiState.update { it.copy(selectedDate = date) }
-        observeBookings()
+    fun onDisappear() {
+        bookingsJob?.cancel()
+        bookingsJob = null
     }
 
     fun refresh() {
+        _uiState.update { it.copy(now = Date()) }
         observeBookings()
+    }
+
+    fun setTimelineFilter(filter: AdventureReservationTimelineFilter) {
+        _uiState.update {
+            it.copy(
+                selectedTimelineFilter = filter,
+                now = Date(),
+            )
+        }
+    }
+
+    fun setStatusFilter(filter: AdventureReservationStatusFilter) {
+        _uiState.update {
+            it.copy(selectedStatusFilter = filter)
+        }
+    }
+
+    fun setSortOrder(sortOrder: AdventureReservationSortOrder) {
+        _uiState.update {
+            it.copy(sortOrder = sortOrder)
+        }
     }
 
     fun cancelBooking(booking: AdventureBooking) {
         val nationalId = _uiState.value.nationalId
+
         if (nationalId.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Tu perfil no tiene cédula registrada.") }
+            _uiState.update {
+                it.copy(errorMessage = "No se encontró una cédula asociada a esta cuenta.")
+            }
             return
         }
 
@@ -58,10 +93,12 @@ class AdventureBookingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isCancelling = true,
+                    cancellingBookingId = booking.id,
                     errorMessage = null,
-                    successMessage = null
+                    successMessage = null,
                 )
             }
+
             runCatching {
                 cancelAdventureBookingUseCase.execute(
                     id = booking.id,
@@ -71,13 +108,18 @@ class AdventureBookingsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isCancelling = false,
+                        cancellingBookingId = null,
                         successMessage = "Reserva cancelada correctamente.",
+                        now = Date(),
                     )
                 }
             }.onFailure { error ->
+                if (error is CancellationException) throw error
+
                 _uiState.update {
                     it.copy(
                         isCancelling = false,
+                        cancellingBookingId = null,
                         errorMessage = error.message ?: "No se pudo cancelar la reserva.",
                     )
                 }
@@ -86,42 +128,63 @@ class AdventureBookingsViewModel @Inject constructor(
     }
 
     fun dismissMessage() {
-        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
+        _uiState.update {
+            it.copy(
+                errorMessage = null,
+                successMessage = null,
+            )
+        }
     }
 
     private fun observeBookings() {
-        val snapshot = _uiState.value
-        val nationalId = snapshot.nationalId
+        val nationalId = _uiState.value.nationalId
+
+        bookingsJob?.cancel()
+
         if (nationalId.isBlank()) {
-            bookingsJob?.cancel()
             bookingsJob = null
-            _uiState.update { it.copy(bookings = emptyList(), isLoading = false) }
+            _uiState.update {
+                it.copy(
+                    allBookings = emptyList(),
+                    isLoading = false,
+                    errorMessage = null,
+                )
+            }
             return
         }
 
-        bookingsJob?.cancel()
         bookingsJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            observeAdventureBookingsUseCase.execute(
-                day = snapshot.selectedDate,
-                nationalId = nationalId,
-            ).catch { error ->
-                if (error is CancellationException) throw error
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
-                    )
-                }
-            }.collectLatest { bookings ->
-                _uiState.update {
-                    it.copy(
-                        bookings = bookings,
-                        isLoading = false,
-                        errorMessage = null,
-                    )
-                }
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    now = Date(),
+                )
             }
+
+            observeAdventureBookingsUseCase.execute(nationalId)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+
+                    _uiState.update {
+                        it.copy(
+                            allBookings = emptyList(),
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
+                            now = Date(),
+                        )
+                    }
+                }
+                .collectLatest { bookings ->
+                    _uiState.update {
+                        it.copy(
+                            allBookings = bookings,
+                            isLoading = false,
+                            errorMessage = null,
+                            now = Date(),
+                        )
+                    }
+                }
         }
     }
 }

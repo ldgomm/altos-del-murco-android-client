@@ -1,8 +1,8 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
 
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data.AdventureBookingsRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.data.AdventureBookingsRepository
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data.AdventureCatalogRepository
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingsRepositoriable
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogRepositoriable
 import dagger.Binds
 import dagger.Module

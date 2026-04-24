@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -37,27 +38,27 @@ private enum class TopLevelDestination(
 ) {
     HOME(
         route = "home",
-        label = "Home",
+        label = "Inicio",
         icon = { Icon(Icons.Rounded.Home, contentDescription = null) },
     ),
     RESTAURANT(
         route = "restaurant",
-        label = "Restaurant",
+        label = "Restaurante",
         icon = { Icon(Icons.Rounded.Restaurant, contentDescription = null) },
     ),
     ADVENTURE(
         route = "adventure",
-        label = "Adventure",
+        label = "Aventura",
         icon = { Icon(Icons.Rounded.Explore, contentDescription = null) },
     ),
     BOOKINGS(
         route = "bookings",
-        label = "Bookings",
+        label = "Reservas",
         icon = { Icon(Icons.Rounded.CalendarMonth, contentDescription = null) },
     ),
     PROFILE(
         route = "profile",
-        label = "Profile",
+        label = "Perfil",
         icon = { Icon(Icons.Rounded.Person, contentDescription = null) },
     ),
 }
@@ -83,15 +84,7 @@ fun AltosMainShell(
 
                     NavigationBarItem(
                         selected = selected,
-                        onClick = {
-                            navController.navigate(destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                restoreState = true
-                                launchSingleTop = true
-                            }
-                        },
+                        onClick = { navController.navigateTopLevel(destination.route) },
                         icon = destination.icon,
                         label = { Text(destination.label) },
                     )
@@ -105,7 +98,7 @@ fun AltosMainShell(
             modifier = Modifier.padding(innerPadding),
         ) {
             composable(TopLevelDestination.HOME.route) {
-                HomeScreen()
+                HomeScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.RESTAURANT.route) {
                 RestaurantScreen(sessionState = sessionState)
@@ -124,5 +117,15 @@ fun AltosMainShell(
                 )
             }
         }
+    }
+}
+
+private fun NavHostController.navigateTopLevel(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+        }
+        restoreState = true
+        launchSingleTop = true
     }
 }

@@ -1,8 +1,9 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
 
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingsRepositoriable
+import kotlinx.coroutines.flow.Flow
 import java.util.Date
 import javax.inject.Inject
-import kotlinx.coroutines.flow.Flow
 
 class FetchAdventureCatalogUseCase @Inject constructor(
     private val repository: AdventureCatalogRepositoriable,
@@ -42,8 +43,8 @@ class CreateAdventureBookingUseCase @Inject constructor(
 class ObserveAdventureBookingsUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    fun execute(day: Date, nationalId: String): Flow<List<AdventureBooking>> =
-        repository.observeBookings(day = day, nationalId = nationalId)
+    fun execute(nationalId: String): Flow<List<AdventureBooking>> =
+        repository.observeBookings(nationalId = nationalId)
 }
 
 class CancelAdventureBookingUseCase @Inject constructor(

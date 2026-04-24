@@ -157,15 +157,6 @@ fun MenuListScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
-                    item {
-                        RestaurantHeroCard(
-                            clientName = clientName,
-                            levelTitle = levelTitle,
-                            featuredCount = state.featuredItems.size,
-                            sectionCount = state.sections.size,
-                        )
-                    }
-
                     state.errorMessage?.let { message ->
                         item {
                             ErrorCard(
@@ -272,82 +263,6 @@ private fun EmptyRestaurantState(modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RestaurantHeroCard(
-    clientName: String,
-    levelTitle: String,
-    featuredCount: Int,
-    sectionCount: Int,
-) {
-    val friendlyName = clientName.substringBefore(" ").ifBlank { "amigo" }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(30.dp))
-            .background(
-                brush = Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.tertiary,
-                    ),
-                ),
-            )
-            .padding(22.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Restaurant,
-                        contentDescription = null,
-                        tint = Color.White,
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                AssistChip(
-                    onClick = {},
-                    label = { Text("Nivel $levelTitle") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.LocalOffer,
-                            contentDescription = null,
-                        )
-                    },
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Hola, $friendlyName",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-
-                Text(
-                    text = "Elige tus favoritos. Si tienes premios Murco Loyalty, se muestran y se aplican automáticamente.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.92f),
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HeroStatPill("$featuredCount destacados")
-                HeroStatPill("$sectionCount categorías")
             }
         }
     }

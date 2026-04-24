@@ -310,152 +310,6 @@ data class AdventureBookingDto(
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureBookingsRepository.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
-
-
-@Singleton
-class AdventureBookingsRepository @Inject constructor(
-    private val firestore: FirebaseFirestore,
-    private val catalogRepository: AdventureCatalogRepositoriable,
-    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
-) : AdventureBookingsRepositoriable {
-
-    override fun observeBookings(
-        day: Date,
-        nationalId: String,
-    ): Flow<List<AdventureBooking>> = callbackFlow {
-        val cleanNationalId = nationalId.trim()
-        if (cleanNationalId.isEmpty()) {
-            trySend(emptyList()).isSuccess
-            close()
-            return@callbackFlow
-        }
-
-        val registration = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .whereEqualTo("startDayKey", AdventureDateHelper.dayKey(day))
-            .orderBy("startAt", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    close(error)
-                    return@addSnapshotListener
-                }
-
-                val bookings = snapshot?.documents.orEmpty().mapNotNull { document ->
-                    document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-                }
-                trySend(bookings).isSuccess
-            }
-
-        awaitClose { registration.remove() }
-    }
-
-    override suspend fun fetchAvailability(
-        date: Date,
-        items: List<AdventureReservationItemDraft>,
-        foodReservation: ReservationFoodDraft?,
-        packageDiscountAmount: Double,
-    ): List<AdventureAvailabilitySlot> {
-        val catalog = catalogRepository.fetchCatalog()
-        return AdventurePlanner.buildAvailability(
-            day = date,
-            items = items,
-            foodReservation = foodReservation,
-            packageDiscountAmount = packageDiscountAmount,
-            catalog = catalog,
-        )
-    }
-
-    override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
-        val catalog = catalogRepository.fetchCatalog()
-        val basePlan = AdventurePlanner.buildPlan(
-            day = request.date,
-            startAt = request.selectedStartAt,
-            items = request.items,
-            foodReservation = request.foodReservation,
-            packageDiscountAmount = request.packageDiscountAmount,
-            catalog = catalog,
-        ) ?: error("Invalid reservation configuration.")
-
-        val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
-            nationalId = request.nationalId,
-            activityItems = request.items,
-            foodItems = request.foodReservation?.items.orEmpty(),
-            catalog = catalog,
-        )
-
-        val finalPlan = AdventureBuildPlan(
-            startAt = basePlan.startAt,
-            endAt = basePlan.endAt,
-            blocks = basePlan.blocks,
-            adventureSubtotal = basePlan.adventureSubtotal,
-            foodSubtotal = basePlan.foodSubtotal,
-            subtotal = basePlan.subtotal,
-            discountAmount = basePlan.discountAmount,
-            loyaltyDiscountAmount = rewardPreview.totalDiscount,
-            appliedRewards = rewardPreview.appliedRewards,
-            nightPremium = basePlan.nightPremium,
-            totalAmount = max(0.0, basePlan.totalAmount - rewardPreview.totalDiscount),
-            hasNightPremium = basePlan.hasNightPremium,
-        )
-
-        val normalizedRequest = request.copy(
-            packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
-            loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
-            appliedRewards = rewardPreview.appliedRewards,
-        )
-
-        val createdAt = Date()
-        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document()
-        val dto = AdventureBookingDto.from(
-            request = normalizedRequest,
-            plan = finalPlan,
-            createdAt = createdAt,
-            status = AdventureBookingStatus.PENDING,
-        )
-
-        bookingRef.set(dto).awaitResult()
-
-        loyaltyRewardsRepository.reserveRewards(
-            nationalId = normalizedRequest.nationalId,
-            referenceType = LoyaltyRewardReferenceType.BOOKING,
-            referenceId = bookingRef.id,
-            appliedRewards = normalizedRequest.appliedRewards,
-        )
-
-        return dto.toDomain(bookingRef.id)
-    }
-
-    override suspend fun cancelBooking(id: String, nationalId: String) {
-        val cleanNationalId = nationalId.trim()
-        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document(id)
-        val snapshot = bookingRef.get().awaitResult()
-        if (!snapshot.exists()) error("Booking not found.")
-
-        val dto = snapshot.toObject(AdventureBookingDto::class.java)
-            ?: error("Could not read booking data.")
-
-        if (dto.nationalId != cleanNationalId) {
-            error("You are not allowed to cancel this booking.")
-        }
-
-        bookingRef.update("status", AdventureBookingStatus.CANCELED.rawValue).awaitResult()
-
-        loyaltyRewardsRepository.releaseRewards(
-            nationalId = dto.nationalId,
-            referenceId = id,
-        )
-    }
-}
-
-```
-
----
-
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/data/AdventureCatalogDtos.kt
 
 ```kotlin
@@ -965,31 +819,6 @@ class AdventureCatalogRepository @Inject constructor(
         is Number -> value.toInt()
         else -> null
     }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/domain/AdventureBookingRepositoriable.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain
-
-
-interface AdventureBookingsRepositoriable {
-    fun observeBookings(day: Date, nationalId: String): Flow<List<AdventureBooking>>
-
-    suspend fun fetchAvailability(
-        date: Date,
-        items: List<AdventureReservationItemDraft>,
-        foodReservation: ReservationFoodDraft?,
-        packageDiscountAmount: Double,
-    ): List<AdventureAvailabilitySlot>
-
-    suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking
-
-    suspend fun cancelBooking(id: String, nationalId: String)
 }
 
 ```
@@ -1922,8 +1751,8 @@ class CreateAdventureBookingUseCase @Inject constructor(
 class ObserveAdventureBookingsUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    fun execute(day: Date, nationalId: String): Flow<List<AdventureBooking>> =
-        repository.observeBookings(day = day, nationalId = nationalId)
+    fun execute(nationalId: String): Flow<List<AdventureBooking>> =
+        repository.observeBookings(nationalId = nationalId)
 }
 
 class CancelAdventureBookingUseCase @Inject constructor(
@@ -1931,218 +1760,6 @@ class CancelAdventureBookingUseCase @Inject constructor(
 ) {
     suspend fun execute(id: String, nationalId: String) {
         repository.cancelBooking(id = id, nationalId = nationalId)
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/view/AdventureBookingsScreen.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
-
-
-@Composable
-fun AdventureBookingsScreen(
-    sessionState: SessionState.Authenticated,
-    modifier: Modifier = Modifier,
-    viewModel: AdventureBookingsViewModel = hiltViewModel(),
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var bookingToCancel by remember { mutableStateOf<AdventureBooking?>(null) }
-
-    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
-        viewModel.onAppear(sessionState.profile)
-    }
-
-    val message = state.errorMessage ?: state.successMessage
-    if (message != null) {
-        AlertDialog(
-            onDismissRequest = viewModel::dismissMessage,
-            confirmButton = { TextButton(onClick = viewModel::dismissMessage) { Text("OK") } },
-            title = { Text("Mensaje") },
-            text = { Text(message) },
-        )
-    }
-
-    bookingToCancel?.let { booking ->
-        AlertDialog(
-            onDismissRequest = { bookingToCancel = null },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.cancelBooking(booking)
-                    bookingToCancel = null
-                }) { Text("Cancelar reserva") }
-            },
-            dismissButton = { TextButton(onClick = { bookingToCancel = null }) { Text("Volver") } },
-            title = { Text("¿Cancelar reserva?") },
-            text = { Text("Se liberarán los premios reservados y la reserva quedará como cancelada.") },
-        )
-    }
-
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Mis reservas",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Aventura, comida y eventos por día.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = viewModel::refresh) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Refrescar")
-            }
-        }
-
-        AdventureCard {
-            AdventureSectionTitle("Fecha", "Mira las reservas de un día específico.")
-            OutlinedButton(
-                onClick = {
-                    val calendar = Calendar.getInstance().apply { time = state.selectedDate }
-                    DatePickerDialog(
-                        context,
-                        { _, year, month, day ->
-                            val picked = Calendar.getInstance().apply {
-                                set(year, month, day, 0, 0, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }
-                            viewModel.onDateSelected(picked.time)
-                        },
-                        calendar.get(Calendar.YEAR),
-                        calendar.get(Calendar.MONTH),
-                        calendar.get(Calendar.DAY_OF_MONTH),
-                    ).show()
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
-                Spacer(Modifier.height(0.dp))
-                Text(AdventureDateHelper.shortDateText(state.selectedDate))
-            }
-        }
-
-        if (state.isLoading) {
-            CircularProgressIndicator()
-        } else if (state.bookings.isEmpty()) {
-            AdventureEmptyState(
-                title = "Sin reservas para este día",
-                body = "Cuando crees una reserva de aventura o comida aparecerá aquí.",
-                icon = Icons.Rounded.Event,
-            )
-        } else {
-            state.bookings.forEach { booking ->
-                AdventureBookingCard(
-                    booking = booking,
-                    onCancel = { bookingToCancel = booking },
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AdventureBookingCard(
-    booking: AdventureBooking,
-    onCancel: () -> Unit,
-) {
-    AdventureCard {
-        Row(
-            verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            AdventureIconBubble(icon = Icons.Rounded.Event)
-            Column(
-                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                Text(
-                    booking.visitTypeTitle,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "${AdventureDateHelper.timeText(booking.startAt)} - ${
-                        AdventureDateHelper.timeText(
-                            booking.endAt
-                        )
-                    }",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(booking.eventDisplayTitle, style = MaterialTheme.typography.bodyMedium)
-            }
-            AssistChip(onClick = {}, label = { Text(booking.status.title) })
-        }
-
-        Divider()
-
-        if (booking.items.isNotEmpty()) {
-            Text("Actividades", fontWeight = FontWeight.Bold)
-            booking.items.forEach { item ->
-                Text(
-                    "• ${item.title}: ${item.summaryText}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-
-        booking.foodReservation?.takeIf { !it.isEmpty }?.let { food ->
-            Text("Comida", fontWeight = FontWeight.Bold)
-            food.items.forEach { item ->
-                Text(
-                    "• ${item.quantity}x ${item.name}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Text(
-                "Servicio: ${food.servingMoment.title}", style = MaterialTheme.typography.bodySmall
-            )
-        }
-
-        if (booking.appliedRewards.isNotEmpty()) {
-            Text("Premios aplicados", fontWeight = FontWeight.Bold)
-            booking.appliedRewards.forEach { reward ->
-                Text(
-                    "• ${reward.title}: -${reward.amount.priceText()}",
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-
-        AdventurePriceRow("Total", booking.totalAmount, bold = true)
-
-        if (booking.status == AdventureBookingStatus.PENDING || booking.status == AdventureBookingStatus.CONFIRMED) {
-            OutlinedButton(
-                onClick = onCancel,
-                modifier = Modifier.fillMaxWidth(),
-                enabled = booking.status != AdventureBookingStatus.CANCELED
-            ) {
-                Icon(Icons.Rounded.Cancel, contentDescription = null)
-                Text("Cancelar reserva")
-            }
-        } else if (booking.status == AdventureBookingStatus.COMPLETED) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.CheckCircle,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text("Reserva completada", color = MaterialTheme.colorScheme.primary)
-            }
-        }
     }
 }
 
@@ -3602,143 +3219,6 @@ fun AdventureEmptyState(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(text = body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureBookingsUiState.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
-
-
-data class AdventureBookingsUiState(
-    val selectedDate: Date = Date(),
-    val nationalId: String = "",
-    val bookings: List<AdventureBooking> = emptyList(),
-    val isLoading: Boolean = false,
-    val isCancelling: Boolean = false,
-    val errorMessage: String? = null,
-    val successMessage: String? = null,
-)
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/adventure/presentation/viewmodel/AdventureBookingsViewModel.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
-
-
-@HiltViewModel
-class AdventureBookingsViewModel @Inject constructor(
-    private val observeAdventureBookingsUseCase: ObserveAdventureBookingsUseCase,
-    private val cancelAdventureBookingUseCase: CancelAdventureBookingUseCase,
-) : ViewModel() {
-
-    private val _uiState = MutableStateFlow(AdventureBookingsUiState())
-    val uiState: StateFlow<AdventureBookingsUiState> = _uiState.asStateFlow()
-
-    private var bookingsJob: Job? = null
-
-    fun onAppear(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter(Char::isDigit)
-        val current = _uiState.value
-        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) return
-        _uiState.update { it.copy(nationalId = cleanNationalId) }
-        observeBookings()
-    }
-
-    fun onDateSelected(date: Date) {
-        _uiState.update { it.copy(selectedDate = date) }
-        observeBookings()
-    }
-
-    fun refresh() {
-        observeBookings()
-    }
-
-    fun cancelBooking(booking: AdventureBooking) {
-        val nationalId = _uiState.value.nationalId
-        if (nationalId.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Tu perfil no tiene cédula registrada.") }
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isCancelling = true,
-                    errorMessage = null,
-                    successMessage = null
-                )
-            }
-            runCatching {
-                cancelAdventureBookingUseCase.execute(
-                    id = booking.id,
-                    nationalId = nationalId,
-                )
-            }.onSuccess {
-                _uiState.update {
-                    it.copy(
-                        isCancelling = false,
-                        successMessage = "Reserva cancelada correctamente.",
-                    )
-                }
-            }.onFailure { error ->
-                _uiState.update {
-                    it.copy(
-                        isCancelling = false,
-                        errorMessage = error.message ?: "No se pudo cancelar la reserva.",
-                    )
-                }
-            }
-        }
-    }
-
-    fun dismissMessage() {
-        _uiState.update { it.copy(errorMessage = null, successMessage = null) }
-    }
-
-    private fun observeBookings() {
-        val snapshot = _uiState.value
-        val nationalId = snapshot.nationalId
-        if (nationalId.isBlank()) {
-            bookingsJob?.cancel()
-            bookingsJob = null
-            _uiState.update { it.copy(bookings = emptyList(), isLoading = false) }
-            return
-        }
-
-        bookingsJob?.cancel()
-        bookingsJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            observeAdventureBookingsUseCase.execute(
-                day = snapshot.selectedDate,
-                nationalId = nationalId,
-            ).catch { error ->
-                if (error is CancellationException) throw error
-                _uiState.update {
-                    it.copy(
-                        isLoading = false,
-                        errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
-                    )
-                }
-            }.collectLatest { bookings ->
-                _uiState.update {
-                    it.copy(
-                        bookings = bookings,
-                        isLoading = false,
-                        errorMessage = null,
-                    )
-                }
             }
         }
     }
@@ -6191,28 +5671,1669 @@ private fun String.onlyDigits(): String = filter(Char::isDigit)
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/data/AdventureBookingsRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.data
+
+
+@Singleton
+class AdventureBookingsRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+    private val catalogRepository: AdventureCatalogRepositoriable,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
+) : AdventureBookingsRepositoriable {
+
+    override fun observeBookings(
+        nationalId: String,
+    ): Flow<List<AdventureBooking>> = callbackFlow {
+        val cleanNationalId = nationalId.filter(Char::isDigit)
+
+        if (cleanNationalId.isEmpty()) {
+            trySend(emptyList()).isSuccess
+            close()
+            return@callbackFlow
+        }
+
+        val registration = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .orderBy("startAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+
+                val bookings = snapshot
+                    ?.documents
+                    .orEmpty()
+                    .mapNotNull { document ->
+                        document.toObject(AdventureBookingDto::class.java)
+                            ?.toDomain(document.id)
+                    }
+                    .sortedBy { it.startAt.time }
+
+                trySend(bookings).isSuccess
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun fetchAvailability(
+        date: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+    ): List<AdventureAvailabilitySlot> {
+        val catalog = catalogRepository.fetchCatalog()
+
+        return AdventurePlanner.buildAvailability(
+            day = date,
+            items = items,
+            foodReservation = foodReservation,
+            packageDiscountAmount = packageDiscountAmount,
+            catalog = catalog,
+        )
+    }
+
+    override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
+        val catalog = catalogRepository.fetchCatalog()
+
+        val basePlan = AdventurePlanner.buildPlan(
+            day = request.date,
+            startAt = request.selectedStartAt,
+            items = request.items,
+            foodReservation = request.foodReservation,
+            packageDiscountAmount = request.packageDiscountAmount,
+            catalog = catalog,
+        ) ?: error("Invalid reservation configuration.")
+
+        val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
+            nationalId = request.nationalId,
+            activityItems = request.items,
+            foodItems = request.foodReservation?.items.orEmpty(),
+            catalog = catalog,
+        )
+
+        val finalPlan = AdventureBuildPlan(
+            startAt = basePlan.startAt,
+            endAt = basePlan.endAt,
+            blocks = basePlan.blocks,
+            adventureSubtotal = basePlan.adventureSubtotal,
+            foodSubtotal = basePlan.foodSubtotal,
+            subtotal = basePlan.subtotal,
+            discountAmount = basePlan.discountAmount,
+            loyaltyDiscountAmount = rewardPreview.totalDiscount,
+            appliedRewards = rewardPreview.appliedRewards,
+            nightPremium = basePlan.nightPremium,
+            totalAmount = max(0.0, basePlan.totalAmount - rewardPreview.totalDiscount),
+            hasNightPremium = basePlan.hasNightPremium,
+        )
+
+        val normalizedRequest = request.copy(
+            nationalId = request.nationalId.filter(Char::isDigit),
+            packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
+            loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
+            appliedRewards = rewardPreview.appliedRewards,
+        )
+
+        val createdAt = Date()
+        val bookingRef = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .document()
+
+        val dto = AdventureBookingDto.Companion.from(
+            request = normalizedRequest,
+            plan = finalPlan,
+            createdAt = createdAt,
+            status = AdventureBookingStatus.PENDING,
+        )
+
+        bookingRef.set(dto).awaitResult()
+
+        loyaltyRewardsRepository.reserveRewards(
+            nationalId = normalizedRequest.nationalId,
+            referenceType = LoyaltyRewardReferenceType.BOOKING,
+            referenceId = bookingRef.id,
+            appliedRewards = normalizedRequest.appliedRewards,
+        )
+
+        return dto.toDomain(bookingRef.id)
+    }
+
+    override suspend fun cancelBooking(id: String, nationalId: String) {
+        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val cleanId = id.trim()
+
+        require(cleanId.isNotEmpty()) { "Booking id is required." }
+        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
+
+        val bookingRef = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .document(cleanId)
+
+        val snapshot = bookingRef.get().awaitResult()
+
+        if (!snapshot.exists()) {
+            error("Booking not found.")
+        }
+
+        val dto = snapshot.toObject(AdventureBookingDto::class.java)
+            ?: error("Could not read booking data.")
+
+        if (dto.nationalId.filter(Char::isDigit) != cleanNationalId) {
+            error("You are not allowed to cancel this booking.")
+        }
+
+        bookingRef
+            .update("status", AdventureBookingStatus.CANCELED.rawValue)
+            .awaitResult()
+
+        loyaltyRewardsRepository.releaseRewards(
+            nationalId = dto.nationalId,
+            referenceId = cleanId,
+        )
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/domain/AdventureBookingRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain
+
+
+interface AdventureBookingsRepositoriable {
+    fun observeBookings(nationalId: String): Flow<List<AdventureBooking>>
+
+    suspend fun fetchAvailability(
+        date: Date,
+        items: List<AdventureReservationItemDraft>,
+        foodReservation: ReservationFoodDraft?,
+        packageDiscountAmount: Double,
+    ): List<AdventureAvailabilitySlot>
+
+    suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking
+
+    suspend fun cancelBooking(id: String, nationalId: String)
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/AdventureBookingsUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+
+
+enum class AdventureReservationTimelineFilter(
+    val title: String,
+) {
+    ALL("Todas"),
+    CURRENT("Actuales"),
+    FUTURE("Futuras"),
+    PAST("Pasadas"),
+}
+
+enum class AdventureReservationStatusFilter(
+    val title: String,
+    val bookingStatus: AdventureBookingStatus?,
+) {
+    ALL("Todo", null),
+    PENDING("Pendiente", AdventureBookingStatus.PENDING),
+    CONFIRMED("Confirmada", AdventureBookingStatus.CONFIRMED),
+    COMPLETED("Completada", AdventureBookingStatus.COMPLETED),
+    CANCELED("Cancelada", AdventureBookingStatus.CANCELED),
+}
+
+enum class AdventureReservationSortOrder(
+    val title: String,
+) {
+    NEAREST_FIRST("Próximas primero"),
+    NEWEST_FIRST("Más recientes"),
+    OLDEST_FIRST("Más antiguas"),
+}
+
+data class AdventureBookingsDateGroup(
+    val id: String,
+    val date: Date,
+    val bookings: List<AdventureBooking>,
+) {
+    val title: String
+        get() {
+            val calendar = Calendar.getInstance()
+            val today = AdventureDateHelper.startOfDay(Date())
+            val tomorrow = calendar.apply {
+                time = today
+                add(Calendar.DAY_OF_YEAR, 1)
+            }.time
+            val yesterday = calendar.apply {
+                time = today
+                add(Calendar.DAY_OF_YEAR, -1)
+            }.time
+
+            return when {
+                AdventureDateHelper.sameDay(date, today) -> "Hoy"
+                AdventureDateHelper.sameDay(date, tomorrow) -> "Mañana"
+                AdventureDateHelper.sameDay(date, yesterday) -> "Ayer"
+                else -> longDateFormatter.format(date).replaceFirstChar {
+                    if (it.isLowerCase()) it.titlecase(Locale("es", "EC")) else it.toString()
+                }
+            }
+        }
+
+    companion object {
+        private val longDateFormatter = SimpleDateFormat(
+            "EEEE d 'de' MMMM yyyy",
+            Locale("es", "EC"),
+        )
+    }
+}
+
+data class AdventureBookingsUiState(
+    val nationalId: String = "",
+    val allBookings: List<AdventureBooking> = emptyList(),
+    val selectedTimelineFilter: AdventureReservationTimelineFilter = AdventureReservationTimelineFilter.ALL,
+    val selectedStatusFilter: AdventureReservationStatusFilter = AdventureReservationStatusFilter.ALL,
+    val sortOrder: AdventureReservationSortOrder = AdventureReservationSortOrder.NEAREST_FIRST,
+    val now: Date = Date(),
+    val isLoading: Boolean = false,
+    val isCancelling: Boolean = false,
+    val cancellingBookingId: String? = null,
+    val errorMessage: String? = null,
+    val successMessage: String? = null,
+) {
+    val displayedBookings: List<AdventureBooking>
+        get() {
+            val filtered = allBookings.filter { booking ->
+                matchesTimelineFilter(booking) && matchesStatusFilter(booking)
+            }
+
+            return sorted(filtered)
+        }
+
+    val groupedBookings: List<AdventureBookingsDateGroup>
+        get() {
+            val groups = linkedMapOf<String, MutableList<AdventureBooking>>()
+
+            displayedBookings.forEach { booking ->
+                val day = AdventureDateHelper.startOfDay(booking.startAt)
+                val key = AdventureDateHelper.dayKey(day)
+                groups.getOrPut(key) { mutableListOf() }.add(booking)
+            }
+
+            return groups.map { (key, bookings) ->
+                AdventureBookingsDateGroup(
+                    id = key,
+                    date = AdventureDateHelper.startOfDay(bookings.first().startAt),
+                    bookings = bookings,
+                )
+            }
+        }
+
+    val totalCount: Int
+        get() = allBookings.size
+
+    val displayedCount: Int
+        get() = displayedBookings.size
+
+    val currentCount: Int
+        get() = allBookings.count { isCurrent(it) }
+
+    val futureCount: Int
+        get() = allBookings.count { isFuture(it) }
+
+    val pastCount: Int
+        get() = allBookings.count { isPast(it) }
+
+    private fun matchesTimelineFilter(booking: AdventureBooking): Boolean {
+        return when (selectedTimelineFilter) {
+            AdventureReservationTimelineFilter.ALL -> true
+            AdventureReservationTimelineFilter.CURRENT -> isCurrent(booking)
+            AdventureReservationTimelineFilter.FUTURE -> isFuture(booking)
+            AdventureReservationTimelineFilter.PAST -> isPast(booking)
+        }
+    }
+
+    private fun matchesStatusFilter(booking: AdventureBooking): Boolean {
+        val selectedStatus = selectedStatusFilter.bookingStatus ?: return true
+        return booking.status == selectedStatus
+    }
+
+    private fun sorted(bookings: List<AdventureBooking>): List<AdventureBooking> {
+        return when (sortOrder) {
+            AdventureReservationSortOrder.NEAREST_FIRST -> bookings.sortedWith { lhs, rhs ->
+                val lhsRank = timelineRank(lhs)
+                val rhsRank = timelineRank(rhs)
+
+                when {
+                    lhsRank != rhsRank -> lhsRank.compareTo(rhsRank)
+                    lhsRank == 2 -> rhs.startAt.time.compareTo(lhs.startAt.time)
+                    lhs.startAt.time != rhs.startAt.time -> lhs.startAt.time.compareTo(rhs.startAt.time)
+                    else -> lhs.createdAt.time.compareTo(rhs.createdAt.time)
+                }
+            }
+
+            AdventureReservationSortOrder.NEWEST_FIRST -> bookings.sortedWith(
+                compareByDescending<AdventureBooking> { it.startAt.time }
+                    .thenByDescending { it.createdAt.time },
+            )
+
+            AdventureReservationSortOrder.OLDEST_FIRST -> bookings.sortedWith(
+                compareBy<AdventureBooking> { it.startAt.time }
+                    .thenBy { it.createdAt.time },
+            )
+        }
+    }
+
+    private fun timelineRank(booking: AdventureBooking): Int {
+        return when {
+            isCurrent(booking) -> 0
+            isFuture(booking) -> 1
+            else -> 2
+        }
+    }
+
+    private fun isCurrent(booking: AdventureBooking): Boolean {
+        val isActiveStatus = booking.status == AdventureBookingStatus.PENDING ||
+                booking.status == AdventureBookingStatus.CONFIRMED
+
+        return isActiveStatus &&
+                !booking.startAt.after(now) &&
+                !booking.endAt.before(now)
+    }
+
+    private fun isFuture(booking: AdventureBooking): Boolean {
+        val isActiveStatus = booking.status == AdventureBookingStatus.PENDING ||
+                booking.status == AdventureBookingStatus.CONFIRMED
+
+        return isActiveStatus && booking.startAt.after(now)
+    }
+
+    private fun isPast(booking: AdventureBooking): Boolean {
+        return booking.endAt.before(now) ||
+                booking.status == AdventureBookingStatus.COMPLETED ||
+                booking.status == AdventureBookingStatus.CANCELED
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/AdventureBookingsViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation
+
+
+@HiltViewModel
+class AdventureBookingsViewModel @Inject constructor(
+    private val observeAdventureBookingsUseCase: ObserveAdventureBookingsUseCase,
+    private val cancelAdventureBookingUseCase: CancelAdventureBookingUseCase,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(AdventureBookingsUiState())
+    val uiState: StateFlow<AdventureBookingsUiState> = _uiState.asStateFlow()
+
+    private var bookingsJob: Job? = null
+
+    fun onAppear(profile: ClientProfile) {
+        val cleanNationalId = profile.nationalId.filter(Char::isDigit)
+        val current = _uiState.value
+
+        _uiState.update {
+            it.copy(
+                nationalId = cleanNationalId,
+                now = Date(),
+            )
+        }
+
+        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) {
+            return
+        }
+
+        observeBookings()
+    }
+
+    fun onDisappear() {
+        bookingsJob?.cancel()
+        bookingsJob = null
+    }
+
+    fun refresh() {
+        _uiState.update { it.copy(now = Date()) }
+        observeBookings()
+    }
+
+    fun setTimelineFilter(filter: AdventureReservationTimelineFilter) {
+        _uiState.update {
+            it.copy(
+                selectedTimelineFilter = filter,
+                now = Date(),
+            )
+        }
+    }
+
+    fun setStatusFilter(filter: AdventureReservationStatusFilter) {
+        _uiState.update {
+            it.copy(selectedStatusFilter = filter)
+        }
+    }
+
+    fun setSortOrder(sortOrder: AdventureReservationSortOrder) {
+        _uiState.update {
+            it.copy(sortOrder = sortOrder)
+        }
+    }
+
+    fun cancelBooking(booking: AdventureBooking) {
+        val nationalId = _uiState.value.nationalId
+
+        if (nationalId.isBlank()) {
+            _uiState.update {
+                it.copy(errorMessage = "No se encontró una cédula asociada a esta cuenta.")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isCancelling = true,
+                    cancellingBookingId = booking.id,
+                    errorMessage = null,
+                    successMessage = null,
+                )
+            }
+
+            runCatching {
+                cancelAdventureBookingUseCase.execute(
+                    id = booking.id,
+                    nationalId = nationalId,
+                )
+            }.onSuccess {
+                _uiState.update {
+                    it.copy(
+                        isCancelling = false,
+                        cancellingBookingId = null,
+                        successMessage = "Reserva cancelada correctamente.",
+                        now = Date(),
+                    )
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+
+                _uiState.update {
+                    it.copy(
+                        isCancelling = false,
+                        cancellingBookingId = null,
+                        errorMessage = error.message ?: "No se pudo cancelar la reserva.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissMessage() {
+        _uiState.update {
+            it.copy(
+                errorMessage = null,
+                successMessage = null,
+            )
+        }
+    }
+
+    private fun observeBookings() {
+        val nationalId = _uiState.value.nationalId
+
+        bookingsJob?.cancel()
+
+        if (nationalId.isBlank()) {
+            bookingsJob = null
+            _uiState.update {
+                it.copy(
+                    allBookings = emptyList(),
+                    isLoading = false,
+                    errorMessage = null,
+                )
+            }
+            return
+        }
+
+        bookingsJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    now = Date(),
+                )
+            }
+
+            observeAdventureBookingsUseCase.execute(nationalId)
+                .catch { error ->
+                    if (error is CancellationException) throw error
+
+                    _uiState.update {
+                        it.copy(
+                            allBookings = emptyList(),
+                            isLoading = false,
+                            errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
+                            now = Date(),
+                        )
+                    }
+                }
+                .collectLatest { bookings ->
+                    _uiState.update {
+                        it.copy(
+                            allBookings = bookings,
+                            isLoading = false,
+                            errorMessage = null,
+                            now = Date(),
+                        )
+                    }
+                }
+        }
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/view/AdventureBookingsScreen.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdventureBookingsScreen(
+    sessionState: SessionState.Authenticated,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: AdventureBookingsViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsState()
+
+    var bookingToCancel by remember { mutableStateOf<AdventureBooking?>(null) }
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        viewModel.onAppear(sessionState.profile)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.onDisappear() }
+    }
+
+    state.errorMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissMessage,
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissMessage) {
+                    Text("OK")
+                }
+            },
+            title = { Text("Mensaje") },
+            text = { Text(message) },
+        )
+    }
+
+    state.successMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::dismissMessage,
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissMessage) {
+                    Text("OK")
+                }
+            },
+            title = { Text("Listo") },
+            text = { Text(message) },
+        )
+    }
+
+    bookingToCancel?.let { booking ->
+        AlertDialog(
+            onDismissRequest = { bookingToCancel = null },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.cancelBooking(booking)
+                        bookingToCancel = null
+                    },
+                ) {
+                    Text("Cancelar reserva")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { bookingToCancel = null }) {
+                    Text("Volver")
+                }
+            },
+            title = { Text("¿Cancelar reserva?") },
+            text = {
+                Text(
+                    "La reserva quedará cancelada y se liberarán los premios Murco Loyalty reservados para esta reserva.",
+                )
+            },
+        )
+    }
+
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Reservas de aventura") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = viewModel::refresh) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "Actualizar")
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding),
+            contentPadding = PaddingValues(
+                start = 16.dp,
+                end = 16.dp,
+                top = 12.dp,
+                bottom = 28.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (state.isLoading) {
+                item {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+            }
+
+            item {
+                AdventureBookingsHero(state = state)
+            }
+
+            item {
+                AdventureBookingsControlsCard(
+                    state = state,
+                    onTimelineSelected = viewModel::setTimelineFilter,
+                    onStatusSelected = viewModel::setStatusFilter,
+                    onSortSelected = viewModel::setSortOrder,
+                )
+            }
+
+            if (!state.errorMessage.isNullOrBlank()) {
+                item {
+                    InlineMessageCard(
+                        title = "No se pudieron cargar tus reservas",
+                        body = state.errorMessage.orEmpty(),
+                        icon = Icons.Rounded.Warning,
+                    )
+                }
+            }
+
+            if (!state.isLoading && state.displayedBookings.isEmpty()) {
+                item {
+                    EmptyAdventureBookingsCard(state = state)
+                }
+            }
+
+            state.groupedBookings.forEach { group ->
+                item(key = "header-${group.id}") {
+                    DateGroupHeader(group = group)
+                }
+
+                items(
+                    count = group.bookings.size,
+                    key = { index -> group.bookings[index].id },
+                ) { index ->
+                    val booking = group.bookings[index]
+
+                    AdventureBookingCard(
+                        booking = booking,
+                        isCancelling = state.cancellingBookingId == booking.id,
+                        onCancel = { bookingToCancel = booking },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdventureBookingsHero(
+    state: AdventureBookingsUiState,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary,
+                        ),
+                    ),
+                )
+                .padding(20.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    IconBubble(
+                        icon = Icons.Rounded.CalendarMonth,
+                        strong = true,
+                    )
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "Tu historial completo",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+
+                        Text(
+                            text = "Actuales, futuras y pasadas; filtradas por estado y ordenadas por fecha.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
+                        )
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MetricPill("Total", state.totalCount.toString())
+                    MetricPill("Actuales", state.currentCount.toString())
+                    MetricPill("Futuras", state.futureCount.toString())
+                    MetricPill("Pasadas", state.pastCount.toString())
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AdventureBookingsControlsCard(
+    state: AdventureBookingsUiState,
+    onTimelineSelected: (AdventureReservationTimelineFilter) -> Unit,
+    onStatusSelected: (AdventureReservationStatusFilter) -> Unit,
+    onSortSelected: (AdventureReservationSortOrder) -> Unit,
+) {
+    var sortExpanded by remember { mutableStateOf(false) }
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SectionTitle(
+                icon = Icons.Rounded.FilterList,
+                title = "Herramientas",
+                subtitle = "Filtra por tiempo, estado y orden de fecha.",
+            )
+
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AdventureReservationTimelineFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = state.selectedTimelineFilter == filter,
+                        onClick = { onTimelineSelected(filter) },
+                        label = { Text(filter.title) },
+                    )
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AdventureReservationStatusFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = state.selectedStatusFilter == filter,
+                        onClick = { onStatusSelected(filter) },
+                        label = { Text(filter.title) },
+                    )
+                }
+            }
+
+            Box {
+                OutlinedButton(
+                    onClick = { sortExpanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Rounded.Sort, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = state.sortOrder.title,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null)
+                }
+
+                DropdownMenu(
+                    expanded = sortExpanded,
+                    onDismissRequest = { sortExpanded = false },
+                ) {
+                    AdventureReservationSortOrder.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.title) },
+                            onClick = {
+                                sortExpanded = false
+                                onSortSelected(option)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DateGroupHeader(
+    group: AdventureBookingsDateGroup,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = group.title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.ExtraBold,
+            )
+            Text(
+                text = "${group.bookings.size} reserva(s)",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SuggestionChip(
+            onClick = {},
+            label = { Text(AdventureDateHelper.shortDateText(group.date)) },
+            icon = {
+                Icon(
+                    Icons.Rounded.CalendarMonth,
+                    contentDescription = null,
+                )
+            },
+        )
+    }
+}
+
+@Composable
+private fun AdventureBookingCard(
+    booking: AdventureBooking,
+    isCancelling: Boolean,
+    onCancel: () -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                IconBubble(
+                    icon = bookingIcon(booking),
+                    strong = false,
+                )
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Text(
+                        text = booking.visitTypeTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+
+                    Text(
+                        text = booking.eventDisplayTitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = "${AdventureDateHelper.timeText(booking.startAt)} - ${
+                            AdventureDateHelper.timeText(
+                                booking.endAt
+                            )
+                        }",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                StatusBadge(status = booking.status)
+            }
+
+            Divider()
+
+            if (booking.items.isNotEmpty()) {
+                BookingSubsection(
+                    title = "Actividades",
+                    icon = Icons.Rounded.Explore,
+                ) {
+                    booking.items.forEach { item ->
+                        Text(
+                            text = "• ${item.title}: ${item.summaryText}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+
+            booking.foodReservation?.takeIf { !it.isEmpty }?.let { food ->
+                BookingFoodSection(food = food)
+            }
+
+            if (booking.appliedRewards.isNotEmpty()) {
+                BookingSubsection(
+                    title = "Premios aplicados",
+                    icon = Icons.Rounded.CheckCircle,
+                ) {
+                    booking.appliedRewards.forEach { reward ->
+                        Text(
+                            text = "• ${reward.title}: -${reward.amount.priceText()}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+
+            booking.notes?.takeIf { it.isNotBlank() }?.let { notes ->
+                InlineNote(text = notes)
+            }
+
+            PriceSummary(booking = booking)
+
+            AnimatedVisibility(visible = booking.canBeCancelled) {
+                OutlinedButton(
+                    onClick = onCancel,
+                    enabled = !isCancelling,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Rounded.Cancel, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(if (isCancelling) "Cancelando..." else "Cancelar reserva")
+                }
+            }
+
+            if (booking.status == AdventureBookingStatus.COMPLETED) {
+                CompletionInfo(text = "Reserva completada")
+            }
+
+            if (booking.status == AdventureBookingStatus.CANCELED) {
+                CompletionInfo(text = "Reserva cancelada")
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookingFoodSection(
+    food: ReservationFoodDraft,
+) {
+    BookingSubsection(
+        title = "Comida",
+        icon = Icons.Rounded.LocalDining,
+    ) {
+        food.items.forEach { item ->
+            Text(
+                text = "• ${item.quantity}x ${item.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Text(
+            text = "Servicio: ${food.servingMoment.title}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
+
+        food.notes?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PriceSummary(
+    booking: AdventureBooking,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SummaryRow("Aventura", booking.adventureSubtotal.priceText())
+        SummaryRow("Comida", booking.foodSubtotal.priceText())
+
+        if (booking.discountAmount > 0.0) {
+            SummaryRow("Descuento aventura", "-${booking.discountAmount.priceText()}")
+        }
+
+        if (booking.loyaltyDiscountAmount > 0.0) {
+            SummaryRow("Murco Loyalty", "-${booking.loyaltyDiscountAmount.priceText()}")
+        }
+
+        Divider()
+
+        SummaryRow(
+            title = "Total",
+            value = booking.totalAmount.priceText(),
+            bold = true,
+        )
+    }
+}
+
+@Composable
+private fun SummaryRow(
+    title: String,
+    value: String,
+    bold: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = if (bold) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Spacer(Modifier.weight(1f))
+
+        Text(
+            text = value,
+            style = if (bold) MaterialTheme.typography.titleLarge else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (bold) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun BookingSubsection(
+    title: String,
+    icon: ImageVector,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+            )
+
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun EmptyAdventureBookingsCard(
+    state: AdventureBookingsUiState,
+) {
+    InlineMessageCard(
+        title = "No hay reservas para mostrar",
+        body = when {
+            state.totalCount == 0 -> "Cuando crees una reserva de aventura, comida o evento aparecerá aquí."
+            else -> "Cambia los filtros para ver otras reservas."
+        },
+        icon = Icons.Rounded.Event,
+    )
+}
+
+@Composable
+private fun InlineMessageCard(
+    title: String,
+    body: String,
+    icon: ImageVector,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            IconBubble(icon = icon)
+
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = body,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusBadge(
+    status: AdventureBookingStatus,
+) {
+    val container = when (status) {
+        AdventureBookingStatus.PENDING -> MaterialTheme.colorScheme.tertiaryContainer
+        AdventureBookingStatus.CONFIRMED -> MaterialTheme.colorScheme.primaryContainer
+        AdventureBookingStatus.COMPLETED -> MaterialTheme.colorScheme.secondaryContainer
+        AdventureBookingStatus.CANCELED -> MaterialTheme.colorScheme.errorContainer
+    }
+
+    val content = when (status) {
+        AdventureBookingStatus.PENDING -> MaterialTheme.colorScheme.onTertiaryContainer
+        AdventureBookingStatus.CONFIRMED -> MaterialTheme.colorScheme.onPrimaryContainer
+        AdventureBookingStatus.COMPLETED -> MaterialTheme.colorScheme.onSecondaryContainer
+        AdventureBookingStatus.CANCELED -> MaterialTheme.colorScheme.onErrorContainer
+    }
+
+    Text(
+        text = status.title,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        color = content,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(container)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    )
+}
+
+@Composable
+private fun SectionTitle(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        IconBubble(icon = icon)
+
+        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetricPill(
+    title: String,
+    value: String,
+) {
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.13f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.ExtraBold,
+            color = MaterialTheme.colorScheme.onPrimary,
+        )
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.82f),
+        )
+    }
+}
+
+@Composable
+private fun IconBubble(
+    icon: ImageVector,
+    strong: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(
+                if (strong) {
+                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f)
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                },
+            )
+            .padding(11.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (strong) {
+                MaterialTheme.colorScheme.onPrimary
+            } else {
+                MaterialTheme.colorScheme.primary
+            },
+        )
+    }
+}
+
+@Composable
+private fun InlineNote(
+    text: String,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            Icons.Rounded.ForkRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun CompletionInfo(
+    text: String,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+private val AdventureBooking.canBeCancelled: Boolean
+    get() = status == AdventureBookingStatus.PENDING ||
+            status == AdventureBookingStatus.CONFIRMED
+
+private fun bookingIcon(booking: AdventureBooking): ImageVector {
+    return when {
+        booking.hasActivities -> booking.items.firstOrNull()?.activity?.bookingIcon()
+        booking.hasFoodReservation -> Icons.Rounded.LocalDining
+        else -> Icons.Rounded.Event
+    } ?: Icons.Rounded.Event
+}
+
+private fun AdventureActivityType.bookingIcon(): ImageVector {
+    return when (this) {
+        AdventureActivityType.OFF_ROAD -> Icons.Rounded.Explore
+        AdventureActivityType.PAINTBALL -> Icons.Rounded.Timeline
+        AdventureActivityType.GO_KARTS -> Icons.Rounded.Event
+        AdventureActivityType.SHOOTING_RANGE -> Icons.Rounded.AccessTime
+        AdventureActivityType.CAMPING -> Icons.Rounded.CalendarMonth
+        AdventureActivityType.EXTREME_SLIDE -> Icons.Rounded.Explore
+    }
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/presentation/view/BookingsScreen.kt
 
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
 
 
+private enum class BookingsMode {
+    HOME,
+    RESTAURANT_ORDERS,
+    ADVENTURE_BOOKINGS,
+}
+
 @Composable
 fun BookingsScreen(
     modifier: Modifier = Modifier,
     sessionState: SessionState.Authenticated,
+    ordersViewModel: OrdersViewModel = hiltViewModel(),
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        AltosPlaceholderCard(
-            title = "Reservas",
-            body = "Los pedidos del restaurante y las reservas de aventura terminarán viviendo aquí, con navegación separada pero una experiencia unificada.",
+    var mode by rememberSaveable { mutableStateOf(BookingsMode.HOME) }
+    val ordersState by ordersViewModel.uiState.collectAsState()
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        ordersViewModel.syncProfile(sessionState.profile)
+    }
+
+    when (mode) {
+        BookingsMode.HOME -> BookingsHomeContent(
+            modifier = modifier,
+            restaurantCount = ordersState.orders.size,
+            onRestaurantOrders = { mode = BookingsMode.RESTAURANT_ORDERS },
+            onAdventureBookings = { mode = BookingsMode.ADVENTURE_BOOKINGS },
         )
 
+        BookingsMode.RESTAURANT_ORDERS -> OrdersScreen(
+            state = ordersState,
+            onBack = { mode = BookingsMode.HOME },
+            onGroupingSelected = ordersViewModel::setGrouping,
+            onSortSelected = ordersViewModel::setSortOption,
+            onStatusSelected = ordersViewModel::setStatusFilter,
+            onDismissError = ordersViewModel::clearError,
+            modifier = modifier,
+        )
+
+        BookingsMode.ADVENTURE_BOOKINGS -> AdventureBookingsScreen(
+            sessionState = sessionState,
+            onBack = { mode = BookingsMode.HOME },
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
+private fun BookingsHomeContent(
+    restaurantCount: Int,
+    onRestaurantOrders: () -> Unit,
+    onAdventureBookings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 20.dp,
+            end = 20.dp,
+            top = 20.dp,
+            bottom = 28.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item {
+            BookingsHeroCard()
+        }
+
+        item {
+            BookingEntryCard(
+                badge = "Restaurante",
+                title = "Pedidos del restaurante",
+                subtitle = "Revisa tus pedidos actuales, anteriores, estados, totales y productos.",
+                icon = Icons.Rounded.LocalDining,
+                metric = "$restaurantCount pedido(s)",
+                onClick = onRestaurantOrders,
+            )
+        }
+
+        item {
+            BookingEntryCard(
+                badge = "Aventura",
+                title = "Reservas de aventura",
+                subtitle = "Mira combos, actividades, comida, eventos, premios aplicados y reservas nocturnas.",
+                icon = Icons.Rounded.CalendarMonth,
+                metric = "Actuales y futuras",
+                onClick = onAdventureBookings,
+            )
+        }
+    }
+}
+
+@Composable
+private fun BookingsHeroCard() {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(30.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary,
+                        ),
+                    ),
+                )
+                .padding(22.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    HeroIconBubble(Icons.Rounded.ReceiptLong)
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "Gestiona tus reservas",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+
+                        Text(
+                            text = "Pedidos del restaurante y reservas de aventura en un solo lugar, separado por experiencia.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.88f),
+                        )
+                    }
+                }
+
+                SuggestionChip(
+                    onClick = {},
+                    label = { Text("Altos del Murco") },
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Explore,
+                            contentDescription = null,
+                        )
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookingEntryCard(
+    badge: String,
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    metric: String,
+    onClick: () -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        onClick = onClick,
+    ) {
+        Row(
+            modifier = Modifier.padding(18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            SectionIconBubble(icon = icon)
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                )
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                Text(
+                    text = metric,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionIconBubble(
+    icon: ImageVector,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .padding(14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@Composable
+private fun HeroIconBubble(
+    icon: ImageVector,
+) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.16f))
+            .padding(14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onPrimary,
+        )
     }
 }
 
@@ -6822,6 +7943,238 @@ class LoyaltyRewardsRepository @Inject constructor(
 
     private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 }
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/data/ProfileImageRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.data
+
+
+@Singleton
+class ProfileImageRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val storage: FirebaseStorage,
+) : ProfileImageRepositoriable {
+
+    private val cacheDirectory: File by lazy {
+        File(context.cacheDir, "ProfileImages").apply {
+            if (!exists()) mkdirs()
+        }
+    }
+
+    override suspend fun cachedImageBytes(userId: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            val file = fileFor(userId)
+            if (file.exists()) runCatching { file.readBytes() }.getOrNull() else null
+        }
+
+    override suspend fun downloadAndCacheImage(userId: String, url: String): ByteArray? =
+        withContext(Dispatchers.IO) {
+            val cleanUrl = url.trim()
+            if (userId.isBlank() || cleanUrl.isBlank()) return@withContext null
+
+            runCatching {
+                val connection = URL(cleanUrl).openConnection() as HttpURLConnection
+                connection.connectTimeout = 12_000
+                connection.readTimeout = 12_000
+                connection.instanceFollowRedirects = true
+                connection.inputStream.use { input ->
+                    val bytes = input.readBytes()
+                    saveImageBytes(userId, bytes)
+                }
+            }.getOrNull()
+        }
+
+    override suspend fun saveImageBytes(userId: String, bytes: ByteArray): ByteArray =
+        withContext(Dispatchers.IO) {
+            if (userId.isNotBlank() && bytes.isNotEmpty()) {
+                fileFor(userId).writeBytes(bytes)
+            }
+            bytes
+        }
+
+    override suspend fun removeCachedImage(userId: String) = withContext(Dispatchers.IO) {
+        if (userId.isNotBlank()) fileFor(userId).delete()
+    }
+
+    override suspend fun uploadProfileImage(
+        profile: ClientProfile,
+        bytes: ByteArray,
+    ): UploadedProfileImage {
+        require(profile.id.isNotBlank()) { "User id is required to upload a profile image." }
+        require(bytes.isNotEmpty()) { "Profile image data is empty." }
+
+        val cleanUserId = profile.id.trim()
+        val path = "profile_images/$cleanUserId/avatar_${System.currentTimeMillis()}.jpg"
+        val ref = storage.reference.child(path)
+
+        ref.putBytes(bytes).awaitResult()
+        val downloadUrl = ref.downloadUrl.awaitResult().toString()
+
+        if (!profile.profileImagePath.isNullOrBlank() && profile.profileImagePath != path) {
+            runCatching { deleteProfileImage(profile.profileImagePath) }
+        }
+
+        saveImageBytes(cleanUserId, bytes)
+
+        return UploadedProfileImage(
+            downloadURL = downloadUrl,
+            storagePath = path,
+        )
+    }
+
+    override suspend fun deleteProfileImage(storagePath: String?) {
+        val cleanPath = storagePath?.trim().orEmpty()
+        if (cleanPath.isEmpty()) return
+
+        val ref = storage.reference.child(cleanPath)
+        runCatching {
+            ref.delete().awaitResult()
+        }.onFailure { error ->
+            val storageError = error as? StorageException
+            if (storageError?.errorCode != StorageException.ERROR_OBJECT_NOT_FOUND) {
+                throw error
+            }
+        }
+    }
+
+    private fun fileFor(userId: String): File =
+        File(cacheDirectory, "profile_${userId.trim()}.jpg")
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/data/ProfileStatsRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.data
+
+
+@Singleton
+class ProfileStatsRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+    private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
+) : ProfileStatsRepositoriable {
+
+    override suspend fun loadStats(nationalId: String): ProfileStats {
+        val cleanNationalId = nationalId.onlyDigits()
+        if (cleanNationalId.isEmpty()) return ProfileStats.EMPTY
+
+        val orderSnapshot = firestore
+            .collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .get()
+            .awaitResult()
+
+        val bookingSnapshot = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .get()
+            .awaitResult()
+
+        val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanNationalId)
+
+        val completedOrders = orderSnapshot.documents
+            .mapNotNull { document -> document.toObject(OrderDto::class.java)?.toDomain() }
+            .filter { order -> order.status == OrderStatus.COMPLETED }
+
+        val completedBookings = bookingSnapshot.documents
+            .mapNotNull { document ->
+                document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+            }
+            .filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
+
+        val restaurantSpent = completedOrders.sumOf { it.totalAmount }.roundMoney()
+        val adventureSpent = completedBookings.sumOf { it.totalAmount }.roundMoney()
+        val totalSpent = (restaurantSpent + adventureSpent).roundMoney()
+        val computedLevel = LoyaltyLevel.fromTotalSpent(totalSpent)
+
+        return ProfileStats(
+            points = wallet.points.coerceAtLeast(totalSpent.toInt()),
+            completedOrders = completedOrders.size,
+            completedBookings = completedBookings.size,
+            restaurantSpent = restaurantSpent,
+            adventureSpent = adventureSpent,
+            totalSpent = totalSpent,
+            level = computedLevel,
+            wallet = wallet.copy(
+                currentLevel = computedLevel,
+                totalSpent = totalSpent,
+                points = wallet.points.coerceAtLeast(totalSpent.toInt()),
+            ),
+        )
+    }
+
+    @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
+    override fun observeStats(nationalId: String): Flow<ProfileStats> = callbackFlow {
+        val cleanNationalId = nationalId.onlyDigits()
+        if (cleanNationalId.isEmpty()) {
+            trySend(ProfileStats.EMPTY).isSuccess
+            close()
+            return@callbackFlow
+        }
+
+        val refreshRequests = MutableSharedFlow<Unit>(extraBufferCapacity = 32)
+        val registrations = mutableListOf<ListenerRegistration>()
+
+        fun requestRefresh() {
+            refreshRequests.tryEmit(Unit)
+        }
+
+        val loaderJob: Job = launch {
+            refreshRequests
+                .onStart { emit(Unit) }
+                .debounce(160)
+                .mapLatest { loadStats(cleanNationalId) }
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    close(error)
+                }
+                .collect { stats ->
+                    trySend(stats).isSuccess
+                }
+        }
+
+        registrations += firestore
+            .collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .addSnapshotListener { _, error ->
+                if (error != null) close(error) else requestRefresh()
+            }
+
+        registrations += firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("nationalId", cleanNationalId)
+            .addSnapshotListener { _, error ->
+                if (error != null) close(error) else requestRefresh()
+            }
+
+        val walletJob = loyaltyRewardsRepository
+            .observeWalletSnapshot(cleanNationalId)
+            .onEach { requestRefresh() }
+            .catch { error ->
+                if (error is CancellationException) throw error
+                close(error)
+            }
+            .launchIn(this)
+
+        awaitClose {
+            registrations.forEach { it.remove() }
+            walletJob.cancel()
+            loaderJob.cancel()
+        }
+    }
+}
+
+private fun String.onlyDigits(): String = filter(Char::isDigit)
+
+private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 
 ```
 
@@ -7827,6 +9180,29 @@ interface LoyaltyRewardsRepositoriable {
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ProfileImageRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+data class UploadedProfileImage(
+    val downloadURL: String,
+    val storagePath: String,
+)
+
+interface ProfileImageRepositoriable {
+    suspend fun cachedImageBytes(userId: String): ByteArray?
+    suspend fun downloadAndCacheImage(userId: String, url: String): ByteArray?
+    suspend fun saveImageBytes(userId: String, bytes: ByteArray): ByteArray
+    suspend fun removeCachedImage(userId: String)
+    suspend fun uploadProfileImage(profile: ClientProfile, bytes: ByteArray): UploadedProfileImage
+    suspend fun deleteProfileImage(storagePath: String?)
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ProfileStats.kt
 
 ```kotlin
@@ -7853,6 +9229,76 @@ data class ProfileStats(
             level = LoyaltyLevel.BRONZE,
             wallet = RewardWalletSnapshot.empty(nationalId = ""),
         )
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ProfileStatsRepositoriable.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+
+interface ProfileStatsRepositoriable {
+    suspend fun loadStats(nationalId: String): ProfileStats
+    fun observeStats(nationalId: String): Flow<ProfileStats>
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/domain/ProfileUseCases.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
+
+
+class LoadProfileStatsUseCase @Inject constructor(
+    private val repository: ProfileStatsRepositoriable,
+) {
+    suspend fun execute(nationalId: String): ProfileStats = repository.loadStats(nationalId)
+}
+
+class ObserveProfileStatsUseCase @Inject constructor(
+    private val repository: ProfileStatsRepositoriable,
+) {
+    fun execute(nationalId: String): Flow<ProfileStats> = repository.observeStats(nationalId)
+}
+
+class LoadProfileImageUseCase @Inject constructor(
+    private val repository: ProfileImageRepositoriable,
+) {
+    suspend fun execute(profile: ClientProfile): ByteArray? {
+        val cached = repository.cachedImageBytes(profile.id)
+        if (cached != null) return cached
+
+        val url = profile.profileImageURL?.trim().orEmpty()
+        if (url.isEmpty()) return null
+
+        return repository.downloadAndCacheImage(
+            userId = profile.id,
+            url = url,
+        )
+    }
+}
+
+class UploadProfileImageUseCase @Inject constructor(
+    private val repository: ProfileImageRepositoriable,
+) {
+    suspend fun execute(profile: ClientProfile, bytes: ByteArray): UploadedProfileImage =
+        repository.uploadProfileImage(profile = profile, bytes = bytes)
+}
+
+class DeleteProfileImageUseCase @Inject constructor(
+    private val repository: ProfileImageRepositoriable,
+) {
+    suspend fun execute(profile: ClientProfile) {
+        repository.deleteProfileImage(profile.profileImagePath)
+        repository.removeCachedImage(profile.id)
     }
 }
 
@@ -8044,37 +9490,1830 @@ object RewardPresentationFactory {
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.view
 
 
+private enum class ProfileRoute {
+    ROOT,
+    EDIT,
+    LOYALTY,
+    PREFERENCES,
+    SUPPORT,
+    ACCOUNT,
+}
+
+private object ProfileLinks {
+    const val instagram = "https://instagram.com/altosdelmurco"
+    const val tiktok = "https://www.tiktok.com/@altosdelmurco"
+    const val facebook = "https://www.facebook.com/altosdelmurco"
+    const val whatsapp = "https://wa.me/593000000000"
+    const val maps = "https://maps.google.com/?q=Altos+del+Murco"
+    const val supportEmail = "mailto:soporte@altosdelmurco.com"
+    const val privacyPolicy = "https://altosdelmurco.com/privacy"
+    const val terms = "https://altosdelmurco.com/terms"
+}
+
 @Composable
 fun ProfileScreen(
     sessionState: SessionState.Authenticated,
     currentThemeMode: ThemeMode,
     onThemeModeSelected: (ThemeMode) -> Unit,
     modifier: Modifier = Modifier,
+    viewModel: ProfileViewModel = hiltViewModel(),
 ) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var route by rememberSaveable { mutableStateOf(ProfileRoute.ROOT) }
+    var showDeleteConfirmation by rememberSaveable { mutableStateOf(false) }
+    var showSignOutConfirmation by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
+        viewModel.onAppear(sessionState.profile)
+    }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri: Uri? ->
+        val selectedUri = uri ?: return@rememberLauncherForActivityResult
+        val bytes = context.readBytes(selectedUri) ?: return@rememberLauncherForActivityResult
+        viewModel.uploadProfileImage(bytes)
+    }
+
+    BackHandler(enabled = route != ProfileRoute.ROOT) {
+        route = ProfileRoute.ROOT
+    }
+
+    state.message?.let { message ->
+        AlertDialog(
+            onDismissRequest = viewModel::clearMessage,
+            confirmButton = {
+                TextButton(onClick = viewModel::clearMessage) { Text("Aceptar") }
+            },
+            title = {
+                Text(
+                    when (message) {
+                        is ProfileMessage.Error -> "Algo salió mal"
+                        is ProfileMessage.Success -> "Listo"
+                    },
+                )
+            },
+            text = {
+                Text(
+                    when (message) {
+                        is ProfileMessage.Error -> message.message
+                        is ProfileMessage.Success -> message.message
+                    },
+                )
+            },
+        )
+    }
+
+    if (showSignOutConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showSignOutConfirmation = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSignOutConfirmation = false
+                        viewModel.signOut()
+                    },
+                ) { Text("Cerrar sesión") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSignOutConfirmation = false }) { Text("Volver") }
+            },
+            title = { Text("¿Cerrar sesión?") },
+            text = { Text("Tu cuenta seguirá existiendo. Solo se cerrará la sesión en este dispositivo.") },
+        )
+    }
+
+    if (showDeleteConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmation = false },
+            confirmButton = {
+                TextButton(
+                    enabled = !state.isDeletingAccount,
+                    onClick = {
+                        showDeleteConfirmation = false
+                        val activity = context.findActivityOrNull() ?: return@TextButton
+                        scope.launch {
+                            runGoogleReauthentication(
+                                activity = activity,
+                                onToken = viewModel::deleteAccount,
+                                onError = viewModel::presentError,
+                            )
+                        }
+                    },
+                ) { Text("Eliminar cuenta") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirmation = false }) { Text("Cancelar") }
+            },
+            title = { Text("Eliminar cuenta definitivamente") },
+            text = {
+                Text("Se eliminará tu perfil de cliente y Firebase pedirá una credencial reciente de Google antes de borrar la cuenta.")
+            },
+        )
+    }
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        when (route) {
+            ProfileRoute.ROOT -> ProfileHomeScreen(
+                state = state,
+                onRefresh = viewModel::refresh,
+                onPickImage = { imagePicker.launch("image/*") },
+                onRemoveImage = viewModel::removeProfileImage,
+                onOpenEdit = {
+                    viewModel.beginEditProfile()
+                    route = ProfileRoute.EDIT
+                },
+                onOpenLoyalty = { route = ProfileRoute.LOYALTY },
+                onOpenPreferences = { route = ProfileRoute.PREFERENCES },
+                onOpenSupport = { route = ProfileRoute.SUPPORT },
+                onOpenAccount = { route = ProfileRoute.ACCOUNT },
+            )
+
+            ProfileRoute.EDIT -> EditProfileScreen(
+                state = state,
+                onBack = {
+                    viewModel.cancelEditProfile()
+                    route = ProfileRoute.ROOT
+                },
+                onFullNameChanged = viewModel::onEditFullNameChanged,
+                onNationalIdChanged = viewModel::onEditNationalIdChanged,
+                onPhoneChanged = viewModel::onEditPhoneChanged,
+                onBirthdayChanged = viewModel::onEditBirthdayChanged,
+                onAddressChanged = viewModel::onEditAddressChanged,
+                onEmergencyNameChanged = viewModel::onEditEmergencyNameChanged,
+                onEmergencyPhoneChanged = viewModel::onEditEmergencyPhoneChanged,
+                onSave = viewModel::saveEditedProfile,
+            )
+
+            ProfileRoute.LOYALTY -> LoyaltyProgramScreen(
+                stats = state.stats,
+                onBack = { route = ProfileRoute.ROOT },
+            )
+
+            ProfileRoute.PREFERENCES -> PreferencesScreen(
+                currentThemeMode = currentThemeMode,
+                onThemeModeSelected = onThemeModeSelected,
+                onBack = { route = ProfileRoute.ROOT },
+            )
+
+            ProfileRoute.SUPPORT -> SupportScreen(
+                onBack = { route = ProfileRoute.ROOT },
+            )
+
+            ProfileRoute.ACCOUNT -> AccountActionsScreen(
+                state = state,
+                onBack = { route = ProfileRoute.ROOT },
+                onSignOut = { showSignOutConfirmation = true },
+                onDeleteAccount = { showDeleteConfirmation = true },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileHomeScreen(
+    state: ProfileUiState,
+    onRefresh: () -> Unit,
+    onPickImage: () -> Unit,
+    onRemoveImage: () -> Unit,
+    onOpenEdit: () -> Unit,
+    onOpenLoyalty: () -> Unit,
+    onOpenPreferences: () -> Unit,
+    onOpenSupport: () -> Unit,
+    onOpenAccount: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
-            .padding(24.dp),
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Perfil",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onRefresh) {
+                Icon(Icons.Rounded.Refresh, contentDescription = "Refrescar")
+            }
+        }
+
+        ProfileHeaderCard(
+            state = state,
+            onPickImage = onPickImage,
+            onRemoveImage = onRemoveImage,
+        )
+
+        ProfileStatsSection(
+            state = state,
+            onOpenLoyalty = onOpenLoyalty,
+        )
+
+        ProfileCard {
+            SectionTitle(
+                title = "Tu cuenta",
+                subtitle = "Datos personales, preferencias y seguridad.",
+            )
+            ProfileMenuRow(
+                title = "Editar perfil",
+                subtitle = "Nombre, cédula, teléfono, dirección y contacto de emergencia",
+                icon = Icons.Rounded.Edit,
+                onClick = onOpenEdit,
+            )
+            ProfileMenuRow(
+                title = "Murco Loyalty",
+                subtitle = "Niveles, puntos y premios disponibles",
+                icon = Icons.Rounded.EmojiEvents,
+                onClick = onOpenLoyalty,
+            )
+            ProfileMenuRow(
+                title = "Preferencias",
+                subtitle = "Tema visual y permisos de la app",
+                icon = Icons.Rounded.Settings,
+                onClick = onOpenPreferences,
+            )
+            ProfileMenuRow(
+                title = "Soporte",
+                subtitle = "WhatsApp, redes, ubicación y políticas",
+                icon = Icons.Rounded.SupportAgent,
+                onClick = onOpenSupport,
+            )
+            ProfileMenuRow(
+                title = "Acciones de la cuenta",
+                subtitle = "Cerrar sesión o eliminar cuenta",
+                icon = Icons.Rounded.Security,
+                destructive = true,
+                onClick = onOpenAccount,
+            )
+        }
+
+        ProfileCard {
+            SectionTitle(
+                title = "Altos del Murco",
+                subtitle = "Síguenos o encuentra la ubicación del restaurante.",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(
+                    onClick = { uriHandler.openUri(ProfileLinks.instagram) },
+                    label = { Text("Instagram") },
+                    leadingIcon = { Icon(Icons.Rounded.OpenInNew, contentDescription = null) },
+                )
+                AssistChip(
+                    onClick = { uriHandler.openUri(ProfileLinks.tiktok) },
+                    label = { Text("TikTok") },
+                    leadingIcon = { Icon(Icons.Rounded.OpenInNew, contentDescription = null) },
+                )
+            }
+            OutlinedButton(
+                onClick = { uriHandler.openUri(ProfileLinks.maps) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.Map, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Abrir ubicación")
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun ProfileHeaderCard(
+    state: ProfileUiState,
+    onPickImage: () -> Unit,
+    onRemoveImage: () -> Unit,
+) {
+    ProfileCard {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Box(contentAlignment = Alignment.BottomEnd) {
+                ProfileAvatar(
+                    avatarBytes = state.avatarBytes,
+                    initials = state.initials,
+                    isLoading = state.isLoadingAvatar || state.isUploadingProfileImage,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (state.hasProfileImage) {
+                        IconButton(
+                            onClick = onRemoveImage,
+                            enabled = !state.isUploadingProfileImage,
+                            modifier = Modifier
+                                .size(42.dp)
+                                .background(MaterialTheme.colorScheme.error, CircleShape),
+                        ) {
+                            Icon(
+                                Icons.Rounded.Delete,
+                                contentDescription = "Eliminar foto",
+                                tint = MaterialTheme.colorScheme.onError,
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        onClick = onPickImage,
+                        enabled = !state.isUploadingProfileImage,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(MaterialTheme.colorScheme.primary, CircleShape),
+                    ) {
+                        Icon(
+                            Icons.Rounded.CameraAlt,
+                            contentDescription = "Cambiar foto",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = state.displayName,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = state.emailText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Miembro desde ${state.memberSinceText}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompactInfoCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Teléfono",
+                    value = state.phoneText,
+                    icon = Icons.Rounded.Phone,
+                )
+                CompactInfoCard(
+                    modifier = Modifier.weight(1f),
+                    title = "Cumpleaños",
+                    value = state.birthdayText,
+                    icon = Icons.Rounded.Cake,
+                )
+            }
+
+            InfoRow(
+                title = "Dirección",
+                value = state.addressText,
+                icon = Icons.Rounded.Home,
+            )
+            InfoRow(
+                title = "Contacto de emergencia",
+                value = state.emergencyContactText,
+                icon = Icons.Rounded.AccountCircle,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileAvatar(
+    avatarBytes: ByteArray?,
+    initials: String,
+    isLoading: Boolean,
+) {
+    val imageBitmap = remember(avatarBytes) {
+        avatarBytes?.let { bytes ->
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+        }
+    }
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(116.dp)
+            .clip(CircleShape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.secondary,
+                    ),
+                ),
+            )
+            .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f), CircleShape),
+    ) {
+        if (imageBitmap != null) {
+            Image(
+                bitmap = imageBitmap,
+                contentDescription = "Foto de perfil",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            Text(
+                text = initials,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimary,
+            )
+        }
+
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.34f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    color = Color.White,
+                    strokeWidth = 2.5.dp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileStatsSection(
+    state: ProfileUiState,
+    onOpenLoyalty: () -> Unit,
+) {
+    ProfileCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionTitle(
+                title = "Resumen",
+                subtitle = "Solo cuentan pedidos y reservas completadas.",
+                modifier = Modifier.weight(1f),
+            )
+            if (state.isLoadingStats) CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp
+            )
+        }
+
+        LevelSummaryCard(stats = state.stats, onClick = onOpenLoyalty)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatTile(
+                modifier = Modifier.weight(1f),
+                title = "Puntos",
+                value = state.stats.points.toString(),
+                icon = Icons.Rounded.Star,
+            )
+            StatTile(
+                modifier = Modifier.weight(1f),
+                title = "Pedidos",
+                value = state.stats.completedOrders.toString(),
+                icon = Icons.Rounded.Restaurant,
+            )
+            StatTile(
+                modifier = Modifier.weight(1f),
+                title = "Reservas",
+                value = state.stats.completedBookings.toString(),
+                icon = Icons.Rounded.Explore,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatTile(
+                modifier = Modifier.weight(1f),
+                title = "Restaurante",
+                value = state.stats.restaurantSpent.priceText(),
+                icon = Icons.Rounded.ShoppingBag,
+            )
+            StatTile(
+                modifier = Modifier.weight(1f),
+                title = "Aventura",
+                value = state.stats.adventureSpent.priceText(),
+                icon = Icons.Rounded.EventAvailable,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LevelSummaryCard(
+    stats: ProfileStats,
+    onClick: () -> Unit,
+) {
+    val level = stats.level
+    val next = level.nextLevel
+    val progress = LoyaltyLevel.progress(stats.totalSpent).toFloat()
+    val remaining = next?.let { (it.minimumSpent - stats.totalSpent).coerceAtLeast(0.0) }
+
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.EmojiEvents,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(38.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Nivel ${level.title}",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = level.badgeSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.78f),
+                    )
+                }
+                Icon(Icons.Rounded.OpenInNew, contentDescription = null)
+            }
+
+            LinearProgressIndicator(
+                progress = progress,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Text(
+                text = if (next == null) {
+                    "Ya estás en el máximo nivel. Total acumulado: ${stats.totalSpent.priceText()}"
+                } else {
+                    "Te faltan ${remaining?.priceText()} para llegar a ${next.title}."
+                },
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EditProfileScreen(
+    state: ProfileUiState,
+    onBack: () -> Unit,
+    onFullNameChanged: (String) -> Unit,
+    onNationalIdChanged: (String) -> Unit,
+    onPhoneChanged: (String) -> Unit,
+    onBirthdayChanged: (java.util.Date) -> Unit,
+    onAddressChanged: (String) -> Unit,
+    onEmergencyNameChanged: (String) -> Unit,
+    onEmergencyPhoneChanged: (String) -> Unit,
+    onSave: () -> Unit,
+) {
+    val edit = state.editState ?: return
+    val context = LocalContext.current
+
+    Scaffold(
+        bottomBar = {
+            Surface(shadowElevation = 8.dp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .imePadding()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onBack,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("Cancelar") }
+                    Button(
+                        onClick = onSave,
+                        enabled = edit.canSave && !state.isSavingProfile,
+                        modifier = Modifier.weight(1.4f),
+                    ) {
+                        if (state.isSavingProfile) CircularProgressIndicator(
+                            modifier = Modifier.size(
+                                18.dp
+                            ), strokeWidth = 2.dp
+                        )
+                        else Text("Guardar")
+                    }
+                }
+            }
+        },
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(padding)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            ScreenHeader(
+                title = "Editar perfil",
+                subtitle = "Esta información se usa para pedidos, reservas, beneficios y contacto.",
+                onBack = onBack,
+            )
+
+            ProfileCard {
+                SectionTitle("Datos personales", "Los campos obligatorios deben estar completos.")
+                OutlinedTextField(
+                    value = edit.fullName,
+                    onValueChange = onFullNameChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Nombre completo") },
+                    leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
+                )
+                OutlinedTextField(
+                    value = state.emailText,
+                    onValueChange = {},
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = false,
+                    singleLine = true,
+                    label = { Text("Correo") },
+                    leadingIcon = { Icon(Icons.Rounded.Email, contentDescription = null) },
+                )
+                OutlinedTextField(
+                    value = edit.nationalId,
+                    onValueChange = onNationalIdChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Cédula") },
+                    leadingIcon = { Icon(Icons.Rounded.AccountCircle, contentDescription = null) },
+                )
+                OutlinedTextField(
+                    value = edit.phoneNumber,
+                    onValueChange = onPhoneChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("WhatsApp") },
+                    leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
+                )
+                OutlinedButton(
+                    onClick = { showBirthdayPicker(context, edit, onBirthdayChanged) },
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    Icon(Icons.Rounded.CalendarMonth, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(edit.birthday.formatDateLong())
+                }
+            }
+
+            ProfileCard {
+                SectionTitle(
+                    "Ubicación y emergencia",
+                    "Ayuda al equipo a coordinar mejor cualquier visita."
+                )
+                OutlinedTextField(
+                    value = edit.address,
+                    onValueChange = onAddressChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    label = { Text("Dirección") },
+                    leadingIcon = { Icon(Icons.Rounded.Home, contentDescription = null) },
+                )
+                OutlinedTextField(
+                    value = edit.emergencyContactName,
+                    onValueChange = onEmergencyNameChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Contacto de emergencia") },
+                    leadingIcon = { Icon(Icons.Rounded.Person, contentDescription = null) },
+                )
+                OutlinedTextField(
+                    value = edit.emergencyContactPhone,
+                    onValueChange = onEmergencyPhoneChanged,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Teléfono de emergencia") },
+                    leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
+                )
+            }
+
+            Spacer(Modifier.height(86.dp))
+        }
+    }
+}
+
+@Composable
+private fun LoyaltyProgramScreen(
+    stats: ProfileStats,
+    onBack: () -> Unit,
+) {
+    val wallet = stats.wallet
+    val level = stats.level
+    val next = level.nextLevel
+    val progress = LoyaltyLevel.progress(stats.totalSpent).toFloat()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        AltosPlaceholderCard(
-            title = "Perfil",
-            body = "En este primer módulo dejamos lista la persistencia del tema con DataStore para reemplazar AppPreferences del proyecto Swift.",
+        ScreenHeader(
+            title = "Murco Loyalty",
+            subtitle = "Niveles, puntos y premios automáticos del restaurante y aventura.",
+            onBack = onBack,
         )
 
-        Text(
-            text = "Tema",
-            style = MaterialTheme.typography.titleMedium,
+        ProfileCard {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Rounded.EmojiEvents,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(44.dp),
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Nivel ${level.title}",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(level.badgeSubtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+
+            Divider()
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatTile(
+                    Modifier.weight(1f),
+                    "Total",
+                    stats.totalSpent.priceText(),
+                    Icons.Rounded.Star
+                )
+                StatTile(
+                    Modifier.weight(1f),
+                    "Puntos",
+                    stats.points.toString(),
+                    Icons.Rounded.EmojiEvents
+                )
+            }
+
+            LinearProgressIndicator(progress = progress, modifier = Modifier.fillMaxWidth())
+            Text(
+                text = if (next == null) {
+                    "Ya estás en la cima del programa."
+                } else {
+                    "Próximo nivel: ${next.title}. Te faltan ${
+                        (next.minimumSpent - stats.totalSpent).coerceAtLeast(
+                            0.0
+                        ).priceText()
+                    }."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        ProfileCard {
+            SectionTitle(
+                "Beneficios actuales",
+                "Esto es lo que representa tu nivel ${level.title}."
+            )
+            level.benefits.forEach { benefit ->
+                InfoRow(
+                    title = benefit,
+                    value = level.spendRangeText,
+                    icon = Icons.Rounded.CheckCircle
+                )
+            }
+        }
+
+        RewardTemplateSection(
+            title = "Premios disponibles",
+            subtitle = "Se aplican automáticamente cuando tu pedido o reserva cumple la regla.",
+            emptyText = "Todavía no tienes premios automáticos disponibles para tu nivel.",
+            rows = wallet.availableTemplates.map { template ->
+                RewardRowData(
+                    title = template.title,
+                    subtitle = template.subtitle,
+                    value = template.displaySummary,
+                )
+            },
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        RewardEventSection(
+            title = "Premios reservados",
+            subtitle = "Ya están apartados en pedidos o reservas pendientes.",
+            emptyText = "No tienes premios reservados ahora mismo.",
+            events = wallet.reservedEvents,
+            status = LoyaltyWalletEventStatus.RESERVED,
+        )
+
+        RewardEventSection(
+            title = "Historial de premios usados",
+            subtitle = "Beneficios ya consumidos.",
+            emptyText = "Todavía no has usado premios.",
+            events = wallet.consumedEvents,
+            status = LoyaltyWalletEventStatus.CONSUMED,
+        )
+
+        Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun PreferencesScreen(
+    currentThemeMode: ThemeMode,
+    onThemeModeSelected: (ThemeMode) -> Unit,
+    onBack: () -> Unit,
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ScreenHeader(
+            title = "Preferencias",
+            subtitle = "Apariencia y ajustes del dispositivo.",
+            onBack = onBack,
+        )
+
+        ProfileCard {
+            SectionTitle("Apariencia", "Elige cómo quieres ver Altos del Murco.")
             ThemeMode.entries.forEach { mode ->
                 FilterChip(
                     selected = currentThemeMode == mode,
                     onClick = { onThemeModeSelected(mode) },
-                    label = { Text(mode.name) },
+                    label = { Text(mode.displayTitle()) },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = when (mode) {
+                                ThemeMode.SYSTEM -> Icons.Rounded.AutoMode
+                                ThemeMode.LIGHT -> Icons.Rounded.LightMode
+                                ThemeMode.DARK -> Icons.Rounded.DarkMode
+                            },
+                            contentDescription = null,
+                        )
+                    },
                 )
             }
+        }
+
+        ProfileCard {
+            ProfileMenuRow(
+                title = "Permisos de la app",
+                subtitle = "Notificaciones, cámara, imágenes y ajustes del dispositivo",
+                icon = Icons.Rounded.Palette,
+                onClick = {
+                    val intent = Intent(
+                        AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", context.packageName, null)
+                    )
+
+                    context.startActivity(intent)
+                },
+            )
+            Text(
+                text = "Para cambiar permisos, abre Ajustes > Apps > Altos del Murco en tu dispositivo Android.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SupportScreen(onBack: () -> Unit) {
+    val uriHandler = LocalUriHandler.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ScreenHeader(
+            title = "Soporte",
+            subtitle = "Contactos, redes sociales y documentos de la app.",
+            onBack = onBack,
+        )
+        ProfileCard {
+            ProfileMenuRow(
+                "WhatsApp",
+                "Escríbenos para reservas o ayuda",
+                Icons.Rounded.Phone
+            ) { uriHandler.openUri(ProfileLinks.whatsapp) }
+            ProfileMenuRow(
+                "Instagram",
+                "@altosdelmurco",
+                Icons.Rounded.OpenInNew
+            ) { uriHandler.openUri(ProfileLinks.instagram) }
+            ProfileMenuRow(
+                "TikTok",
+                "Videos, promociones y experiencias",
+                Icons.Rounded.OpenInNew
+            ) { uriHandler.openUri(ProfileLinks.tiktok) }
+            ProfileMenuRow(
+                "Facebook",
+                "Comunidad y novedades",
+                Icons.Rounded.OpenInNew
+            ) { uriHandler.openUri(ProfileLinks.facebook) }
+            ProfileMenuRow(
+                "Ubicación",
+                "Abrir en Google Maps",
+                Icons.Rounded.Map
+            ) { uriHandler.openUri(ProfileLinks.maps) }
+        }
+        ProfileCard {
+            ProfileMenuRow(
+                "Correo de soporte",
+                "soporte@altosdelmurco.com",
+                Icons.Rounded.Email
+            ) { uriHandler.openUri(ProfileLinks.supportEmail) }
+            ProfileMenuRow(
+                "Privacidad",
+                "Política de privacidad",
+                Icons.Rounded.Security
+            ) { uriHandler.openUri(ProfileLinks.privacyPolicy) }
+            ProfileMenuRow(
+                "Términos",
+                "Términos y condiciones",
+                Icons.Rounded.Info
+            ) { uriHandler.openUri(ProfileLinks.terms) }
+        }
+    }
+}
+
+@Composable
+private fun AccountActionsScreen(
+    state: ProfileUiState,
+    onBack: () -> Unit,
+    onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        ScreenHeader(
+            title = "Acciones de la cuenta",
+            subtitle = "Estas acciones afectan tu sesión y tu perfil.",
+            onBack = onBack,
+        )
+
+        ProfileCard {
+            DangerRow(
+                title = "Cerrar sesión",
+                subtitle = "Cierra tu sesión actual en este dispositivo",
+                icon = Icons.Rounded.Logout,
+                enabled = !state.isSigningOut && !state.isDeletingAccount,
+                onClick = onSignOut,
+            )
+            DangerRow(
+                title = "Eliminar cuenta",
+                subtitle = "Elimina permanentemente tu cuenta y perfil",
+                icon = Icons.Rounded.Delete,
+                enabled = !state.isSigningOut && !state.isDeletingAccount,
+                onClick = onDeleteAccount,
+            )
+
+            AnimatedVisibility(state.isSigningOut || state.isDeletingAccount) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+}
+
+@Composable
+private fun RewardTemplateSection(
+    title: String,
+    subtitle: String,
+    emptyText: String,
+    rows: List<RewardRowData>,
+) {
+    ProfileCard {
+        SectionTitle(title, subtitle)
+        if (rows.isEmpty()) {
+            Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            rows.forEach { row ->
+                InfoRow(
+                    title = row.title,
+                    value = "${row.subtitle}\n${row.value}",
+                    icon = Icons.Rounded.EmojiEvents
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RewardEventSection(
+    title: String,
+    subtitle: String,
+    emptyText: String,
+    events: List<LoyaltyWalletEvent>,
+    status: LoyaltyWalletEventStatus,
+) {
+    ProfileCard {
+        SectionTitle(title, subtitle)
+        if (events.isEmpty()) {
+            Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            events.forEach { event ->
+                val referenceLabel = when (event.referenceType) {
+                    LoyaltyRewardReferenceType.ORDER -> "Pedido"
+                    LoyaltyRewardReferenceType.BOOKING -> "Reserva"
+                }
+                InfoRow(
+                    title = event.templateTitle,
+                    value = "$referenceLabel ${event.referenceId.take(8)} • ${event.amount.priceText()}",
+                    icon = if (status == LoyaltyWalletEventStatus.RESERVED) Icons.Rounded.EventAvailable else Icons.Rounded.CheckCircle,
+                )
+            }
+        }
+    }
+}
+
+private data class RewardRowData(
+    val title: String,
+    val subtitle: String,
+    val value: String,
+)
+
+@Composable
+private fun ScreenHeader(
+    title: String,
+    subtitle: String,
+    onBack: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = onBack) {
+            Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun SectionTitle(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun CompactInfoCard(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+) {
+    ElevatedCard(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                alpha = 0.5f
+            )
+        ),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Text(
+                title,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(
+    title: String,
+    value: String,
+    icon: ImageVector,
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        IconBubble(icon)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun StatTile(
+    modifier: Modifier,
+    title: String,
+    value: String,
+    icon: ImageVector,
+) {
+    ElevatedCard(
+        modifier = modifier.aspectRatio(1.15f),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Column {
+                Text(
+                    value,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1
+                )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProfileMenuRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    destructive: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        IconBubble(icon, destructive)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            Icons.Rounded.OpenInNew,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun DangerRow(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.error
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+        }
+    }
+}
+
+@Composable
+private fun IconBubble(
+    icon: ImageVector,
+    destructive: Boolean = false,
+) {
+    Box(
+        modifier = Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(
+                if (destructive) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.primaryContainer,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+private fun showBirthdayPicker(
+    context: Context,
+    edit: EditProfileUiState,
+    onPicked: (java.util.Date) -> Unit,
+) {
+    val calendar = Calendar.getInstance().apply { time = edit.birthday }
+    DatePickerDialog(
+        context,
+        { _, year, month, day ->
+            val picked = Calendar.getInstance().apply {
+                set(year, month, day, 0, 0, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            onPicked(picked.time)
+        },
+        calendar.get(Calendar.YEAR),
+        calendar.get(Calendar.MONTH),
+        calendar.get(Calendar.DAY_OF_MONTH),
+    ).show()
+}
+
+private fun Context.readBytes(uri: Uri): ByteArray? = runCatching {
+    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+}.getOrNull()
+
+private suspend fun runGoogleReauthentication(
+    activity: Activity,
+    onToken: (String) -> Unit,
+    onError: (String) -> Unit,
+) {
+    val credentialManager = CredentialManager.create(activity)
+    val googleIdOption = GetGoogleIdOption.Builder()
+        .setServerClientId(clientId)
+        .setFilterByAuthorizedAccounts(false)
+        .setAutoSelectEnabled(false)
+        .build()
+
+    val request = GetCredentialRequest.Builder()
+        .addCredentialOption(googleIdOption)
+        .build()
+
+    try {
+        val result: GetCredentialResponse = credentialManager.getCredential(activity, request)
+        val credential = result.credential
+        if (
+            credential is CustomCredential &&
+            credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+        ) {
+            val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
+            onToken(googleCredential.idToken)
+        } else {
+            onError("Credential Manager devolvió una credencial no compatible.")
+        }
+    } catch (_: GetCredentialCancellationException) {
+        onError("Reautenticación cancelada.")
+    } catch (_: NoCredentialException) {
+        onError("No se encontró una cuenta de Google disponible.")
+    } catch (error: GetCredentialException) {
+        onError(error.message ?: "No se pudo reautenticar con Google.")
+    } catch (error: Exception) {
+        onError(error.message ?: "No se pudo reautenticar con Google.")
+    }
+}
+
+private tailrec fun Context.findActivityOrNull(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivityOrNull()
+    else -> null
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/presentation/viewmodel/ProfileUiState.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.viewmodel
+
+
+sealed interface ProfileMessage {
+    data class Error(val message: String) : ProfileMessage
+    data class Success(val message: String) : ProfileMessage
+}
+
+data class ProfileUiState(
+    val profile: ClientProfile? = null,
+    val stats: ProfileStats = ProfileStats.EMPTY,
+    val avatarBytes: ByteArray? = null,
+    val isLoadingAvatar: Boolean = false,
+    val isLoadingStats: Boolean = false,
+    val isUploadingProfileImage: Boolean = false,
+    val isSavingProfile: Boolean = false,
+    val isSigningOut: Boolean = false,
+    val isDeletingAccount: Boolean = false,
+    val editState: EditProfileUiState? = null,
+    val message: ProfileMessage? = null,
+) {
+    val displayName: String
+        get() = profile?.fullName?.takeIf { it.isNotBlank() } ?: "Invitado"
+
+    val emailText: String
+        get() = profile?.email?.takeIf { it.isNotBlank() } ?: "Correo oculto"
+
+    val phoneText: String
+        get() = profile?.phoneNumber?.takeIf { it.isNotBlank() } ?: "No registrado"
+
+    val nationalIdText: String
+        get() = profile?.nationalId?.takeIf { it.isNotBlank() } ?: "No registrado"
+
+    val birthdayText: String
+        get() = profile?.birthday?.formatDateLong() ?: "No registrado"
+
+    val addressText: String
+        get() = profile?.address?.takeIf { it.isNotBlank() } ?: "No registrado"
+
+    val emergencyContactText: String
+        get() {
+            val name = profile?.emergencyContactName?.takeIf { it.isNotBlank() } ?: "No registrado"
+            val phone = profile?.emergencyContactPhone?.takeIf { it.isNotBlank() }
+            return if (phone == null) name else "$name • $phone"
+        }
+
+    val memberSinceText: String
+        get() = profile?.createdAt?.formatDateShort() ?: "Ahora"
+
+    val initials: String
+        get() = displayName
+            .split(" ")
+            .filter { it.isNotBlank() }
+            .take(2)
+            .joinToString("") { it.first().uppercaseChar().toString() }
+            .ifBlank { "AM" }
+
+    val hasProfileImage: Boolean
+        get() = avatarBytes != null || profile?.hasProfileImage == true
+}
+
+data class EditProfileUiState(
+    val fullName: String = "",
+    val nationalId: String = "",
+    val phoneNumber: String = "",
+    val birthday: Date = defaultBirthday(),
+    val address: String = "",
+    val emergencyContactName: String = "",
+    val emergencyContactPhone: String = "",
+) {
+    val canSave: Boolean
+        get() = fullName.trim().isNotEmpty() &&
+                nationalId.onlyDigits().length >= 8 &&
+                phoneNumber.onlyDigits().length >= 8 &&
+                address.trim().isNotEmpty() &&
+                emergencyContactName.trim().isNotEmpty() &&
+                emergencyContactPhone.onlyDigits().length >= 8
+
+    companion object {
+        fun fromProfile(profile: ClientProfile): EditProfileUiState = EditProfileUiState(
+            fullName = profile.fullName,
+            nationalId = profile.nationalId,
+            phoneNumber = profile.phoneNumber,
+            birthday = profile.birthday,
+            address = profile.address,
+            emergencyContactName = profile.emergencyContactName,
+            emergencyContactPhone = profile.emergencyContactPhone,
+        )
+    }
+}
+
+data class AccountActionUiState(
+    val isBusy: Boolean = false,
+    val needsFreshGoogleToken: Boolean = false,
+)
+
+fun ClientProfile.updatedFromEdit(edit: EditProfileUiState): ClientProfile = copy(
+    fullName = edit.fullName.trim(),
+    nationalId = edit.nationalId.onlyDigits(),
+    phoneNumber = edit.phoneNumber.onlyDigits(),
+    birthday = edit.birthday,
+    address = edit.address.trim(),
+    emergencyContactName = edit.emergencyContactName.trim(),
+    emergencyContactPhone = edit.emergencyContactPhone.onlyDigits(),
+    isProfileComplete = true,
+    updatedAt = Date(),
+    profileCompletedAt = profileCompletedAt ?: Date(),
+)
+
+fun ThemeMode.displayTitle(): String = when (this) {
+    ThemeMode.SYSTEM -> "Sistema"
+    ThemeMode.LIGHT -> "Claro"
+    ThemeMode.DARK -> "Oscuro"
+}
+
+fun Date.formatDateShort(): String = SimpleDateFormat("d MMM yyyy", Locale("es", "EC")).format(this)
+fun Date.formatDateLong(): String = SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es", "EC")).format(this)
+fun String.onlyDigits(): String = filter(Char::isDigit)
+
+private fun defaultBirthday(): Date = Calendar.getInstance().apply {
+    add(Calendar.YEAR, -18)
+    set(Calendar.HOUR_OF_DAY, 0)
+    set(Calendar.MINUTE, 0)
+    set(Calendar.SECOND, 0)
+    set(Calendar.MILLISECOND, 0)
+}.time
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/profile/presentation/viewmodel/ProfileViewModel.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.viewmodel
+
+
+@HiltViewModel
+class ProfileViewModel @Inject constructor(
+    private val observeProfileStatsUseCase: ObserveProfileStatsUseCase,
+    private val loadProfileImageUseCase: LoadProfileImageUseCase,
+    private val uploadProfileImageUseCase: UploadProfileImageUseCase,
+    private val deleteProfileImageUseCase: DeleteProfileImageUseCase,
+    private val completeClientProfileUseCase: CompleteClientProfileUseCase,
+    private val signOutUseCase: SignOutUseCase,
+    private val deleteCurrentAccountUseCase: DeleteCurrentAccountUseCase,
+    private val sessionRepositoriable: SessionRepositoriable,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow(ProfileUiState())
+    val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
+
+    private var statsJob: Job? = null
+    private var avatarJob: Job? = null
+
+    fun onAppear(profile: ClientProfile) {
+        val currentProfile = _uiState.value.profile
+        if (currentProfile?.id != profile.id || currentProfile.updatedAt != profile.updatedAt) {
+            _uiState.update {
+                it.copy(
+                    profile = profile,
+                    editState = null,
+                    message = null,
+                )
+            }
+            loadAvatar(profile)
+        }
+
+        observeStats(profile)
+    }
+
+    fun refresh() {
+        val profile = _uiState.value.profile ?: return
+        observeStats(profile, forceRestart = true)
+        loadAvatar(profile, forceReload = true)
+    }
+
+    fun clearMessage() {
+        _uiState.update { it.copy(message = null) }
+    }
+
+    fun presentError(message: String) {
+        _uiState.update { it.copy(message = ProfileMessage.Error(message)) }
+    }
+
+    fun beginEditProfile() {
+        val profile = _uiState.value.profile ?: return
+        _uiState.update { it.copy(editState = EditProfileUiState.fromProfile(profile)) }
+    }
+
+    fun cancelEditProfile() {
+        _uiState.update { it.copy(editState = null) }
+    }
+
+    fun onEditFullNameChanged(value: String) = updateEdit { copy(fullName = value) }
+    fun onEditNationalIdChanged(value: String) = updateEdit { copy(nationalId = value) }
+    fun onEditPhoneChanged(value: String) = updateEdit { copy(phoneNumber = value) }
+    fun onEditBirthdayChanged(value: Date) = updateEdit { copy(birthday = value) }
+    fun onEditAddressChanged(value: String) = updateEdit { copy(address = value) }
+    fun onEditEmergencyNameChanged(value: String) = updateEdit { copy(emergencyContactName = value) }
+    fun onEditEmergencyPhoneChanged(value: String) = updateEdit { copy(emergencyContactPhone = value) }
+
+    fun saveEditedProfile() {
+        val profile = _uiState.value.profile ?: return
+        val edit = _uiState.value.editState ?: return
+
+        if (!edit.canSave) {
+            _uiState.update {
+                it.copy(message = ProfileMessage.Error("Completa correctamente todos los campos obligatorios."))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSavingProfile = true, message = null) }
+
+            runCatching {
+                val updated = profile.updatedFromEdit(edit)
+                completeClientProfileUseCase.execute(updated)
+                sessionRepositoriable.refresh()
+                updated
+            }.onSuccess { updated ->
+                _uiState.update {
+                    it.copy(
+                        profile = updated,
+                        editState = null,
+                        isSavingProfile = false,
+                        message = ProfileMessage.Success("Perfil actualizado correctamente."),
+                    )
+                }
+                observeStats(updated, forceRestart = true)
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isSavingProfile = false,
+                        message = ProfileMessage.Error(error.message ?: "No se pudo actualizar el perfil."),
+                    )
+                }
+            }
+        }
+    }
+
+    fun uploadProfileImage(bytes: ByteArray) {
+        val profile = _uiState.value.profile ?: return
+        if (bytes.isEmpty()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isUploadingProfileImage = true, message = null) }
+
+            runCatching {
+                val uploaded = uploadProfileImageUseCase.execute(profile, bytes)
+                val updated = profile.copy(
+                    profileImageURL = uploaded.downloadURL,
+                    profileImagePath = uploaded.storagePath,
+                    updatedAt = Date(),
+                )
+                completeClientProfileUseCase.execute(updated)
+                sessionRepositoriable.refresh()
+                updated
+            }.onSuccess { updated ->
+                _uiState.update {
+                    it.copy(
+                        profile = updated,
+                        avatarBytes = bytes,
+                        isUploadingProfileImage = false,
+                        message = ProfileMessage.Success("Foto de perfil actualizada."),
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isUploadingProfileImage = false,
+                        message = ProfileMessage.Error(error.message ?: "No se pudo subir la foto."),
+                    )
+                }
+            }
+        }
+    }
+
+    fun removeProfileImage() {
+        val profile = _uiState.value.profile ?: return
+        if (!profile.hasProfileImage && _uiState.value.avatarBytes == null) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isUploadingProfileImage = true, message = null) }
+
+            runCatching {
+                deleteProfileImageUseCase.execute(profile)
+                val updated = profile.copy(
+                    profileImageURL = null,
+                    profileImagePath = null,
+                    updatedAt = Date(),
+                )
+                completeClientProfileUseCase.execute(updated)
+                sessionRepositoriable.refresh()
+                updated
+            }.onSuccess { updated ->
+                _uiState.update {
+                    it.copy(
+                        profile = updated,
+                        avatarBytes = null,
+                        isUploadingProfileImage = false,
+                        message = ProfileMessage.Success("Foto de perfil eliminada."),
+                    )
+                }
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isUploadingProfileImage = false,
+                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la foto."),
+                    )
+                }
+            }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSigningOut = true, message = null) }
+
+            runCatching {
+                signOutUseCase.execute()
+                sessionRepositoriable.refresh()
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(message = ProfileMessage.Error(error.message ?: "No se pudo cerrar sesión."))
+                }
+            }
+
+            _uiState.update { it.copy(isSigningOut = false) }
+        }
+    }
+
+    fun deleteAccount(freshGoogleIdToken: String) {
+        val profile = _uiState.value.profile ?: return
+        if (freshGoogleIdToken.isBlank()) {
+            _uiState.update {
+                it.copy(message = ProfileMessage.Error("Google no devolvió una credencial válida."))
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDeletingAccount = true, message = null) }
+
+            runCatching {
+                deleteProfileImageUseCase.execute(profile)
+                deleteCurrentAccountUseCase.execute(
+                    currentUserId = profile.id,
+                    googleIdToken = freshGoogleIdToken,
+                )
+                sessionRepositoriable.refresh()
+            }.onFailure { error ->
+                _uiState.update {
+                    it.copy(
+                        isDeletingAccount = false,
+                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la cuenta."),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadAvatar(profile: ClientProfile, forceReload: Boolean = false) {
+        avatarJob?.cancel()
+        avatarJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingAvatar = true) }
+
+            runCatching {
+                if (forceReload && !profile.profileImageURL.isNullOrBlank()) {
+                    loadProfileImageUseCase.execute(profile.copy(profileImageURL = profile.profileImageURL))
+                } else {
+                    loadProfileImageUseCase.execute(profile)
+                }
+            }.onSuccess { bytes ->
+                _uiState.update { it.copy(avatarBytes = bytes, isLoadingAvatar = false) }
+            }.onFailure {
+                _uiState.update { it.copy(isLoadingAvatar = false) }
+            }
+        }
+    }
+
+    private fun observeStats(profile: ClientProfile, forceRestart: Boolean = false) {
+        val nationalId = profile.nationalId.onlyDigits()
+        if (nationalId.isEmpty()) {
+            statsJob?.cancel()
+            _uiState.update { it.copy(stats = ProfileStats.Companion.EMPTY, isLoadingStats = false) }
+            return
+        }
+
+        if (!forceRestart && statsJob?.isActive == true) return
+
+        statsJob?.cancel()
+        statsJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingStats = true) }
+
+            observeProfileStatsUseCase.execute(nationalId)
+                .catch { error ->
+                    _uiState.update {
+                        it.copy(
+                            isLoadingStats = false,
+                            message = ProfileMessage.Error(error.message ?: "No se pudieron cargar tus estadísticas."),
+                        )
+                    }
+                }
+                .collect { stats ->
+                    _uiState.update {
+                        it.copy(
+                            stats = stats,
+                            isLoadingStats = false,
+                        )
+                    }
+                }
+        }
+    }
+
+    private inline fun updateEdit(
+        transform: EditProfileUiState.() -> EditProfileUiState,
+    ) {
+        _uiState.update { state ->
+            val edit = state.editState ?: return@update state
+            state.copy(editState = edit.transform())
         }
     }
 }
@@ -9596,15 +12835,6 @@ fun MenuListScreen(
                     ),
                     verticalArrangement = Arrangement.spacedBy(22.dp),
                 ) {
-                    item {
-                        RestaurantHeroCard(
-                            clientName = clientName,
-                            levelTitle = levelTitle,
-                            featuredCount = state.featuredItems.size,
-                            sectionCount = state.sections.size,
-                        )
-                    }
-
                     state.errorMessage?.let { message ->
                         item {
                             ErrorCard(
@@ -9711,82 +12941,6 @@ private fun EmptyRestaurantState(modifier: Modifier = Modifier) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RestaurantHeroCard(
-    clientName: String,
-    levelTitle: String,
-    featuredCount: Int,
-    sectionCount: Int,
-) {
-    val friendlyName = clientName.substringBefore(" ").ifBlank { "amigo" }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(30.dp))
-            .background(
-                brush = Brush.linearGradient(
-                    listOf(
-                        MaterialTheme.colorScheme.primary,
-                        MaterialTheme.colorScheme.tertiary,
-                    ),
-                ),
-            )
-            .padding(22.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Restaurant,
-                        contentDescription = null,
-                        tint = Color.White,
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                AssistChip(
-                    onClick = {},
-                    label = { Text("Nivel $levelTitle") },
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.LocalOffer,
-                            contentDescription = null,
-                        )
-                    },
-                )
-            }
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Hola, $friendlyName",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-
-                Text(
-                    text = "Elige tus favoritos. Si tienes premios Murco Loyalty, se muestran y se aplican automáticamente.",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color.White.copy(alpha = 0.92f),
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HeroStatPill("$featuredCount destacados")
-                HeroStatPill("$sectionCount categorías")
             }
         }
     }
@@ -13093,6 +16247,16 @@ abstract class ProfileRepositoryModule {
     abstract fun bindLoyaltyRewardsRepository(
         repository: LoyaltyRewardsRepository,
     ): LoyaltyRewardsRepositoriable
+
+    @Binds
+    abstract fun bindProfileStatsRepository(
+        repository: ProfileStatsRepository,
+    ): ProfileStatsRepositoriable
+
+    @Binds
+    abstract fun bindProfileImageRepository(
+        repository: ProfileImageRepository,
+    ): ProfileImageRepositoriable
 }
 
 ```

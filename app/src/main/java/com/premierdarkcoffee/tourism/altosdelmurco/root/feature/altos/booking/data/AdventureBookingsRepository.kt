@@ -1,18 +1,18 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.data
 
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data.AdventureBookingDto
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureAvailabilitySlot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBooking
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingRequest
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingStatus
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBookingsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBuildPlan
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogRepositoriable
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventurePlanner
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardReferenceType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
@@ -33,10 +33,10 @@ class AdventureBookingsRepository @Inject constructor(
 ) : AdventureBookingsRepositoriable {
 
     override fun observeBookings(
-        day: Date,
         nationalId: String,
     ): Flow<List<AdventureBooking>> = callbackFlow {
-        val cleanNationalId = nationalId.trim()
+        val cleanNationalId = nationalId.filter(Char::isDigit)
+
         if (cleanNationalId.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
@@ -46,7 +46,6 @@ class AdventureBookingsRepository @Inject constructor(
         val registration = firestore
             .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
             .whereEqualTo("nationalId", cleanNationalId)
-            .whereEqualTo("startDayKey", AdventureDateHelper.dayKey(day))
             .orderBy("startAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -54,9 +53,15 @@ class AdventureBookingsRepository @Inject constructor(
                     return@addSnapshotListener
                 }
 
-                val bookings = snapshot?.documents.orEmpty().mapNotNull { document ->
-                    document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-                }
+                val bookings = snapshot
+                    ?.documents
+                    .orEmpty()
+                    .mapNotNull { document ->
+                        document.toObject(AdventureBookingDto::class.java)
+                            ?.toDomain(document.id)
+                    }
+                    .sortedBy { it.startAt.time }
+
                 trySend(bookings).isSuccess
             }
 
@@ -70,6 +75,7 @@ class AdventureBookingsRepository @Inject constructor(
         packageDiscountAmount: Double,
     ): List<AdventureAvailabilitySlot> {
         val catalog = catalogRepository.fetchCatalog()
+
         return AdventurePlanner.buildAvailability(
             day = date,
             items = items,
@@ -81,6 +87,7 @@ class AdventureBookingsRepository @Inject constructor(
 
     override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
         val catalog = catalogRepository.fetchCatalog()
+
         val basePlan = AdventurePlanner.buildPlan(
             day = request.date,
             startAt = request.selectedStartAt,
@@ -113,14 +120,18 @@ class AdventureBookingsRepository @Inject constructor(
         )
 
         val normalizedRequest = request.copy(
+            nationalId = request.nationalId.filter(Char::isDigit),
             packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
             loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
             appliedRewards = rewardPreview.appliedRewards,
         )
 
         val createdAt = Date()
-        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document()
-        val dto = AdventureBookingDto.from(
+        val bookingRef = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .document()
+
+        val dto = AdventureBookingDto.Companion.from(
             request = normalizedRequest,
             plan = finalPlan,
             createdAt = createdAt,
@@ -140,23 +151,36 @@ class AdventureBookingsRepository @Inject constructor(
     }
 
     override suspend fun cancelBooking(id: String, nationalId: String) {
-        val cleanNationalId = nationalId.trim()
-        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document(id)
+        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val cleanId = id.trim()
+
+        require(cleanId.isNotEmpty()) { "Booking id is required." }
+        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
+
+        val bookingRef = firestore
+            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .document(cleanId)
+
         val snapshot = bookingRef.get().awaitResult()
-        if (!snapshot.exists()) error("Booking not found.")
+
+        if (!snapshot.exists()) {
+            error("Booking not found.")
+        }
 
         val dto = snapshot.toObject(AdventureBookingDto::class.java)
             ?: error("Could not read booking data.")
 
-        if (dto.nationalId != cleanNationalId) {
+        if (dto.nationalId.filter(Char::isDigit) != cleanNationalId) {
             error("You are not allowed to cancel this booking.")
         }
 
-        bookingRef.update("status", AdventureBookingStatus.CANCELED.rawValue).awaitResult()
+        bookingRef
+            .update("status", AdventureBookingStatus.CANCELED.rawValue)
+            .awaitResult()
 
         loyaltyRewardsRepository.releaseRewards(
             nationalId = dto.nationalId,
-            referenceId = id,
+            referenceId = cleanId,
         )
     }
 }
