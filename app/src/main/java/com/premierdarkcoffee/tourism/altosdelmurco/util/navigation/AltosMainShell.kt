@@ -15,6 +15,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
@@ -74,6 +77,8 @@ fun AltosMainShell(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
+    var pendingExperiencePackageId by rememberSaveable { mutableStateOf<String?>(null) }
+
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         bottomBar = {
@@ -99,6 +104,10 @@ fun AltosMainShell(
                     sessionState = sessionState,
                     onOpenRestaurant = { navController.navigateTopLevel(TopLevelDestination.RESTAURANT.route) },
                     onOpenExperiences = { navController.navigateTopLevel(TopLevelDestination.EXPERIENCES.route) },
+                    onOpenExperiencePackage = { packageId ->
+                        pendingExperiencePackageId = packageId
+                        navController.navigateTopLevel(TopLevelDestination.EXPERIENCES.route)
+                    },
                     onOpenBookings = { navController.navigateTopLevel(TopLevelDestination.BOOKINGS.route) },
                     onOpenProfile = { navController.navigateTopLevel(TopLevelDestination.PROFILE.route) },
                 )
@@ -107,7 +116,11 @@ fun AltosMainShell(
                 RestaurantScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.EXPERIENCES.route) {
-                AdventureScreen(sessionState = sessionState)
+                AdventureScreen(
+                    sessionState = sessionState,
+                    homePrefillPackageId = pendingExperiencePackageId,
+                    onHomePrefillPackageConsumed = { pendingExperiencePackageId = null },
+                )
             }
             composable(TopLevelDestination.BOOKINGS.route) {
                 BookingsScreen(sessionState = sessionState)

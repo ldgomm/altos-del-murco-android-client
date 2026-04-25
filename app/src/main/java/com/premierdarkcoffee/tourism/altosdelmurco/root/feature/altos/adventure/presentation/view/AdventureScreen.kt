@@ -117,6 +117,8 @@ fun AdventureScreen(
     catalogViewModel: AdventureCatalogViewModel = hiltViewModel(),
     builderViewModel: AdventureComboBuilderViewModel = hiltViewModel(),
     menuViewModel: MenuViewModel = hiltViewModel(),
+    homePrefillPackageId: String? = null,
+    onHomePrefillPackageConsumed: () -> Unit = {},
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val adventurePalette = AppTheme.palette(AdventureTheme, darkTheme)
@@ -131,6 +133,8 @@ fun AdventureScreen(
             catalogViewModel = catalogViewModel,
             builderViewModel = builderViewModel,
             menuViewModel = menuViewModel,
+            homePrefillPackageId = homePrefillPackageId,
+            onHomePrefillPackageConsumed = onHomePrefillPackageConsumed,
         )
     }
 }
@@ -142,6 +146,8 @@ private fun AdventureScreenContent(
     catalogViewModel: AdventureCatalogViewModel,
     builderViewModel: AdventureComboBuilderViewModel,
     menuViewModel: MenuViewModel,
+    homePrefillPackageId: String?,
+    onHomePrefillPackageConsumed: () -> Unit,
 ) {
     val catalogState by catalogViewModel.uiState.collectAsStateWithLifecycle()
     val builderState by builderViewModel.uiState.collectAsStateWithLifecycle()
@@ -156,6 +162,26 @@ private fun AdventureScreenContent(
         catalogViewModel.onAppear()
         builderViewModel.onAppear(sessionState.profile)
         menuViewModel.onAppear(sessionState.profile.nationalId)
+    }
+
+    LaunchedEffect(
+        homePrefillPackageId,
+        catalogState.catalog.activePackagesSorted,
+        menuState.sections,
+    ) {
+        val packageId = homePrefillPackageId?.trim().orEmpty()
+        if (packageId.isEmpty()) return@LaunchedEffect
+
+        val packageModel = catalogState.catalog.activePackagesSorted
+            .firstOrNull { it.id == packageId }
+            ?: return@LaunchedEffect
+
+        val hasAllFoodData = packageModel.foodItems.isEmpty() || menuState.sections.isNotEmpty()
+        if (!hasAllFoodData) return@LaunchedEffect
+
+        builderViewModel.replacePackage(packageModel, menuState.sections)
+        mode = AdventureMode.Builder
+        onHomePrefillPackageConsumed()
     }
 
     DisposableEffect(Unit) {
