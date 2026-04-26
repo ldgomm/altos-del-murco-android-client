@@ -1,5 +1,6 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
 
+import android.util.Log
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.Date
 
 @Singleton
 class OrdersRepository @Inject constructor(
@@ -23,6 +25,35 @@ class OrdersRepository @Inject constructor(
 ) : OrdersRepositoriable {
 
     override suspend fun submit(order: Order) {
+        if (order.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+            error("La fecha de la reserva ya pasó. Elige una hora actual o futura.")
+        }
+
+        if (order.shouldConsumeCurrentMenuStock) {
+            submitAndConsumeCurrentStock(order)
+        } else {
+            submitFutureFoodReservation(order)
+        }
+
+        val nationalId = order.nationalId?.trim().orEmpty()
+        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
+            loyaltyRewardsRepository.reserveRewards(
+                nationalId = nationalId,
+                referenceType = LoyaltyRewardReferenceType.ORDER,
+                referenceId = order.id,
+                appliedRewards = order.appliedRewards,
+            )
+        }
+    }
+
+    private suspend fun submitFutureFoodReservation(order: Order) {
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .document(order.id)
+            .set(OrderDto(order))
+            .awaitResult()
+    }
+
+    private suspend fun submitAndConsumeCurrentStock(order: Order) {
         val quantitiesByMenuItemId = order.items
             .groupBy { it.menuItemId }
             .mapValues { (_, items) -> items.sumOf { it.quantity } }
@@ -37,8 +68,9 @@ class OrdersRepository @Inject constructor(
         firestore.runTransaction { transaction ->
             val loadedItems = menuItemsToProcess.map { (ref, totalQuantity) ->
                 val snapshot = transaction.get(ref)
-                val dto =
-                    requireNotNull(snapshot.toObject(MenuItemDto::class.java)) { "Missing menu item ${ref.id}." }
+                val dto = requireNotNull(snapshot.toObject(MenuItemDto::class.java)) {
+                    "Missing menu item ${ref.id}."
+                }
                 Triple(ref, dto, totalQuantity)
             }
 
@@ -57,21 +89,10 @@ class OrdersRepository @Inject constructor(
                 )
             }
 
-            val orderRef =
-                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            val orderRef = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
             transaction.set(orderRef, OrderDto(order))
             null
         }.awaitResult()
-
-        val nationalId = order.nationalId?.trim().orEmpty()
-        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
-            loyaltyRewardsRepository.reserveRewards(
-                nationalId = nationalId,
-                referenceType = LoyaltyRewardReferenceType.ORDER,
-                referenceId = order.id,
-                appliedRewards = order.appliedRewards,
-            )
-        }
     }
 
     override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
@@ -92,8 +113,13 @@ class OrdersRepository @Inject constructor(
                     snapshot == null -> trySend(emptyList()).isSuccess
                     else -> {
                         val orders = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(OrderDto::class.java)?.toDomain()
-                        }.sortedByDescending { it.createdAt.time }
+                            runCatching { doc.toObject(OrderDto::class.java)?.toDomain() }
+                                .onFailure { Log.e("AltosOrders", "Could not decode order ${doc.id}", it) }
+                                .getOrNull()
+                        }.sortedWith(
+                            compareByDescending<Order> { it.scheduledAt.time }
+                                .thenByDescending { it.createdAt.time },
+                        )
                         trySend(orders).isSuccess
                     }
                 }

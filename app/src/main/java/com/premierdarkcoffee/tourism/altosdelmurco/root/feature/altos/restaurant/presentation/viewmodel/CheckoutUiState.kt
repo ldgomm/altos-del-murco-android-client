@@ -10,9 +10,7 @@ data class CheckoutUiState(
     val isSubmitting: Boolean = false,
     val isLoadingRewards: Boolean = false,
     val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
-        RewardWalletSnapshot.empty(
-            ""
-        )
+        RewardWalletSnapshot.empty("")
     ),
     val errorMessage: String? = null,
 ) {
@@ -20,4 +18,5 @@ data class CheckoutUiState(
     val discount: Double get() = rewardPreview.totalDiscount.coerceAtLeast(0.0)
     val total: Double get() = (subtotal - discount).coerceAtLeast(0.0)
     val canSubmit: Boolean get() = draft.canSubmit && !isSubmitting
+    val isScheduledForLater: Boolean get() = draft.isScheduledForLater
 }

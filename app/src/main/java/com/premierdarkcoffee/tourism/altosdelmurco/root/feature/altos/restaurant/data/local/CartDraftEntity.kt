@@ -9,6 +9,7 @@ data class CartDraftEntity(
     val nationalId: String?,
     val clientName: String,
     val tableNumber: String,
+    val scheduledAtMillis: Long,
     val revision: Int?,
     val lastConfirmedRevision: Int?,
     val createdAtMillis: Long,

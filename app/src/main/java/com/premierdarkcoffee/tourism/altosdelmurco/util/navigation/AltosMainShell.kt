@@ -109,7 +109,6 @@ fun AltosMainShell(
                         navController.navigateTopLevel(TopLevelDestination.EXPERIENCES.route)
                     },
                     onOpenBookings = { navController.navigateTopLevel(TopLevelDestination.BOOKINGS.route) },
-                    onOpenProfile = { navController.navigateTopLevel(TopLevelDestination.PROFILE.route) },
                 )
             }
             composable(TopLevelDestination.RESTAURANT.route) {

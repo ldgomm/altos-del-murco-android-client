@@ -10,6 +10,7 @@ data class OrderDraft(
     val nationalId: String? = null,
     val clientName: String = "",
     val tableNumber: String = "",
+    val scheduledAt: Date = Date(),
     val createdAt: Date = Date(),
     val updatedAt: Date = Date(),
     val items: List<CartItem> = emptyList(),
@@ -22,12 +23,24 @@ data class OrderDraft(
     val isEmpty: Boolean = items.isEmpty()
     val hasValidClientName: Boolean = clientName.trim().isNotEmpty()
     val hasValidTableNumber: Boolean = tableNumber.trim().isNotEmpty()
-    val canSubmit: Boolean = !isEmpty && hasValidClientName && hasValidTableNumber
+
+    val normalizedScheduledAt: Date = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
+    val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(Date(), normalizedScheduledAt)
+    val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED
+    val canSubmit: Boolean = !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
+
+    fun normalizedForSubmit(now: Date = Date()): OrderDraft = copy(
+        scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now),
+        updatedAt = now,
+    )
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
+        val now = Date()
+        val safeScheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now)
+        val safeMode = OrderScheduleFormatter.mode(now, safeScheduledAt)
         val orderItems = items.map { item ->
             OrderItem(
                 menuItemId = item.menuItem.id,
@@ -38,13 +51,18 @@ data class OrderDraft(
             )
         }
 
+        val cleanTable = tableNumber.trim()
+
         return Order(
             id = orderId,
             nationalId = nationalId?.trim()?.takeIf { it.isNotEmpty() },
             clientName = clientName.trim(),
-            tableNumber = tableNumber.trim(),
-            createdAt = Date(),
-            updatedAt = Date(),
+            tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
+            createdAt = now,
+            updatedAt = now,
+            scheduledAt = safeScheduledAt,
+            scheduledDayKey = OrderScheduleFormatter.dayKey(safeScheduledAt),
+            serviceMode = safeMode,
             items = orderItems,
             subtotal = subtotal,
             loyaltyDiscountAmount = 0.0,

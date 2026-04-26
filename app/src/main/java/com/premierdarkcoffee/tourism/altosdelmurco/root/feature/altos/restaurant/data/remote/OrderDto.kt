@@ -3,6 +3,8 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 import com.google.firebase.Timestamp
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.AppliedRewardDto
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderScheduleFormatter
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderServiceMode
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import kotlin.collections.map
 
@@ -14,6 +16,9 @@ data class OrderDto(
     val tableNumber: String = "",
     val createdAt: Timestamp = Timestamp.now(),
     val updatedAt: Timestamp? = null,
+    val scheduledAt: Timestamp? = null,
+    val scheduledDayKey: String? = null,
+    val serviceMode: String? = null,
     val items: List<OrderItemDto> = emptyList(),
     val subtotal: Double = 0.0,
     val loyaltyDiscountAmount: Double? = null,
@@ -30,6 +35,9 @@ data class OrderDto(
         tableNumber = domain.tableNumber,
         createdAt = Timestamp(domain.createdAt),
         updatedAt = Timestamp(domain.updatedAt),
+        scheduledAt = Timestamp(domain.scheduledAt),
+        scheduledDayKey = domain.scheduledDayKey,
+        serviceMode = domain.serviceMode.rawValue,
         items = domain.items.map(::OrderItemDto),
         subtotal = domain.subtotal,
         loyaltyDiscountAmount = domain.loyaltyDiscountAmount,
@@ -40,20 +48,28 @@ data class OrderDto(
         lastConfirmedRevision = domain.lastConfirmedRevision,
     )
 
-    fun toDomain(): Order = Order(
-        id = id,
-        nationalId = nationalId,
-        clientName = clientName,
-        tableNumber = tableNumber,
-        createdAt = createdAt.toDate(),
-        updatedAt = updatedAt?.toDate() ?: createdAt.toDate(),
-        items = items.map { it.toDomain() },
-        subtotal = subtotal,
-        loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
-        appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
-        totalAmount = totalAmount,
-        status = OrderStatus.fromRaw(status),
-        revision = revision ?: 1,
-        lastConfirmedRevision = lastConfirmedRevision,
-    )
+    fun toDomain(): Order {
+        val safeCreatedAt = createdAt.toDate()
+        val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
+        return Order(
+            id = id,
+            nationalId = nationalId,
+            clientName = clientName,
+            tableNumber = tableNumber,
+            createdAt = safeCreatedAt,
+            updatedAt = updatedAt?.toDate() ?: safeCreatedAt,
+            scheduledAt = safeScheduledAt,
+            scheduledDayKey = scheduledDayKey ?: OrderScheduleFormatter.dayKey(safeScheduledAt),
+            serviceMode = serviceMode?.let(OrderServiceMode::fromRaw)
+                ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt),
+            items = items.map { it.toDomain() },
+            subtotal = subtotal,
+            loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
+            appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
+            totalAmount = totalAmount,
+            status = OrderStatus.fromRaw(status),
+            revision = revision ?: 1,
+            lastConfirmedRevision = lastConfirmedRevision,
+        )
+    }
 }

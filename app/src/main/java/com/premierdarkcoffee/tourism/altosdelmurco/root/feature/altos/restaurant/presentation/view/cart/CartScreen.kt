@@ -245,8 +245,7 @@ private fun EmptyCart(
             modifier = Modifier
                 .fillMaxWidth()
                 .appCardStyle(
-                    theme = CartTheme,
-                    emphasized = true,
+                    theme = CartTheme
                 ),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,

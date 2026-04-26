@@ -86,20 +86,27 @@ fun RestaurantScreen(
         is RestaurantDestination.Detail -> {
             val item = menuState.itemById(current.itemId)
             if (item == null) {
-                LaunchedEffect(current.itemId) {
-                    destination = RestaurantDestination.Menu
-                }
+                LaunchedEffect(current.itemId) { destination = RestaurantDestination.Menu }
             } else {
                 MenuItemDetailScreen(
                     item = item,
                     rewardPresentationProvider = { menuItem, quantity ->
-                        menuViewModel.rewardPresentation(menuItem, quantity)
+                        menuViewModel.rewardPresentation(
+                            menuItem,
+                            quantity
+                        )
                     },
                     displayedPriceProvider = { menuItem, quantity ->
-                        menuViewModel.displayedPrice(menuItem, quantity)
+                        menuViewModel.displayedPrice(
+                            menuItem,
+                            quantity
+                        )
                     },
                     incrementalDiscountProvider = { menuItem, quantity ->
-                        menuViewModel.incrementalDiscount(menuItem, quantity)
+                        menuViewModel.incrementalDiscount(
+                            menuItem,
+                            quantity
+                        )
                     },
                     onAddToCart = { menuItem, quantity, notes ->
                         cartViewModel.addItem(menuItem, quantity, notes)
@@ -131,6 +138,8 @@ fun RestaurantScreen(
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
                 onTableNumberChanged = checkoutViewModel::updateTableNumber,
+                onScheduledAtChanged = checkoutViewModel::updateScheduledAt,
+                onScheduleNow = checkoutViewModel::scheduleForNow,
                 onSubmit = checkoutViewModel::submit,
                 onDismissError = checkoutViewModel::clearError,
                 modifier = modifier,

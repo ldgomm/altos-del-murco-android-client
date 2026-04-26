@@ -14186,6 +14186,7 @@ data class CartDraftEntity(
     val nationalId: String?,
     val clientName: String,
     val tableNumber: String,
+    val scheduledAtMillis: Long,
     val revision: Int?,
     val lastConfirmedRevision: Int?,
     val createdAtMillis: Long,
@@ -14211,6 +14212,7 @@ internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
     nationalId = nationalId,
     clientName = clientName,
     tableNumber = tableNumber,
+    scheduledAtMillis = scheduledAt.time,
     revision = revision,
     lastConfirmedRevision = lastConfirmedRevision,
     createdAtMillis = createdAt.time,
@@ -14243,6 +14245,7 @@ internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
     nationalId = draft.nationalId,
     clientName = draft.clientName,
     tableNumber = draft.tableNumber,
+    scheduledAt = Date(draft.scheduledAtMillis),
     createdAt = Date(draft.createdAtMillis),
     updatedAt = Date(draft.updatedAtMillis),
     items = items.map { item ->
@@ -14282,8 +14285,9 @@ class CartDraftRepository @Inject constructor(
     }
 
     override suspend fun saveDraft(draft: OrderDraft) {
+        val now = Date()
         cartDao.replaceDraft(
-            draft = draft.copy(updatedAt = Date()).toEntity(),
+            draft = draft.copy(updatedAt = now).toEntity(),
             items = draft.items.map { it.toEntity(draft.id) },
         )
     }
@@ -14588,6 +14592,9 @@ data class OrderDto(
     val tableNumber: String = "",
     val createdAt: Timestamp = Timestamp.now(),
     val updatedAt: Timestamp? = null,
+    val scheduledAt: Timestamp? = null,
+    val scheduledDayKey: String? = null,
+    val serviceMode: String? = null,
     val items: List<OrderItemDto> = emptyList(),
     val subtotal: Double = 0.0,
     val loyaltyDiscountAmount: Double? = null,
@@ -14604,6 +14611,9 @@ data class OrderDto(
         tableNumber = domain.tableNumber,
         createdAt = Timestamp(domain.createdAt),
         updatedAt = Timestamp(domain.updatedAt),
+        scheduledAt = Timestamp(domain.scheduledAt),
+        scheduledDayKey = domain.scheduledDayKey,
+        serviceMode = domain.serviceMode.rawValue,
         items = domain.items.map(::OrderItemDto),
         subtotal = domain.subtotal,
         loyaltyDiscountAmount = domain.loyaltyDiscountAmount,
@@ -14614,22 +14624,30 @@ data class OrderDto(
         lastConfirmedRevision = domain.lastConfirmedRevision,
     )
 
-    fun toDomain(): Order = Order(
-        id = id,
-        nationalId = nationalId,
-        clientName = clientName,
-        tableNumber = tableNumber,
-        createdAt = createdAt.toDate(),
-        updatedAt = updatedAt?.toDate() ?: createdAt.toDate(),
-        items = items.map { it.toDomain() },
-        subtotal = subtotal,
-        loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
-        appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
-        totalAmount = totalAmount,
-        status = OrderStatus.fromRaw(status),
-        revision = revision ?: 1,
-        lastConfirmedRevision = lastConfirmedRevision,
-    )
+    fun toDomain(): Order {
+        val safeCreatedAt = createdAt.toDate()
+        val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
+        return Order(
+            id = id,
+            nationalId = nationalId,
+            clientName = clientName,
+            tableNumber = tableNumber,
+            createdAt = safeCreatedAt,
+            updatedAt = updatedAt?.toDate() ?: safeCreatedAt,
+            scheduledAt = safeScheduledAt,
+            scheduledDayKey = scheduledDayKey ?: OrderScheduleFormatter.dayKey(safeScheduledAt),
+            serviceMode = serviceMode?.let(OrderServiceMode::fromRaw)
+                ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt),
+            items = items.map { it.toDomain() },
+            subtotal = subtotal,
+            loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
+            appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
+            totalAmount = totalAmount,
+            status = OrderStatus.fromRaw(status),
+            revision = revision ?: 1,
+            lastConfirmedRevision = lastConfirmedRevision,
+        )
+    }
 }
 
 ```
@@ -14691,6 +14709,35 @@ class OrdersRepository @Inject constructor(
 ) : OrdersRepositoriable {
 
     override suspend fun submit(order: Order) {
+        if (order.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+            error("La fecha de la reserva ya pasó. Elige una hora actual o futura.")
+        }
+
+        if (order.shouldConsumeCurrentMenuStock) {
+            submitAndConsumeCurrentStock(order)
+        } else {
+            submitFutureFoodReservation(order)
+        }
+
+        val nationalId = order.nationalId?.trim().orEmpty()
+        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
+            loyaltyRewardsRepository.reserveRewards(
+                nationalId = nationalId,
+                referenceType = LoyaltyRewardReferenceType.ORDER,
+                referenceId = order.id,
+                appliedRewards = order.appliedRewards,
+            )
+        }
+    }
+
+    private suspend fun submitFutureFoodReservation(order: Order) {
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .document(order.id)
+            .set(OrderDto(order))
+            .awaitResult()
+    }
+
+    private suspend fun submitAndConsumeCurrentStock(order: Order) {
         val quantitiesByMenuItemId = order.items
             .groupBy { it.menuItemId }
             .mapValues { (_, items) -> items.sumOf { it.quantity } }
@@ -14705,8 +14752,9 @@ class OrdersRepository @Inject constructor(
         firestore.runTransaction { transaction ->
             val loadedItems = menuItemsToProcess.map { (ref, totalQuantity) ->
                 val snapshot = transaction.get(ref)
-                val dto =
-                    requireNotNull(snapshot.toObject(MenuItemDto::class.java)) { "Missing menu item ${ref.id}." }
+                val dto = requireNotNull(snapshot.toObject(MenuItemDto::class.java)) {
+                    "Missing menu item ${ref.id}."
+                }
                 Triple(ref, dto, totalQuantity)
             }
 
@@ -14725,21 +14773,10 @@ class OrdersRepository @Inject constructor(
                 )
             }
 
-            val orderRef =
-                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            val orderRef = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
             transaction.set(orderRef, OrderDto(order))
             null
         }.awaitResult()
-
-        val nationalId = order.nationalId?.trim().orEmpty()
-        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
-            loyaltyRewardsRepository.reserveRewards(
-                nationalId = nationalId,
-                referenceType = LoyaltyRewardReferenceType.ORDER,
-                referenceId = order.id,
-                appliedRewards = order.appliedRewards,
-            )
-        }
     }
 
     override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
@@ -14760,8 +14797,13 @@ class OrdersRepository @Inject constructor(
                     snapshot == null -> trySend(emptyList()).isSuccess
                     else -> {
                         val orders = snapshot.documents.mapNotNull { doc ->
-                            doc.toObject(OrderDto::class.java)?.toDomain()
-                        }.sortedByDescending { it.createdAt.time }
+                            runCatching { doc.toObject(OrderDto::class.java)?.toDomain() }
+                                .onFailure { Log.e("AltosOrders", "Could not decode order ${doc.id}", it) }
+                                .getOrNull()
+                        }.sortedWith(
+                            compareByDescending<Order> { it.scheduledAt.time }
+                                .thenByDescending { it.createdAt.time },
+                        )
                         trySend(orders).isSuccess
                     }
                 }
@@ -14928,6 +14970,18 @@ class ObserveMenuUseCase(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
 
+enum class OrderServiceMode(val rawValue: String, val title: String) {
+    NOW("now", "Pedido inmediato"),
+    SCHEDULED("scheduled", "Reserva de comida");
+
+    companion object {
+        fun fromRaw(rawValue: String?): OrderServiceMode {
+            return entries.firstOrNull { it.rawValue.equals(rawValue, ignoreCase = true) || it.name.equals(rawValue, ignoreCase = true) }
+                ?: NOW
+        }
+    }
+}
+
 data class Order(
     val id: String,
     val nationalId: String?,
@@ -14935,6 +14989,9 @@ data class Order(
     val tableNumber: String,
     val createdAt: Date,
     val updatedAt: Date,
+    val scheduledAt: Date = createdAt,
+    val scheduledDayKey: String = OrderScheduleFormatter.dayKey(scheduledAt),
+    val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(createdAt, scheduledAt),
     val items: List<OrderItem>,
     val subtotal: Double,
     val loyaltyDiscountAmount: Double = 0.0,
@@ -14951,6 +15008,14 @@ data class Order(
     val requiresReconfirmation: Boolean = lastConfirmedRevision != revision
     val wasEditedAfterConfirmation: Boolean = lastConfirmedRevision?.let { revision > it } ?: false
 
+    val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED ||
+            scheduledAt.time - createdAt.time > OrderScheduleFormatter.LATER_THRESHOLD_MS
+
+    val shouldConsumeCurrentMenuStock: Boolean =
+        !isScheduledForLater || OrderScheduleFormatter.sameDay(scheduledAt, Date())
+
+    val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
+
     fun withLoyalty(
         appliedRewards: List<AppliedReward>,
         discount: Double,
@@ -14961,6 +15026,35 @@ data class Order(
             appliedRewards = appliedRewards,
             totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0),
         )
+    }
+}
+
+object OrderScheduleFormatter {
+    const val LATER_THRESHOLD_MS: Long = 5 * 60 * 1000L
+
+    private val dayFormatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val displayFormatter = SimpleDateFormat("EEE d MMM, h:mm a", Locale("es", "EC"))
+
+    fun dayKey(date: Date): String = dayFormatter.format(date)
+
+    fun displayText(date: Date): String = displayFormatter.format(date)
+
+    fun mode(createdAt: Date, scheduledAt: Date): OrderServiceMode =
+        if (scheduledAt.time - createdAt.time > LATER_THRESHOLD_MS) OrderServiceMode.SCHEDULED else OrderServiceMode.NOW
+
+    fun sanitizedScheduledAt(value: Date, now: Date = Date()): Date =
+        if (value.time < now.time - 120_000L) now else value
+
+    fun sameDay(lhs: Date, rhs: Date): Boolean = dayKey(lhs) == dayKey(rhs)
+
+    fun combineDateAndTime(day: Date, hourOfDay: Int, minute: Int): Date {
+        return Calendar.getInstance().apply {
+            time = day
+            set(Calendar.HOUR_OF_DAY, hourOfDay)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
     }
 }
 
@@ -14981,6 +15075,7 @@ data class OrderDraft(
     val nationalId: String? = null,
     val clientName: String = "",
     val tableNumber: String = "",
+    val scheduledAt: Date = Date(),
     val createdAt: Date = Date(),
     val updatedAt: Date = Date(),
     val items: List<CartItem> = emptyList(),
@@ -14993,12 +15088,24 @@ data class OrderDraft(
     val isEmpty: Boolean = items.isEmpty()
     val hasValidClientName: Boolean = clientName.trim().isNotEmpty()
     val hasValidTableNumber: Boolean = tableNumber.trim().isNotEmpty()
-    val canSubmit: Boolean = !isEmpty && hasValidClientName && hasValidTableNumber
+
+    val normalizedScheduledAt: Date = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
+    val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(Date(), normalizedScheduledAt)
+    val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED
+    val canSubmit: Boolean = !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
+
+    fun normalizedForSubmit(now: Date = Date()): OrderDraft = copy(
+        scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now),
+        updatedAt = now,
+    )
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
+        val now = Date()
+        val safeScheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now)
+        val safeMode = OrderScheduleFormatter.mode(now, safeScheduledAt)
         val orderItems = items.map { item ->
             OrderItem(
                 menuItemId = item.menuItem.id,
@@ -15009,13 +15116,18 @@ data class OrderDraft(
             )
         }
 
+        val cleanTable = tableNumber.trim()
+
         return Order(
             id = orderId,
             nationalId = nationalId?.trim()?.takeIf { it.isNotEmpty() },
             clientName = clientName.trim(),
-            tableNumber = tableNumber.trim(),
-            createdAt = Date(),
-            updatedAt = Date(),
+            tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
+            createdAt = now,
+            updatedAt = now,
+            scheduledAt = safeScheduledAt,
+            scheduledDayKey = OrderScheduleFormatter.dayKey(safeScheduledAt),
+            serviceMode = safeMode,
             items = orderItems,
             subtotal = subtotal,
             loyaltyDiscountAmount = 0.0,
@@ -15216,20 +15328,27 @@ fun RestaurantScreen(
         is RestaurantDestination.Detail -> {
             val item = menuState.itemById(current.itemId)
             if (item == null) {
-                LaunchedEffect(current.itemId) {
-                    destination = RestaurantDestination.Menu
-                }
+                LaunchedEffect(current.itemId) { destination = RestaurantDestination.Menu }
             } else {
                 MenuItemDetailScreen(
                     item = item,
                     rewardPresentationProvider = { menuItem, quantity ->
-                        menuViewModel.rewardPresentation(menuItem, quantity)
+                        menuViewModel.rewardPresentation(
+                            menuItem,
+                            quantity
+                        )
                     },
                     displayedPriceProvider = { menuItem, quantity ->
-                        menuViewModel.displayedPrice(menuItem, quantity)
+                        menuViewModel.displayedPrice(
+                            menuItem,
+                            quantity
+                        )
                     },
                     incrementalDiscountProvider = { menuItem, quantity ->
-                        menuViewModel.incrementalDiscount(menuItem, quantity)
+                        menuViewModel.incrementalDiscount(
+                            menuItem,
+                            quantity
+                        )
                     },
                     onAddToCart = { menuItem, quantity, notes ->
                         cartViewModel.addItem(menuItem, quantity, notes)
@@ -15261,6 +15380,8 @@ fun RestaurantScreen(
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
                 onTableNumberChanged = checkoutViewModel::updateTableNumber,
+                onScheduledAtChanged = checkoutViewModel::updateScheduledAt,
+                onScheduleNow = checkoutViewModel::scheduleForNow,
                 onSubmit = checkoutViewModel::submit,
                 onDismissError = checkoutViewModel::clearError,
                 modifier = modifier,
@@ -16020,6 +16141,8 @@ fun CheckoutScreen(
     profile: ClientProfile,
     onBack: () -> Unit,
     onTableNumberChanged: (String) -> Unit,
+    onScheduledAtChanged: (Date) -> Unit,
+    onScheduleNow: () -> Unit,
     onSubmit: () -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
@@ -16038,17 +16161,11 @@ fun CheckoutScreen(
             topBar = {
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            text = "Confirmar pedido",
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Text(text = "Confirmar pedido", fontWeight = FontWeight.Bold)
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(
-                                imageVector = Icons.Rounded.ArrowBack,
-                                contentDescription = "Volver",
-                            )
+                            Icon(Icons.Rounded.ArrowBack, contentDescription = "Volver")
                         }
                     },
                     colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
@@ -16056,7 +16173,6 @@ fun CheckoutScreen(
                         scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
                         titleContentColor = palette.textPrimary,
                         navigationIconContentColor = palette.textPrimary,
-                        actionIconContentColor = palette.textPrimary,
                     ),
                 )
             },
@@ -16066,6 +16182,7 @@ fun CheckoutScreen(
                     total = state.total,
                     canSubmit = state.canSubmit,
                     isSubmitting = state.isSubmitting,
+                    isScheduledForLater = state.isScheduledForLater,
                     onSubmit = onSubmit,
                 )
             },
@@ -16093,47 +16210,31 @@ fun CheckoutScreen(
                 }
 
                 state.errorMessage?.let { message ->
-                    item {
-                        ErrorCardInline(
-                            theme = theme,
-                            message = message,
-                            onDismiss = onDismissError,
-                        )
-                    }
+                    item { ErrorCardInline(theme, message, onDismissError) }
                 }
 
-                item {
-                    CheckoutClientCard(
-                        theme = theme,
-                        profile = profile,
-                    )
-                }
+                item { CheckoutClientCard(theme, profile) }
 
                 item {
                     TableCard(
                         theme = theme,
                         tableNumber = state.draft.tableNumber,
+                        isScheduledForLater = state.isScheduledForLater,
                         onTableNumberChanged = onTableNumberChanged,
                     )
                 }
 
                 item {
-                    CheckoutItemsCard(
+                    ScheduleCard(
                         theme = theme,
-                        state = state,
+                        scheduledAt = state.draft.scheduledAt,
+                        isScheduledForLater = state.isScheduledForLater,
+                        onScheduledAtChanged = onScheduledAtChanged,
+                        onScheduleNow = onScheduleNow,
                     )
                 }
 
-                if (state.rewardPreview.appliedRewards.isNotEmpty()) {
-                    item {
-                        RewardsAppliedCard(
-                            theme = theme,
-                            rewards = state.rewardPreview.appliedRewards.map {
-                                RewardPresentation.fromAppliedReward(it)
-                            },
-                        )
-                    }
-                }
+                item { CheckoutItemsCard(theme, state) }
 
                 item {
                     OrderSummaryCard(
@@ -16141,6 +16242,8 @@ fun CheckoutScreen(
                         subtotal = state.subtotal,
                         discount = state.discount,
                         total = state.total,
+                        scheduledAt = state.draft.scheduledAt,
+                        isScheduledForLater = state.isScheduledForLater,
                     )
                 }
             }
@@ -16149,10 +16252,7 @@ fun CheckoutScreen(
 }
 
 @Composable
-private fun CheckoutClientCard(
-    theme: AppSectionTheme,
-    profile: ClientProfile,
-) {
+private fun CheckoutClientCard(theme: AppSectionTheme, profile: ClientProfile) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -16162,22 +16262,10 @@ private fun CheckoutClientCard(
         BrandSectionHeader(
             theme = theme,
             title = "Cliente",
-            subtitle = "Estos datos vienen de tu perfil y no se editan aquí.",
+            subtitle = "Estos datos vienen de tu perfil."
         )
-
-        InfoRow(
-            theme = theme,
-            icon = Icons.Rounded.Person,
-            title = "Nombre",
-            value = profile.fullName,
-        )
-
-        InfoRow(
-            theme = theme,
-            icon = Icons.Rounded.Badge,
-            title = "Cédula",
-            value = profile.nationalId,
-        )
+        InfoRow(theme, "Nombre", profile.fullName)
+        InfoRow(theme, "Cédula", profile.nationalId)
     }
 }
 
@@ -16186,6 +16274,7 @@ private fun CheckoutClientCard(
 private fun TableCard(
     theme: AppSectionTheme,
     tableNumber: String,
+    isScheduledForLater: Boolean,
     onTableNumberChanged: (String) -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
@@ -16199,49 +16288,154 @@ private fun TableCard(
     ) {
         BrandSectionHeader(
             theme = theme,
-            title = "Mesa",
-            subtitle = "Indica dónde debe llegar el pedido.",
+            title = if (isScheduledForLater) "Mesa o referencia" else "Mesa",
+            subtitle = if (isScheduledForLater) {
+                "Para reservas posteriores puede quedar vacía; ADM la verá como Por asignar."
+            } else {
+                "Indica dónde debe llegar el pedido."
+            },
         )
 
         OutlinedTextField(
             value = tableNumber,
             onValueChange = onTableNumberChanged,
             modifier = Modifier.fillMaxWidth(),
-            label = { Text("Número o nombre de mesa") },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Rounded.TableRestaurant,
-                    contentDescription = null,
-                )
-            },
+            label = { Text(if (isScheduledForLater) "Mesa, nombre de reserva o referencia" else "Número o nombre de mesa") },
+            leadingIcon = { Icon(Icons.Rounded.TableRestaurant, contentDescription = null) },
             singleLine = true,
             shape = RoundedCornerShape(AppTheme.Radius.large),
             keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Characters,
+                capitalization = KeyboardCapitalization.Words,
+                keyboardType = KeyboardType.Text,
             ),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = palette.textPrimary,
                 unfocusedTextColor = palette.textPrimary,
                 focusedContainerColor = palette.elevatedCard,
                 unfocusedContainerColor = palette.elevatedCard,
-                disabledContainerColor = palette.card,
                 focusedBorderColor = palette.primary,
                 unfocusedBorderColor = palette.stroke,
                 focusedLabelColor = palette.primary,
                 unfocusedLabelColor = palette.textSecondary,
                 cursorColor = palette.primary,
-                focusedLeadingIconColor = palette.primary,
-                unfocusedLeadingIconColor = palette.textSecondary,
             ),
         )
     }
 }
 
 @Composable
-private fun CheckoutItemsCard(
+private fun ScheduleCard(
     theme: AppSectionTheme,
-    state: CheckoutUiState,
+    scheduledAt: Date,
+    isScheduledForLater: Boolean,
+    onScheduledAtChanged: (Date) -> Unit,
+    onScheduleNow: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val calendar = remember(scheduledAt) { Calendar.getInstance().apply { time = scheduledAt } }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Cuándo preparar",
+            subtitle = "Reserva solo comida para más tarde sin usar actividades de aventura.",
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = if (isScheduledForLater) Icons.Rounded.CalendarMonth else Icons.Rounded.Schedule,
+                size = 44.dp,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (isScheduledForLater) "Reserva de comida" else "Pedido inmediato",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+                Text(
+                    text = OrderScheduleFormatter.displayText(scheduledAt),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.textSecondary,
+                )
+            }
+
+            OutlinedButton(
+                enabled = isScheduledForLater,
+                onClick = onScheduleNow,
+            ) { Text("Ahora") }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    DatePickerDialog(
+                        context,
+                        { _, year, month, dayOfMonth ->
+                            val next = Calendar.getInstance().apply {
+                                time = scheduledAt
+                                set(Calendar.YEAR, year)
+                                set(Calendar.MONTH, month)
+                                set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.time
+                            onScheduledAtChanged(next)
+                        },
+                        calendar.get(Calendar.YEAR),
+                        calendar.get(Calendar.MONTH),
+                        calendar.get(Calendar.DAY_OF_MONTH),
+                    ).show()
+                },
+            ) { Text("Fecha") }
+
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, hourOfDay, minute ->
+                            val next = Calendar.getInstance().apply {
+                                time = scheduledAt
+                                set(Calendar.HOUR_OF_DAY, hourOfDay)
+                                set(Calendar.MINUTE, minute)
+                                set(Calendar.SECOND, 0)
+                                set(Calendar.MILLISECOND, 0)
+                            }.time
+                            onScheduledAtChanged(next)
+                        },
+                        calendar.get(Calendar.HOUR_OF_DAY),
+                        calendar.get(Calendar.MINUTE),
+                        false,
+                    ).show()
+                },
+            ) { Text("Hora") }
+        }
+
+        Text(
+            text = "Por defecto es ahora. Si eliges otro día, el pedido se guardará con scheduledAt en restaurant_orders.",
+            style = MaterialTheme.typography.bodySmall,
+            color = palette.textSecondary,
+        )
+    }
+}
+
+@Composable
+private fun CheckoutItemsCard(theme: AppSectionTheme, state: CheckoutUiState) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
 
@@ -16254,7 +16448,7 @@ private fun CheckoutItemsCard(
         BrandSectionHeader(
             theme = theme,
             title = "Productos",
-            subtitle = "${state.draft.totalItems} producto(s) seleccionados.",
+            subtitle = "${state.draft.totalItems} producto(s) seleccionados."
         )
 
         state.draft.items.forEachIndexed { index, item ->
@@ -16263,128 +16457,38 @@ private fun CheckoutItemsCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                BrandIconBubble(
-                    theme = theme,
-                    icon = Icons.Rounded.RestaurantMenu,
-                    size = 42.dp,
-                )
+                BrandIconBubble(theme = theme, icon = Icons.Rounded.RestaurantMenu, size = 42.dp)
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = item.menuItem.name,
-                        style = MaterialTheme.typography.bodyLarge,
+                        item.menuItem.name,
                         fontWeight = FontWeight.SemiBold,
-                        color = palette.textPrimary,
+                        color = palette.textPrimary
                     )
-
                     Text(
-                        text = "x${item.safeQuantity} • ${item.unitPrice.priceLabel()}",
-                        style = MaterialTheme.typography.bodySmall,
+                        "x${item.safeQuantity} • ${item.unitPrice.priceLabel()}",
                         color = palette.textSecondary,
+                        style = MaterialTheme.typography.bodySmall
                     )
-
                     if (!item.notes.isNullOrBlank()) {
                         Text(
-                            text = item.notes.orEmpty(),
-                            style = MaterialTheme.typography.bodySmall,
+                            item.notes.orEmpty(),
                             color = palette.accent,
-                            fontWeight = FontWeight.Medium,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
                 Text(
-                    text = item.totalPrice.priceLabel(),
-                    style = MaterialTheme.typography.bodyLarge,
+                    item.totalPrice.priceLabel(),
                     fontWeight = FontWeight.Bold,
-                    color = palette.textPrimary,
+                    color = palette.textPrimary
                 )
             }
 
             if (index != state.draft.items.lastIndex) {
-                HorizontalDivider(
-                    color = palette.stroke.copy(alpha = 0.72f),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun RewardsAppliedCard(
-    theme: AppSectionTheme,
-    rewards: List<RewardPresentation>,
-) {
-    val darkTheme = LocalBrandDarkTheme.current
-    val palette = AppTheme.palette(theme, darkTheme)
-    val shape = RoundedCornerShape(AppTheme.Radius.xLarge)
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .shadow(
-                elevation = 12.dp,
-                shape = shape,
-                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
-                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.18f else 0.08f),
-            )
-            .clip(shape)
-            .background(palette.chipGradient)
-            .border(
-                width = 1.dp,
-                color = palette.stroke,
-                shape = shape,
-            )
-            .padding(AppTheme.Metrics.cardPadding),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        BrandSectionHeader(
-            theme = theme,
-            title = "Beneficios aplicados",
-            subtitle = "Se reservarán al enviar el pedido.",
-        )
-
-        rewards.forEach { reward ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                BrandIconBubble(
-                    theme = theme,
-                    icon = Icons.Rounded.LocalOffer,
-                    size = 42.dp,
-                )
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = reward.title,
-                        color = palette.textPrimary,
-                        fontWeight = FontWeight.Bold,
-                    )
-
-                    Text(
-                        text = reward.message,
-                        color = palette.textSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-
-                reward.amountText?.let { amount ->
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(palette.heroGradient)
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    ) {
-                        Text(
-                            text = "-$amount",
-                            fontWeight = FontWeight.ExtraBold,
-                            color = palette.onPrimary,
-                            style = MaterialTheme.typography.labelMedium,
-                        )
-                    }
-                }
+                HorizontalDivider(color = palette.stroke.copy(alpha = 0.72f))
             }
         }
     }
@@ -16396,6 +16500,8 @@ private fun OrderSummaryCard(
     subtotal: Double,
     discount: Double,
     total: Double,
+    scheduledAt: Date,
+    isScheduledForLater: Boolean,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
@@ -16403,44 +16509,34 @@ private fun OrderSummaryCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .appCardStyle(
-                theme = theme,
-                emphasized = false,
-            ),
+            .appCardStyle(theme = theme, emphasized = false),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         BrandSectionHeader(
             theme = theme,
             title = "Resumen",
-            subtitle = "Revisa el total antes de enviar tu pedido.",
+            subtitle = "Revisa el total antes de enviar."
         )
-
+        SummaryLine("Subtotal", subtotal.priceLabel(), palette.textSecondary, palette.textPrimary)
+        if (discount > 0.0) SummaryLine(
+            "Beneficios",
+            "-${discount.priceLabel()}",
+            palette.textSecondary,
+            palette.success
+        )
         SummaryLine(
-            label = "Subtotal",
-            value = subtotal.priceLabel(),
-            labelColor = palette.textSecondary,
-            valueColor = palette.textPrimary,
+            if (isScheduledForLater) "Reserva" else "Hora",
+            OrderScheduleFormatter.displayText(scheduledAt),
+            palette.textSecondary,
+            palette.textPrimary
         )
-
-        if (discount > 0.0) {
-            SummaryLine(
-                label = "Beneficios",
-                value = "-${discount.priceLabel()}",
-                labelColor = palette.textSecondary,
-                valueColor = palette.success,
-            )
-        }
-
-        HorizontalDivider(
-            color = palette.stroke.copy(alpha = 0.72f),
-        )
-
+        HorizontalDivider(color = palette.stroke.copy(alpha = 0.72f))
         SummaryLine(
-            label = "Total",
-            value = total.priceLabel(),
-            labelColor = palette.textPrimary,
-            valueColor = palette.textPrimary,
-            emphasized = true,
+            "Total",
+            total.priceLabel(),
+            palette.textPrimary,
+            palette.textPrimary,
+            emphasized = true
         )
     }
 }
@@ -16453,78 +16549,36 @@ fun SummaryLine(
     valueColor: Color,
     emphasized: Boolean = false,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(
-            text = label,
+            label,
             color = labelColor,
-            style = if (emphasized) {
-                MaterialTheme.typography.titleMedium
-            } else {
-                MaterialTheme.typography.bodyMedium
-            },
-            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Medium,
+            fontWeight = if (emphasized) FontWeight.Bold else FontWeight.Medium
         )
-
         Text(
-            text = value,
+            value,
             color = valueColor,
-            style = if (emphasized) {
-                MaterialTheme.typography.titleLarge
-            } else {
-                MaterialTheme.typography.bodyMedium
-            },
-            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold,
+            fontWeight = if (emphasized) FontWeight.ExtraBold else FontWeight.SemiBold
         )
     }
 }
 
 @Composable
-private fun InfoRow(
-    theme: AppSectionTheme,
-    icon: ImageVector,
-    title: String,
-    value: String,
-) {
+private fun InfoRow(theme: AppSectionTheme, title: String, value: String) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        BrandIconBubble(
-            theme = theme,
-            icon = icon,
-            size = 42.dp,
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = palette.textSecondary)
+        Text(
+            value.ifBlank { "Sin registrar" },
+            fontWeight = FontWeight.SemiBold,
+            color = palette.textPrimary
         )
-
-        Column {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textSecondary,
-            )
-
-            Text(
-                text = value.ifBlank { "Sin registrar" },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = palette.textPrimary,
-            )
-        }
     }
 }
 
 @Composable
-private fun ErrorCardInline(
-    theme: AppSectionTheme,
-    message: String,
-    onDismiss: () -> Unit,
-) {
+private fun ErrorCardInline(theme: AppSectionTheme, message: String, onDismiss: () -> Unit) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
     val shape = RoundedCornerShape(AppTheme.Radius.large)
@@ -16534,38 +16588,20 @@ private fun ErrorCardInline(
             .fillMaxWidth()
             .clip(shape)
             .background(palette.destructive.copy(alpha = if (darkTheme) 0.18f else 0.10f))
-            .border(
-                width = 1.dp,
-                color = palette.destructive.copy(alpha = 0.35f),
-                shape = shape,
-            )
+            .border(1.dp, palette.destructive.copy(alpha = 0.35f), shape)
             .padding(14.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.Top,
     ) {
-        Icon(
-            imageVector = Icons.Rounded.WarningAmber,
-            contentDescription = null,
-            tint = palette.destructive,
-        )
-
+        Icon(Icons.Rounded.WarningAmber, contentDescription = null, tint = palette.destructive)
         Text(
-            text = message,
+            message,
             modifier = Modifier.weight(1f),
             color = palette.textPrimary,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
+            fontWeight = FontWeight.Medium
         )
-
-        IconButton(
-            onClick = onDismiss,
-            modifier = Modifier.size(28.dp),
-        ) {
-            Icon(
-                imageVector = Icons.Rounded.Close,
-                contentDescription = "Cerrar",
-                tint = palette.textSecondary,
-            )
+        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+            Icon(Icons.Rounded.Close, contentDescription = "Cerrar", tint = palette.textSecondary)
         }
     }
 }
@@ -16576,31 +16612,20 @@ private fun CheckoutBottomBar(
     total: Double,
     canSubmit: Boolean,
     isSubmitting: Boolean,
+    isScheduledForLater: Boolean,
     onSubmit: () -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
-    val shape = RoundedCornerShape(
-        topStart = AppTheme.Radius.xLarge,
-        topEnd = AppTheme.Radius.xLarge,
-    )
+    val shape =
+        RoundedCornerShape(topStart = AppTheme.Radius.xLarge, topEnd = AppTheme.Radius.xLarge)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(
-                elevation = 18.dp,
-                shape = shape,
-                ambientColor = palette.shadow.copy(alpha = if (darkTheme) 0.30f else 0.12f),
-                spotColor = palette.shadow.copy(alpha = if (darkTheme) 0.30f else 0.12f),
-            )
             .clip(shape)
             .background(palette.cardGradient)
-            .border(
-                width = 1.dp,
-                color = palette.stroke,
-                shape = shape,
-            ),
+            .border(1.dp, palette.stroke, shape),
     ) {
         Row(
             modifier = Modifier
@@ -16613,16 +16638,15 @@ private fun CheckoutBottomBar(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Total",
+                    "Total",
                     style = MaterialTheme.typography.labelMedium,
-                    color = palette.textSecondary,
+                    color = palette.textSecondary
                 )
-
                 Text(
-                    text = total.priceLabel(),
+                    total.priceLabel(),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.ExtraBold,
-                    color = palette.textPrimary,
+                    color = palette.textPrimary
                 )
             }
 
@@ -16630,27 +16654,29 @@ private fun CheckoutBottomBar(
                 theme = theme,
                 enabled = canSubmit && !isSubmitting,
                 onClick = onSubmit,
-                modifier = Modifier.weight(1.35f),
+                modifier = Modifier.weight(1.45f),
             ) {
                 if (isSubmitting) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
                         color = palette.onPrimary,
-                        trackColor = Color.Transparent,
+                        trackColor = Color.Transparent
                     )
                 } else {
                     Icon(
-                        imageVector = Icons.Rounded.CheckCircle,
+                        Icons.Rounded.CheckCircle,
                         contentDescription = null,
-                        tint = palette.onPrimary,
+                        tint = palette.onPrimary
                     )
                 }
-
                 Spacer(modifier = Modifier.size(8.dp))
-
                 Text(
-                    text = if (isSubmitting) "Enviando..." else "Enviar pedido",
+                    text = when {
+                        isSubmitting -> "Enviando..."
+                        isScheduledForLater -> "Reservar comida"
+                        else -> "Enviar pedido"
+                    },
                     color = palette.onPrimary,
                     fontWeight = FontWeight.Bold,
                 )
@@ -16658,6 +16684,8 @@ private fun CheckoutBottomBar(
         }
     }
 }
+
+private fun Double.priceLabel(): String = NumberFormat.getCurrencyInstance(Locale.US).format(this)
 
 ```
 
@@ -18175,12 +18203,6 @@ private fun CategorySelectorBlock(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            RestaurantFilterChip(
-                title = "Todo",
-                selected = selectedCategoryId == null,
-                onClick = { onCategorySelected(null) },
-            )
-
             categories.forEach { category ->
                 RestaurantFilterChip(
                     title = category.title,
@@ -18235,12 +18257,14 @@ private fun MenuSectionCard(
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             section.items.forEach { item ->
-                MenuItemRowCard(
-                    theme = theme,
-                    item = item,
-                    reward = rewardProvider(item),
-                    onClick = { onOpen(item) },
-                )
+                if (item.isAvailable) {
+                    MenuItemRowCard(
+                        theme = theme,
+                        item = item,
+                        reward = rewardProvider(item),
+                        onClick = { onOpen(item) },
+                    )
+                }
             }
         }
     }
@@ -19622,9 +19646,7 @@ data class CheckoutUiState(
     val isSubmitting: Boolean = false,
     val isLoadingRewards: Boolean = false,
     val rewardPreview: RewardComputationResult = RewardComputationResult.empty(
-        RewardWalletSnapshot.empty(
-            ""
-        )
+        RewardWalletSnapshot.empty("")
     ),
     val errorMessage: String? = null,
 ) {
@@ -19632,6 +19654,7 @@ data class CheckoutUiState(
     val discount: Double get() = rewardPreview.totalDiscount.coerceAtLeast(0.0)
     val total: Double get() = (subtotal - discount).coerceAtLeast(0.0)
     val canSubmit: Boolean get() = draft.canSubmit && !isSubmitting
+    val isScheduledForLater: Boolean get() = draft.isScheduledForLater
 }
 
 ```
@@ -19665,13 +19688,20 @@ class CheckoutViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
+                val refreshedDraft = if (!draft.isScheduledForLater && draft.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+                    draft.copy(scheduledAt = Date())
+                } else {
+                    draft
+                }
+
                 _uiState.update {
                     it.copy(
-                        draft = draft,
+                        draft = refreshedDraft,
                         isLoadingCart = false,
                     )
                 }
-                refreshRewardPreview(draft)
+                if (refreshedDraft != draft) saveDraft(refreshedDraft)
+                refreshRewardPreview(refreshedDraft)
             }
         }
     }
@@ -19688,7 +19718,19 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun updateTableNumber(value: String) {
-        saveDraft(_uiState.value.draft.copy(tableNumber = value.take(20)))
+        saveDraft(_uiState.value.draft.copy(tableNumber = value.take(30)))
+    }
+
+    fun updateScheduledAt(value: Date) {
+        saveDraft(
+            _uiState.value.draft.copy(
+                scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(value),
+            )
+        )
+    }
+
+    fun scheduleForNow() {
+        saveDraft(_uiState.value.draft.copy(scheduledAt = Date()))
     }
 
     fun clearError() {
@@ -19696,11 +19738,17 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun submit() {
-        val draft = _uiState.value.draft
+        val draft = _uiState.value.draft.normalizedForSubmit()
 
         if (!draft.canSubmit) {
             _uiState.update {
-                it.copy(errorMessage = "Completa la mesa y asegúrate de tener productos en el carrito.")
+                it.copy(
+                    errorMessage = if (draft.isScheduledForLater) {
+                        "Agrega productos y confirma tu perfil. La mesa puede quedar por asignar para reservas."
+                    } else {
+                        "Completa la mesa y asegúrate de tener productos en el carrito."
+                    }
+                )
             }
             return
         }

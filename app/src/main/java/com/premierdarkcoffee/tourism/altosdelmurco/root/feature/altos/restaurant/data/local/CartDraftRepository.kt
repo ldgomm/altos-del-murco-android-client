@@ -15,6 +15,7 @@ internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
     nationalId = nationalId,
     clientName = clientName,
     tableNumber = tableNumber,
+    scheduledAtMillis = scheduledAt.time,
     revision = revision,
     lastConfirmedRevision = lastConfirmedRevision,
     createdAtMillis = createdAt.time,
@@ -47,6 +48,7 @@ internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
     nationalId = draft.nationalId,
     clientName = draft.clientName,
     tableNumber = draft.tableNumber,
+    scheduledAt = Date(draft.scheduledAtMillis),
     createdAt = Date(draft.createdAtMillis),
     updatedAt = Date(draft.updatedAtMillis),
     items = items.map { item ->
@@ -86,8 +88,9 @@ class CartDraftRepository @Inject constructor(
     }
 
     override suspend fun saveDraft(draft: OrderDraft) {
+        val now = Date()
         cartDao.replaceDraft(
-            draft = draft.copy(updatedAt = Date()).toEntity(),
+            draft = draft.copy(updatedAt = now).toEntity(),
             items = draft.items.map { it.toEntity(draft.id) },
         )
     }

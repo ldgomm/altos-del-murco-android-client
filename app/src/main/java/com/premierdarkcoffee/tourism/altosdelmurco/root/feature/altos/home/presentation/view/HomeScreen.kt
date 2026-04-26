@@ -110,7 +110,6 @@ fun HomeScreen(
     onOpenExperiences: () -> Unit = {},
     onOpenExperiencePackage: (String) -> Unit = {},
     onOpenBookings: () -> Unit = {},
-    onOpenProfile: () -> Unit = {},
 ) {
     val feedState by viewModel.uiState.collectAsStateWithLifecycle()
     val menuState by menuViewModel.uiState.collectAsStateWithLifecycle()
@@ -253,7 +252,6 @@ fun HomeScreen(
                         onOpenRestaurant = onOpenRestaurant,
                         onOpenExperiences = onOpenExperiences,
                         onOpenBookings = onOpenBookings,
-                        onOpenProfile = onOpenProfile,
                         onOpenFeaturedDishes = { route = HomeRoute.FEATURED_DISHES },
                         onOpenPackages = { route = HomeRoute.EXPERIENCE_PACKAGES },
                         onOpenRewards = { route = HomeRoute.REWARDS_CENTER },
@@ -340,7 +338,6 @@ private fun HomeMainContent(
     onOpenRestaurant: () -> Unit,
     onOpenExperiences: () -> Unit,
     onOpenBookings: () -> Unit,
-    onOpenProfile: () -> Unit,
     onOpenFeaturedDishes: () -> Unit,
     onOpenPackages: () -> Unit,
     onOpenRewards: () -> Unit,
@@ -372,7 +369,6 @@ private fun HomeMainContent(
                 onOpenPackages = onOpenPackages,
                 onOpenRewards = onOpenRewards,
                 onOpenBookings = onOpenBookings,
-                onOpenProfile = onOpenProfile,
             )
         }
 
@@ -498,7 +494,6 @@ private fun HomeQuickActions(
     onOpenPackages: () -> Unit,
     onOpenRewards: () -> Unit,
     onOpenBookings: () -> Unit,
-    onOpenProfile: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -536,22 +531,6 @@ private fun HomeQuickActions(
                 modifier = Modifier.weight(1f),
                 onClick = onOpenBookings,
             )
-        }
-        PremiumCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                PremiumIconBubble(Icons.Rounded.Star, selected = true)
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Murco Loyalty visible antes de pagar", fontWeight = FontWeight.Bold)
-                    Text(
-                        "Cada descuento debe aparecer como dinero real: -$3.00, item gratis o porcentaje aplicado.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                TextButton(onClick = onOpenProfile) { Text("Perfil") }
-            }
         }
     }
 }

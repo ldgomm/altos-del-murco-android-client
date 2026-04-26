@@ -11,6 +11,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderScheduleFormatter
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SubmitOrderUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Date
 import java.util.UUID
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
@@ -49,13 +51,20 @@ class CheckoutViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
+                val refreshedDraft = if (!draft.isScheduledForLater && draft.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+                    draft.copy(scheduledAt = Date())
+                } else {
+                    draft
+                }
+
                 _uiState.update {
                     it.copy(
-                        draft = draft,
+                        draft = refreshedDraft,
                         isLoadingCart = false,
                     )
                 }
-                refreshRewardPreview(draft)
+                if (refreshedDraft != draft) saveDraft(refreshedDraft)
+                refreshRewardPreview(refreshedDraft)
             }
         }
     }
@@ -72,7 +81,19 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun updateTableNumber(value: String) {
-        saveDraft(_uiState.value.draft.copy(tableNumber = value.take(20)))
+        saveDraft(_uiState.value.draft.copy(tableNumber = value.take(30)))
+    }
+
+    fun updateScheduledAt(value: Date) {
+        saveDraft(
+            _uiState.value.draft.copy(
+                scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(value),
+            )
+        )
+    }
+
+    fun scheduleForNow() {
+        saveDraft(_uiState.value.draft.copy(scheduledAt = Date()))
     }
 
     fun clearError() {
@@ -80,11 +101,17 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun submit() {
-        val draft = _uiState.value.draft
+        val draft = _uiState.value.draft.normalizedForSubmit()
 
         if (!draft.canSubmit) {
             _uiState.update {
-                it.copy(errorMessage = "Completa la mesa y asegúrate de tener productos en el carrito.")
+                it.copy(
+                    errorMessage = if (draft.isScheduledForLater) {
+                        "Agrega productos y confirma tu perfil. La mesa puede quedar por asignar para reservas."
+                    } else {
+                        "Completa la mesa y asegúrate de tener productos en el carrito."
+                    }
+                )
             }
             return
         }

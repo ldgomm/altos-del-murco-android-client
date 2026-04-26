@@ -854,12 +854,6 @@ private fun CategorySelectorBlock(
             modifier = Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            RestaurantFilterChip(
-                title = "Todo",
-                selected = selectedCategoryId == null,
-                onClick = { onCategorySelected(null) },
-            )
-
             categories.forEach { category ->
                 RestaurantFilterChip(
                     title = category.title,
@@ -914,12 +908,14 @@ private fun MenuSectionCard(
 
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             section.items.forEach { item ->
-                MenuItemRowCard(
-                    theme = theme,
-                    item = item,
-                    reward = rewardProvider(item),
-                    onClick = { onOpen(item) },
-                )
+                if (item.isAvailable) {
+                    MenuItemRowCard(
+                        theme = theme,
+                        item = item,
+                        reward = rewardProvider(item),
+                        onClick = { onOpen(item) },
+                    )
+                }
             }
         }
     }
