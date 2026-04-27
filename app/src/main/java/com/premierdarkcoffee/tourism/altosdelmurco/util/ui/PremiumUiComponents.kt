@@ -149,9 +149,11 @@ fun PremiumCard(
     ElevatedCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-        ),
+
+        //Done
+//        colors = CardDefaults.elevatedCardColors(
+//            containerColor = if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+//        ),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (emphasized) 8.dp else 3.dp),
     ) {
         Column(

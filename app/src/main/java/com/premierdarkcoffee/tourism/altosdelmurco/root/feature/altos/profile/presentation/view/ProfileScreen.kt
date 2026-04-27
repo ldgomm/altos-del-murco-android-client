@@ -667,9 +667,9 @@ private fun LevelSummaryCard(
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-        ),
+//        colors = CardDefaults.elevatedCardColors(
+//            containerColor = MaterialTheme.colorScheme.primaryContainer,
+//        ),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
@@ -1276,11 +1276,11 @@ private fun CompactInfoCard(
     ElevatedCard(
         modifier = modifier,
         shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
-                alpha = 0.5f
-            )
-        ),
+//        colors = CardDefaults.elevatedCardColors(
+//            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+//                alpha = 0.5f
+//            )
+//        ),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
