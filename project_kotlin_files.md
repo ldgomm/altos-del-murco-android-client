@@ -5413,6 +5413,118 @@ data class RewardPreviewInput(
 
 ---
 
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/ClientProfileRepository.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
+
+
+@Singleton
+class ClientProfileRepository @Inject constructor(
+    private val firestore: FirebaseFirestore,
+) : ClientProfileRepositoriable {
+
+    private val collection = firestore.collection(FirestoreCollections.CLIENTS)
+
+    companion object {
+        private const val TAG = "AltosProfileRepo"
+    }
+
+    override suspend fun fetchProfile(uid: String): ClientProfile? {
+        val cleanUid = uid.trim()
+        if (cleanUid.isEmpty()) {
+            Log.d(TAG, "fetchProfile -> empty uid")
+            return null
+        }
+
+        val snapshot = collection.document(cleanUid).get().awaitResult()
+
+        if (!snapshot.exists()) {
+            Log.d(TAG, "fetchProfile -> no profile for uid=${cleanUid.safeTail()}")
+            return null
+        }
+
+        val profile = snapshot.toClientProfileOrNull()
+
+        Log.d(
+            TAG,
+            "fetchProfile -> mapped=${profile != null}, uid=${cleanUid.safeTail()}, " +
+                    "complete=${profile?.isProfileComplete == true}"
+        )
+
+        return profile
+    }
+
+    override suspend fun saveProfile(profile: ClientProfile) {
+        val cleanUid = profile.id.trim()
+        require(cleanUid.isNotEmpty()) { "Profile id is required." }
+
+        Log.d(
+            TAG,
+            "saveProfile -> uid=${cleanUid.safeTail()}, complete=${profile.isProfileComplete}"
+        )
+
+        collection
+            .document(cleanUid)
+            .set(ClientProfileDocument(profile), SetOptions.merge())
+            .awaitResult()
+
+        Log.d(TAG, "saveProfile -> success uid=${cleanUid.safeTail()}")
+    }
+
+    override suspend fun deleteProfile(uid: String) {
+        val cleanUid = uid.trim()
+        if (cleanUid.isEmpty()) return
+        collection.document(cleanUid).delete().awaitResult()
+        Log.d(TAG, "deleteProfile -> uid=${cleanUid.safeTail()}")
+    }
+
+    private fun DocumentSnapshot.toClientProfileOrNull(): ClientProfile? {
+        return runCatching {
+            ClientProfile(
+                id = id.trim(),
+                email = getString("email").orEmpty().trim(),
+                appleUserIdentifier = getString("appleUserIdentifier").orEmpty().trim(),
+                fullName = getString("fullName").orEmpty().trim(),
+                nationalId = getString("nationalId").orEmpty().filter(Char::isDigit),
+                phoneNumber = getString("phoneNumber").orEmpty().filter(Char::isDigit),
+                birthday = getDateValue("birthday") ?: Date(0),
+                address = getString("address").orEmpty().trim(),
+                emergencyContactName = getString("emergencyContactName").orEmpty().trim(),
+                emergencyContactPhone = getString("emergencyContactPhone").orEmpty()
+                    .filter(Char::isDigit),
+                isProfileComplete = getBoolean("profileComplete") == true,
+                createdAt = getDateValue("createdAt") ?: Date(),
+                updatedAt = getDateValue("updatedAt") ?: Date(),
+                profileCompletedAt = getDateValue("profileCompletedAt"),
+                profileImageURL = getString("profileImageURL")?.trim()?.takeIf { it.isNotEmpty() },
+                profileImagePath = getString("profileImagePath")?.trim()
+                    ?.takeIf { it.isNotEmpty() },
+            )
+        }.onFailure { error ->
+            Log.e(TAG, "toClientProfileOrNull -> mapping failed doc=${id.safeTail()}", error)
+        }.getOrNull()
+    }
+
+    private fun DocumentSnapshot.getDateValue(field: String): Date? {
+        return when (val value = get(field)) {
+            is Timestamp -> value.toDate()
+            is Date -> value
+            else -> null
+        }
+    }
+}
+
+private fun String.safeTail(): String {
+    val clean = trim()
+    if (clean.isEmpty()) return "<empty>"
+    return "…${clean.takeLast(6)}"
+}
+
+```
+
+---
+
 # app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/DeveloperBypassSessionRepository.kt
 
 ```kotlin
@@ -5561,131 +5673,6 @@ class FirebaseAuthenticationRepository @Inject constructor(
             .firstOrNull { it.providerId == GoogleAuthProvider.PROVIDER_ID }
             ?.uid
             .orEmpty()
-    }
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/authentication/data/FirestoreClientProfileRepository.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data
-
-
-@Singleton
-class FirestoreClientProfileRepository @Inject constructor(
-    private val firestore: FirebaseFirestore,
-) : ClientProfileRepositoriable {
-
-    private val collection = firestore.collection(FirestoreCollections.CLIENTS)
-
-    companion object {
-        private const val TAG = "AltosProfileRepo"
-    }
-
-    override suspend fun fetchProfile(uid: String): ClientProfile? {
-        val cleanUid = uid.trim()
-        if (cleanUid.isEmpty()) {
-            Log.d(TAG, "fetchProfile -> empty uid")
-            return null
-        }
-
-        Log.d(TAG, "fetchProfile -> requesting clients/$cleanUid")
-
-        val snapshot = collection.document(cleanUid).get().awaitResult()
-
-        Log.d(
-            TAG,
-            "fetchProfile -> snapshot exists=${snapshot.exists()}, id=${snapshot.id}, keys=${snapshot.data?.keys?.sorted()}"
-        )
-
-        if (!snapshot.exists()) {
-            Log.d(TAG, "fetchProfile -> document does not exist for uid=$cleanUid")
-            return null
-        }
-
-        val profile = snapshot.toClientProfileOrNull()
-
-        Log.d(
-            TAG,
-            "fetchProfile -> mapped profile null=${profile == null}, " +
-                    "id=${profile?.id}, " +
-                    "email=${profile?.email}, " +
-                    "fullName='${profile?.fullName}', " +
-                    "nationalId='${profile?.nationalId}', " +
-                    "phone='${profile?.phoneNumber}', " +
-                    "address='${profile?.address}', " +
-                    "emergencyName='${profile?.emergencyContactName}', " +
-                    "emergencyPhone='${profile?.emergencyContactPhone}', " +
-                    "isProfileComplete=${profile?.isProfileComplete}, " +
-                    "isComplete=${profile?.isComplete}"
-        )
-
-        return profile
-    }
-
-    override suspend fun saveProfile(profile: ClientProfile) {
-        Log.d(
-            TAG,
-            "saveProfile -> writing clients/${profile.id.trim()} " +
-                    "email=${profile.email}, " +
-                    "fullName='${profile.fullName}', " +
-                    "nationalId='${profile.nationalId}', " +
-                    "phone='${profile.phoneNumber}', " +
-                    "address='${profile.address}', " +
-                    "emergencyName='${profile.emergencyContactName}', " +
-                    "emergencyPhone='${profile.emergencyContactPhone}', " +
-                    "isProfileComplete=${profile.isProfileComplete}, " +
-                    "isComplete=${profile.isComplete}"
-        )
-
-        collection
-            .document(profile.id.trim())
-            .set(ClientProfileDocument(profile), SetOptions.merge())
-            .awaitResult()
-
-        Log.d(TAG, "saveProfile -> write success clients/${profile.id.trim()}")
-    }
-
-    override suspend fun deleteProfile(uid: String) {
-        val cleanUid = uid.trim()
-        if (cleanUid.isEmpty()) return
-        collection.document(cleanUid).delete().awaitResult()
-    }
-
-    private fun DocumentSnapshot.toClientProfileOrNull(): ClientProfile? {
-        return runCatching {
-            ClientProfile(
-                id = id.trim(),
-                email = getString("email").orEmpty().trim(),
-                appleUserIdentifier = getString("appleUserIdentifier").orEmpty().trim(),
-                fullName = getString("fullName").orEmpty().trim(),
-                nationalId = getString("nationalId").orEmpty().trim(),
-                phoneNumber = getString("phoneNumber").orEmpty().trim(),
-                birthday = getDateValue("birthday") ?: Date(0),
-                address = getString("address").orEmpty().trim(),
-                emergencyContactName = getString("emergencyContactName").orEmpty().trim(),
-                emergencyContactPhone = getString("emergencyContactPhone").orEmpty().trim(),
-                isProfileComplete = getBoolean("profileComplete") == true,
-                createdAt = getDateValue("createdAt") ?: Date(),
-                updatedAt = getDateValue("updatedAt") ?: Date(),
-                profileCompletedAt = getDateValue("profileCompletedAt"),
-                profileImageURL = getString("profileImageURL")?.trim()?.takeIf { it.isNotEmpty() },
-                profileImagePath = getString("profileImagePath")?.trim()?.takeIf { it.isNotEmpty() },
-            )
-        }.onFailure { error ->
-            Log.e(TAG, "toClientProfileOrNull -> mapping failed for docId=$id", error)
-        }.getOrNull()
-    }
-
-    private fun DocumentSnapshot.getDateValue(field: String): Date? {
-        return when (val value = get(field)) {
-            is Timestamp -> value.toDate()
-            is Date -> value
-            else -> null
-        }
     }
 }
 
@@ -7179,6 +7166,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.d
 @Singleton
 class AdventureBookingsRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth,
     private val catalogRepository: AdventureCatalogRepositoriable,
     private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : AdventureBookingsRepositoriable {
@@ -7186,32 +7174,25 @@ class AdventureBookingsRepository @Inject constructor(
     override fun observeBookings(
         nationalId: String,
     ): Flow<List<AdventureBooking>> = callbackFlow {
-        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val uid = auth.currentUser?.uid?.trim().orEmpty()
 
-        if (cleanNationalId.isEmpty()) {
+        if (uid.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
-        val registration = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .orderBy("startAt", Query.Direction.ASCENDING)
+        val registration = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("clientId", uid).orderBy("startAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
                     return@addSnapshotListener
                 }
 
-                val bookings = snapshot
-                    ?.documents
-                    .orEmpty()
-                    .mapNotNull { document ->
-                        document.toObject(AdventureBookingDto::class.java)
-                            ?.toDomain(document.id)
-                    }
-                    .sortedBy { it.startAt.time }
+                val bookings = snapshot?.documents.orEmpty().mapNotNull { document ->
+                    document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+                }.sortedBy { it.startAt.time }
 
                 trySend(bookings).isSuccess
             }
@@ -7237,7 +7218,10 @@ class AdventureBookingsRepository @Inject constructor(
     }
 
     override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
+        val uid = requireCurrentUid()
         val catalog = catalogRepository.fetchCatalog()
+        val cleanNationalId = request.nationalId.filter(Char::isDigit)
+        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
         val basePlan = AdventurePlanner.buildPlan(
             day = request.date,
@@ -7249,7 +7233,7 @@ class AdventureBookingsRepository @Inject constructor(
         ) ?: error("Invalid reservation configuration.")
 
         val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
-            nationalId = request.nationalId,
+            nationalId = cleanNationalId,
             activityItems = request.items,
             foodItems = request.foodReservation?.items.orEmpty(),
             catalog = catalog,
@@ -7271,18 +7255,17 @@ class AdventureBookingsRepository @Inject constructor(
         )
 
         val normalizedRequest = request.copy(
-            nationalId = request.nationalId.filter(Char::isDigit),
+            clientId = uid,
+            nationalId = cleanNationalId,
             packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
             loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
             appliedRewards = rewardPreview.appliedRewards,
         )
 
         val createdAt = Date()
-        val bookingRef = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .document()
+        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document()
 
-        val dto = AdventureBookingDto.Companion.from(
+        val dto = AdventureBookingDto.from(
             request = normalizedRequest,
             plan = finalPlan,
             createdAt = createdAt,
@@ -7302,15 +7285,12 @@ class AdventureBookingsRepository @Inject constructor(
     }
 
     override suspend fun cancelBooking(id: String, nationalId: String) {
-        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val uid = requireCurrentUid()
         val cleanId = id.trim()
-
         require(cleanId.isNotEmpty()) { "Booking id is required." }
-        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
-        val bookingRef = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .document(cleanId)
+        val bookingRef =
+            firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document(cleanId)
 
         val snapshot = bookingRef.get().awaitResult()
 
@@ -7321,18 +7301,78 @@ class AdventureBookingsRepository @Inject constructor(
         val dto = snapshot.toObject(AdventureBookingDto::class.java)
             ?: error("Could not read booking data.")
 
-        if (dto.nationalId.filter(Char::isDigit) != cleanNationalId) {
+        val booking = dto.toDomain(cleanId)
+
+        if (booking.clientId != uid) {
             error("You are not allowed to cancel this booking.")
         }
 
-        bookingRef
-            .update("status", AdventureBookingStatus.CANCELED.rawValue)
-            .awaitResult()
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking)?.let { reason ->
+            error(reason)
+        }
+
+        bookingRef.update(
+            mapOf(
+                "status" to AdventureBookingStatus.CANCELED.rawValue,
+                "updatedAt" to Timestamp.now(),
+                "canceledAt" to Timestamp.now(),
+                "canceledByClientId" to uid,
+            )
+        ).awaitResult()
 
         loyaltyRewardsRepository.releaseRewards(
             nationalId = dto.nationalId,
             referenceId = cleanId,
         )
+    }
+
+    private fun requireCurrentUid(): String {
+        return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error("Debes iniciar sesión nuevamente para continuar.")
+    }
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/booking/domain/AdventureBookingCancellationPolicy.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain
+
+
+object AdventureBookingCancellationPolicy {
+    private val minimumNoticeMillis: Long = TimeUnit.HOURS.toMillis(2)
+
+    fun canClientCancel(
+        booking: AdventureBooking,
+        now: Date = Date(),
+    ): Boolean {
+        return reasonClientCannotCancel(booking, now) == null
+    }
+
+    fun reasonClientCannotCancel(
+        booking: AdventureBooking,
+        now: Date = Date(),
+    ): String? {
+        if (booking.status !in setOf(
+                AdventureBookingStatus.PENDING, AdventureBookingStatus.CONFIRMED
+            )
+        ) {
+            return "Solo se pueden cancelar reservas pendientes o confirmadas."
+        }
+
+        if (!booking.startAt.after(now)) {
+            return "Esta reserva ya inició o ya pasó."
+        }
+
+        val latestAllowed = Date(booking.startAt.time - minimumNoticeMillis)
+        if (now.after(latestAllowed)) {
+            return "Para cancelar con menos de 2 horas de anticipación, por favor contáctanos por WhatsApp."
+        }
+
+        return null
     }
 }
 
@@ -7875,7 +7915,8 @@ private fun BookingsScreenContent(
                                 },
                                 upcomingCount = allReservations.count {
                                     !it.isTerminal &&
-                                            AdventureDateHelper.startOfDay(it.serviceDate).after(today)
+                                            AdventureDateHelper.startOfDay(it.serviceDate)
+                                                .after(today)
                                 },
                                 historyCount = allReservations.count {
                                     it.isTerminal || it.endDate.before(today)
@@ -8782,7 +8823,10 @@ private fun AdventureBookingPreview(
                 Icon(
                     imageVector = Icons.Rounded.LocalDining,
                     contentDescription = null,
-                    tint = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                    tint = AppTheme.palette(
+                        AppSectionTheme.Adventure,
+                        LocalBrandDarkTheme.current
+                    ).primary,
                     modifier = Modifier.size(18.dp),
                 )
 
@@ -9505,7 +9549,12 @@ private fun AdventureBlockCard(
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary),
+                    .background(
+                        AppTheme.palette(
+                            AppSectionTheme.Adventure,
+                            LocalBrandDarkTheme.current
+                        ).primary
+                    ),
             )
 
             Box(
@@ -9543,7 +9592,10 @@ private fun AdventureBlockCard(
                 Text(
                     text = block.subtotal.agendaPriceText(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                    color = AppTheme.palette(
+                        AppSectionTheme.Adventure,
+                        LocalBrandDarkTheme.current
+                    ).primary,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -9597,7 +9649,10 @@ private fun FoodDetailCard(
             Text(
                 text = "Subtotal: ${item.subtotal.agendaPriceText()}",
                 style = MaterialTheme.typography.labelMedium,
-                color = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                color = AppTheme.palette(
+                    AppSectionTheme.Adventure,
+                    LocalBrandDarkTheme.current
+                ).primary,
                 fontWeight = FontWeight.Bold,
             )
 
@@ -10057,7 +10112,7 @@ private fun List<UnifiedReservation>.visibleTotal(): Double {
     return filterNot { it.isCanceled }.sumOf { it.total }
 }
 
-private fun Order.recalculatedAgendaStatus(): OrderStatus {
+fun Order.recalculatedAgendaStatus(): OrderStatus {
     return when {
         status == OrderStatus.CANCELED -> OrderStatus.CANCELED
         requiresReconfirmation -> OrderStatus.PENDING
@@ -10448,16 +10503,18 @@ class AdventureBookingsViewModel @Inject constructor(
     }
 
     fun setStatusFilter(filter: AdventureReservationStatusFilter) {
-        _uiState.update {
-            it.copy(selectedStatusFilter = filter)
-        }
+        _uiState.update { it.copy(selectedStatusFilter = filter) }
     }
 
     fun setSortOrder(sortOrder: AdventureReservationSortOrder) {
-        _uiState.update {
-            it.copy(sortOrder = sortOrder)
-        }
+        _uiState.update { it.copy(sortOrder = sortOrder) }
     }
+
+    fun canCancel(booking: AdventureBooking): Boolean =
+        AdventureBookingCancellationPolicy.canClientCancel(booking, _uiState.value.now)
+
+    fun cancellationBlockedReason(booking: AdventureBooking): String? =
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
 
     fun cancelBooking(booking: AdventureBooking) {
         val nationalId = _uiState.value.nationalId
@@ -10468,6 +10525,12 @@ class AdventureBookingsViewModel @Inject constructor(
             }
             return
         }
+
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
+            ?.let { reason ->
+                _uiState.update { it.copy(errorMessage = reason) }
+                return
+            }
 
         viewModelScope.launch {
             _uiState.update {
@@ -17018,9 +17081,9 @@ class MenuRepository @Inject constructor(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.data.remote
 
 
-
 data class OrderDto(
     val id: String = "",
+    val clientId: String? = null,
     val nationalId: String? = null,
     val clientName: String = "",
     val tableNumber: String = "",
@@ -17040,6 +17103,7 @@ data class OrderDto(
 ) {
     constructor(domain: Order) : this(
         id = domain.id,
+        clientId = domain.clientId,
         nationalId = domain.nationalId,
         clientName = domain.clientName,
         tableNumber = domain.tableNumber,
@@ -17063,7 +17127,8 @@ data class OrderDto(
         val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
         return Order(
             id = id,
-            nationalId = nationalId,
+            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
+            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
             clientName = clientName,
             tableNumber = tableNumber,
             createdAt = safeCreatedAt,
@@ -17139,29 +17204,80 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 @Singleton
 class OrdersRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth,
     private val loyaltyRewardsRepository: LoyaltyRewardsRepository,
 ) : OrdersRepositoriable {
 
     override suspend fun submit(order: Order) {
-        if (order.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+        val trustedOrder = buildTrustedOrder(order)
+
+        if (trustedOrder.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
             error("La fecha de la reserva ya pasó. Elige una hora actual o futura.")
         }
 
-        if (order.shouldConsumeCurrentMenuStock) {
-            submitAndConsumeCurrentStock(order)
+        if (trustedOrder.shouldConsumeCurrentMenuStock) {
+            submitAndConsumeCurrentStock(trustedOrder)
         } else {
-            submitFutureFoodReservation(order)
+            submitFutureFoodReservation(trustedOrder)
         }
 
-        val nationalId = order.nationalId?.trim().orEmpty()
-        if (nationalId.isNotEmpty() && order.appliedRewards.isNotEmpty()) {
+        val nationalId = trustedOrder.nationalId?.filter(Char::isDigit).orEmpty()
+        if (nationalId.isNotEmpty() && trustedOrder.appliedRewards.isNotEmpty()) {
             loyaltyRewardsRepository.reserveRewards(
                 nationalId = nationalId,
                 referenceType = LoyaltyRewardReferenceType.ORDER,
-                referenceId = order.id,
-                appliedRewards = order.appliedRewards,
+                referenceId = trustedOrder.id,
+                appliedRewards = trustedOrder.appliedRewards,
             )
         }
+    }
+
+    private suspend fun buildTrustedOrder(order: Order): Order {
+        val uid = requireCurrentUid()
+        val cleanNationalId = order.nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() }
+            ?: error("No se encontró una cédula asociada a esta cuenta.")
+
+        val trustedItems = order.items.map { requestedItem ->
+            val menuRef = firestore
+                .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+                .document(requestedItem.menuItemId)
+
+            val menuDto = menuRef.get().awaitResult().toObject(MenuItemDto::class.java)
+                ?: error("No se encontró ${requestedItem.name}.")
+
+            val menuItem = menuDto.toDomain(menuRef.id)
+            require(menuItem.id.isNotBlank()) { "Producto inválido." }
+
+            OrderItem(
+                menuItemId = menuItem.id,
+                name = menuItem.name,
+                unitPrice = menuItem.finalPrice,
+                quantity = requestedItem.quantity.coerceAtLeast(1),
+                preparedQuantity = 0,
+                notes = requestedItem.notes?.trim()?.takeIf { it.isNotEmpty() },
+            )
+        }
+
+        val preview = loyaltyRewardsRepository.previewRestaurantRewards(
+            nationalId = cleanNationalId,
+            items = trustedItems,
+        )
+
+        return order
+            .copy(
+                clientId = uid,
+                nationalId = cleanNationalId,
+                clientName = order.clientName.trim(),
+                tableNumber = order.tableNumber.trim().ifBlank {
+                    if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
+                },
+                updatedAt = Date(),
+            )
+            .withTrustedPricing(
+                trustedItems = trustedItems,
+                appliedRewards = preview.appliedRewards,
+                discount = preview.totalDiscount,
+            )
     }
 
     private suspend fun submitFutureFoodReservation(order: Order) {
@@ -17207,15 +17323,17 @@ class OrdersRepository @Inject constructor(
                 )
             }
 
-            val orderRef = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            val orderRef =
+                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
             transaction.set(orderRef, OrderDto(order))
             null
         }.awaitResult()
     }
 
     override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
-        val cleanNationalId = nationalId.trim()
-        if (cleanNationalId.isEmpty()) {
+        val uid = auth.currentUser?.uid?.trim().orEmpty()
+
+        if (uid.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
@@ -17223,8 +17341,8 @@ class OrdersRepository @Inject constructor(
 
         val registration: ListenerRegistration = firestore
             .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .orderBy("createdAt")
+            .whereEqualTo("clientId", uid)
+            .orderBy("scheduledAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 when {
                     error != null -> close(error)
@@ -17232,7 +17350,13 @@ class OrdersRepository @Inject constructor(
                     else -> {
                         val orders = snapshot.documents.mapNotNull { doc ->
                             runCatching { doc.toObject(OrderDto::class.java)?.toDomain() }
-                                .onFailure { Log.e("AltosOrders", "Could not decode order ${doc.id}", it) }
+                                .onFailure {
+                                    Log.e(
+                                        "AltosOrders",
+                                        "Could not decode order ${doc.id}",
+                                        it
+                                    )
+                                }
                                 .getOrNull()
                         }.sortedWith(
                             compareByDescending<Order> { it.scheduledAt.time }
@@ -17244,6 +17368,13 @@ class OrdersRepository @Inject constructor(
             }
 
         awaitClose { registration.remove() }
+    }
+
+    private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
+
+    private fun requireCurrentUid(): String {
+        return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error("Debes iniciar sesión nuevamente para enviar el pedido.")
     }
 }
 
@@ -17418,6 +17549,7 @@ enum class OrderServiceMode(val rawValue: String, val title: String) {
 
 data class Order(
     val id: String,
+    val clientId: String? = null,
     val nationalId: String?,
     val clientName: String,
     val tableNumber: String,
@@ -17450,18 +17582,39 @@ data class Order(
 
     val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
 
+    fun withClientId(uid: String): Order = copy(clientId = uid.trim().takeIf { it.isNotEmpty() })
+
+    fun withTrustedPricing(
+        trustedItems: List<OrderItem>,
+        appliedRewards: List<AppliedReward>,
+        discount: Double,
+    ): Order {
+        val trustedSubtotal = trustedItems.sumOf { it.totalPrice }.roundMoney()
+        val safeDiscount = discount.coerceIn(0.0, trustedSubtotal).roundMoney()
+
+        return copy(
+            items = trustedItems,
+            subtotal = trustedSubtotal,
+            loyaltyDiscountAmount = safeDiscount,
+            appliedRewards = appliedRewards,
+            totalAmount = (trustedSubtotal - safeDiscount).coerceAtLeast(0.0).roundMoney(),
+        )
+    }
+
     fun withLoyalty(
         appliedRewards: List<AppliedReward>,
         discount: Double,
     ): Order {
-        val safeDiscount = discount.coerceIn(0.0, subtotal)
+        val safeDiscount = discount.coerceIn(0.0, subtotal).roundMoney()
         return copy(
             loyaltyDiscountAmount = safeDiscount,
             appliedRewards = appliedRewards,
-            totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0),
+            totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0).roundMoney(),
         )
     }
 }
+
+private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
 
 object OrderScheduleFormatter {
     const val LATER_THRESHOLD_MS: Long = 5 * 60 * 1000L
@@ -17474,7 +17627,11 @@ object OrderScheduleFormatter {
     fun displayText(date: Date): String = displayFormatter.format(date)
 
     fun mode(createdAt: Date, scheduledAt: Date): OrderServiceMode =
-        if (scheduledAt.time - createdAt.time > LATER_THRESHOLD_MS) OrderServiceMode.SCHEDULED else OrderServiceMode.NOW
+        if (scheduledAt.time - createdAt.time > LATER_THRESHOLD_MS) {
+            OrderServiceMode.SCHEDULED
+        } else {
+            OrderServiceMode.NOW
+        }
 
     fun sanitizedScheduledAt(value: Date, now: Date = Date()): Date =
         if (value.time < now.time - 120_000L) now else value
@@ -17517,7 +17674,7 @@ data class OrderDraft(
     val lastConfirmedRevision: Int? = null,
 ) {
     val totalItems: Int = items.sumOf { it.safeQuantity }
-    val subtotal: Double = items.sumOf { it.totalPrice }
+    val subtotal: Double = items.sumOf { it.totalPrice }.roundMoney()
     val totalAmount: Double = subtotal
     val isEmpty: Boolean = items.isEmpty()
     val hasValidClientName: Boolean = clientName.trim().isNotEmpty()
@@ -17535,6 +17692,7 @@ data class OrderDraft(
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
+        clientId: String? = null,
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
         val now = Date()
@@ -17554,7 +17712,8 @@ data class OrderDraft(
 
         return Order(
             id = orderId,
-            nationalId = nationalId?.trim()?.takeIf { it.isNotEmpty() },
+            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
+            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
             clientName = clientName.trim(),
             tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
             createdAt = now,
@@ -17573,6 +17732,8 @@ data class OrderDraft(
         )
     }
 }
+
+private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
 
 ```
 
@@ -17711,7 +17872,7 @@ private sealed interface RestaurantDestination {
 @Composable
 fun RestaurantScreen(
     sessionState: SessionState.Authenticated,
-    modifier: Modifier = Modifier,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
     menuViewModel: MenuViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel(),
     checkoutViewModel: CheckoutViewModel = hiltViewModel(),
@@ -17723,6 +17884,7 @@ fun RestaurantScreen(
     val ordersState by ordersViewModel.uiState.collectAsStateWithLifecycle()
 
     var destination: RestaurantDestination by remember { mutableStateOf(RestaurantDestination.Menu) }
+    var pendingAddItemId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
         menuViewModel.onAppear(sessionState.profile.nationalId)
@@ -17767,26 +17929,25 @@ fun RestaurantScreen(
                 MenuItemDetailScreen(
                     item = item,
                     rewardPresentationProvider = { menuItem, quantity ->
-                        menuViewModel.rewardPresentation(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.rewardPresentation(menuItem, quantity)
                     },
                     displayedPriceProvider = { menuItem, quantity ->
-                        menuViewModel.displayedPrice(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.displayedPrice(menuItem, quantity)
                     },
                     incrementalDiscountProvider = { menuItem, quantity ->
-                        menuViewModel.incrementalDiscount(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.incrementalDiscount(menuItem, quantity)
                     },
                     onAddToCart = { menuItem, quantity, notes ->
-                        cartViewModel.addItem(menuItem, quantity, notes)
-                        destination = RestaurantDestination.Cart
+                        if (pendingAddItemId != null) return@MenuItemDetailScreen
+
+                        pendingAddItemId = menuItem.id
+
+                        cartViewModel.addItem(menuItem, quantity, notes) { success ->
+                            pendingAddItemId = null
+                            if (success) {
+                                destination = RestaurantDestination.Cart
+                            }
+                        }
                     },
                     onBack = { destination = RestaurantDestination.Menu },
                     modifier = modifier,
@@ -21670,14 +21831,18 @@ private fun StatusPill(status: OrderStatus) {
 private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
     return when (state.grouping) {
         OrdersGroupingOption.DATE -> state.visibleOrders
-            .groupBy { OrdersViewModel.dateGroupTitle(it.createdAt) }
-            .map { it.key to it.value }
+            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map { it.key to it.value.sortedWith(
+                compareBy<Order> { order -> order.scheduledAt.time }
+                    .thenBy { order -> order.createdAt.time }
+            ) }
 
         OrdersGroupingOption.STATUS -> state.visibleOrders
-            .groupBy { it.status.title }
+            .groupBy { it.recalculatedAgendaStatus().title }
             .map { it.key to it.value }
     }
 }
+
 
 private fun Date.shortDateTime(): String {
     return SimpleDateFormat(
@@ -22588,30 +22753,36 @@ data class OrdersUiState(
     val orders: List<Order> = emptyList(),
     val isLoading: Boolean = false,
     val grouping: OrdersGroupingOption = OrdersGroupingOption.DATE,
-    val sortOption: OrdersSortOption = OrdersSortOption.NEWEST,
+    val sortOption: OrdersSortOption = OrdersSortOption.NEAREST_SERVICE,
     val statusFilter: OrderStatus? = null,
     val errorMessage: String? = null,
 ) {
     val visibleOrders: List<Order>
         get() {
-            val filtered = statusFilter?.let { status -> orders.filter { it.status == status } } ?: orders
+            val filtered = statusFilter?.let { status ->
+                orders.filter { it.recalculatedAgendaStatus() == status }
+            } ?: orders
+
             return when (sortOption) {
-                OrdersSortOption.NEWEST -> filtered.sortedByDescending { it.createdAt.time }
-                OrdersSortOption.OLDEST -> filtered.sortedBy { it.createdAt.time }
-                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedByDescending { it.totalAmount }
+                OrdersSortOption.NEAREST_SERVICE -> filtered.sortedWith(compareBy<Order> { it.scheduledAt.time }.thenBy { it.createdAt.time })
+
+                OrdersSortOption.FARTHEST_SERVICE -> filtered.sortedWith(compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time })
+
+                OrdersSortOption.NEWEST_CREATED -> filtered.sortedWith(compareByDescending<Order> { it.createdAt.time }.thenByDescending { it.scheduledAt.time })
+
+                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedWith(compareByDescending<Order> { it.totalAmount }.thenBy { it.scheduledAt.time })
             }
         }
 }
 
 enum class OrdersGroupingOption(val title: String) {
-    DATE("Fecha"),
-    STATUS("Estado"),
+    DATE("Fecha de servicio"), STATUS("Estado"),
 }
 
 enum class OrdersSortOption(val title: String) {
-    NEWEST("Recientes"),
-    OLDEST("Antiguos"),
-    HIGHEST_TOTAL("Mayor total"),
+    NEAREST_SERVICE("Más cercana"), FARTHEST_SERVICE("Más lejana"), NEWEST_CREATED("Más reciente"), HIGHEST_TOTAL(
+        "Mayor total"
+    ),
 }
 
 ```
@@ -22775,7 +22946,7 @@ abstract class AuthRepositoryModule {
 
     @Binds
     abstract fun bindClientProfileRepository(
-        repository: FirestoreClientProfileRepository,
+        repository: ClientProfileRepository,
     ): ClientProfileRepositoriable
 }
 

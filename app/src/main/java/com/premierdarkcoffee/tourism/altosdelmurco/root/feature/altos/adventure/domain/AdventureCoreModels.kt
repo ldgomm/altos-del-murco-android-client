@@ -130,8 +130,9 @@ enum class AdventureBookingStatus(val rawValue: String, val title: String) {
         fun fromRaw(rawValue: String?): AdventureBookingStatus {
             val key = rawValue?.normalizedAdventureKey().orEmpty()
             return entries.firstOrNull {
-                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
-            } ?: CONFIRMED
+                it.rawValue.normalizedAdventureKey() == key ||
+                        it.name.normalizedAdventureKey() == key
+            } ?: PENDING
         }
     }
 }

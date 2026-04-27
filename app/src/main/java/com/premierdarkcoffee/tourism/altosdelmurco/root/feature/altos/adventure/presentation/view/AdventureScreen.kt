@@ -1,6 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
 
-import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,6 +38,8 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -52,8 +53,10 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -61,6 +64,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,6 +106,8 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalAppSectionThe
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
 import java.util.Calendar
+import java.util.Date
+import java.util.TimeZone
 
 private sealed interface AdventureMode {
     data object Catalog : AdventureMode
@@ -713,13 +719,17 @@ private fun AdventureBuilderContent(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdventureDateAndSlotsSection(
     viewModel: AdventureComboBuilderViewModel,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     val palette = LocalBrandPalette.current
+
+    var showDatePicker by rememberSaveable {
+        mutableStateOf(false)
+    }
 
     AdventureCard {
         AdventureSectionTitle(
@@ -729,25 +739,7 @@ private fun AdventureDateAndSlotsSection(
 
         BrandSecondaryButton(
             theme = AdventureTheme,
-            onClick = {
-                val calendar = Calendar.getInstance().apply {
-                    time = state.selectedDate
-                }
-
-                DatePickerDialog(
-                    context,
-                    { _, year, month, day ->
-                        val picked = Calendar.getInstance().apply {
-                            set(year, month, day, 0, 0, 0)
-                            set(Calendar.MILLISECOND, 0)
-                        }
-                        viewModel.setDate(picked.time)
-                    },
-                    calendar.get(Calendar.YEAR),
-                    calendar.get(Calendar.MONTH),
-                    calendar.get(Calendar.DAY_OF_MONTH),
-                ).show()
-            },
+            onClick = { showDatePicker = true },
         ) {
             Icon(
                 imageVector = Icons.Rounded.CalendarMonth,
@@ -765,8 +757,8 @@ private fun AdventureDateAndSlotsSection(
 
     AdventureCard {
         AdventureSectionTitle(
-            title = "Horarios disponibles",
-            subtitle = "Selecciona inicio o llegada preferida.",
+            title = "Horarios sugeridos",
+            subtitle = "Elige una hora preferida. Confirmaremos disponibilidad final por WhatsApp si hay cambios.",
         )
 
         when {
@@ -776,7 +768,7 @@ private fun AdventureDateAndSlotsSection(
 
             state.availableSlots.isEmpty() -> {
                 Text(
-                    text = "Agrega una actividad o comida, o prueba otra fecha.",
+                    text = "Agrega una actividad o comida para ver horarios sugeridos.",
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
@@ -802,6 +794,133 @@ private fun AdventureDateAndSlotsSection(
             }
         }
     }
+
+    if (showDatePicker) {
+        AdventureComposeDatePickerDialog(
+            selectedDate = state.selectedDate,
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { pickedDate ->
+                viewModel.setDate(pickedDate)
+                showDatePicker = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AdventureComposeDatePickerDialog(
+    selectedDate: Date,
+    onDismiss: () -> Unit,
+    onDateSelected: (Date) -> Unit,
+) {
+    val initialSelectedDateMillis = remember(selectedDate.time) {
+        selectedDate.toDatePickerUtcMillis()
+    }
+
+    val todayUtcMillis = remember {
+        Date().toDatePickerUtcMillis()
+    }
+
+    val currentYear = remember {
+        Calendar.getInstance().get(Calendar.YEAR)
+    }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis,
+        yearRange = currentYear..currentYear + 2,
+        selectableDates = object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean {
+                return utcTimeMillis >= todayUtcMillis
+            }
+        },
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val selectedMillis = datePickerState.selectedDateMillis
+
+                    if (selectedMillis != null) {
+                        onDateSelected(selectedMillis.toLocalDateFromDatePickerMillis())
+                    } else {
+                        onDismiss()
+                    }
+                },
+            ) {
+                Text("Aceptar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        },
+    ) {
+        DatePicker(
+            state = datePickerState,
+            title = {
+                Text(
+                    text = "Fecha de visita",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        top = 16.dp,
+                    ),
+                )
+            },
+            headline = {
+                Text(
+                    text = "Selecciona el día",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        bottom = 12.dp,
+                    ),
+                )
+            },
+        )
+    }
+}
+
+private fun Date.toDatePickerUtcMillis(): Long {
+    val localCalendar = Calendar.getInstance().apply {
+        time = this@toDatePickerUtcMillis
+    }
+
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(
+            localCalendar.get(Calendar.YEAR),
+            localCalendar.get(Calendar.MONTH),
+            localCalendar.get(Calendar.DAY_OF_MONTH),
+            0,
+            0,
+            0,
+        )
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+private fun Long.toLocalDateFromDatePickerMillis(): Date {
+    val utcCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        timeInMillis = this@toLocalDateFromDatePickerMillis
+    }
+
+    return Calendar.getInstance().apply {
+        clear()
+        set(
+            utcCalendar.get(Calendar.YEAR),
+            utcCalendar.get(Calendar.MONTH),
+            utcCalendar.get(Calendar.DAY_OF_MONTH),
+            0,
+            0,
+            0,
+        )
+        set(Calendar.MILLISECOND, 0)
+    }.time
 }
 
 @Composable
@@ -1260,7 +1379,10 @@ private fun AdventureSummarySection(
         if (slot != null) {
             AdventurePriceRow("Aventura", slot.adventureSubtotal)
             AdventurePriceRow("Comida", slot.foodSubtotal)
-            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+            AdventurePriceRow(
+                "Subtotal sin combo ni loyalty",
+                viewModel.subtotalBeforeComboAndLoyalty
+            )
 
             if (breakdown.activityDiscountAmount > 0) {
                 AdventurePriceRow(
@@ -1272,7 +1394,9 @@ private fun AdventureSummarySection(
 
             if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
                 AdventurePriceRow(
-                    label = "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    label = "Descuento combo${
+                        viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()
+                    }",
                     amount = viewModel.comboDiscountAmount,
                     negative = true,
                 )
@@ -1301,6 +1425,13 @@ private fun AdventureSummarySection(
                 )
             }
 
+            if (slot.nightPremium > 0.0) {
+                Text(
+                    text = "Recargo nocturno +${slot.nightPremium.priceText()}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+
             HorizontalDivider(color = palette.stroke)
 
             AdventurePriceRow(
@@ -1309,9 +1440,15 @@ private fun AdventureSummarySection(
                 bold = true,
             )
         } else {
-            AdventurePriceRow("Aventura estimada", breakdown.activitySubtotalAfterIndividualDiscounts)
+            AdventurePriceRow(
+                "Aventura estimada",
+                breakdown.activitySubtotalAfterIndividualDiscounts
+            )
             AdventurePriceRow("Comida estimada", breakdown.foodSubtotal)
-            AdventurePriceRow("Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty)
+            AdventurePriceRow(
+                "Subtotal sin combo ni loyalty",
+                viewModel.subtotalBeforeComboAndLoyalty
+            )
 
             if (breakdown.activityDiscountAmount > 0) {
                 AdventurePriceRow(
@@ -1323,7 +1460,9 @@ private fun AdventureSummarySection(
 
             if (viewModel.hasValidCombo && viewModel.comboDiscountAmount > 0) {
                 AdventurePriceRow(
-                    label = "Descuento combo${viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()}",
+                    label = "Descuento combo${
+                        viewModel.matchedPackageTitle?.let { " • $it" }.orEmpty()
+                    }",
                     amount = viewModel.comboDiscountAmount,
                     negative = true,
                 )

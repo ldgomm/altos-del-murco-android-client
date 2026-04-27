@@ -1,7 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart
 
-import android.app.DatePickerDialog
-import android.app.TimePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +14,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,8 +27,11 @@ import androidx.compose.material.icons.rounded.RestaurantMenu
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TableRestaurant
 import androidx.compose.material.icons.rounded.WarningAmber
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -41,14 +43,21 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -64,11 +73,13 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandPrimaryButton
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.appCardStyle
 import java.text.NumberFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -170,7 +181,13 @@ fun CheckoutScreen(
                     )
                 }
 
-                item { CheckoutItemsCard(theme, state) }
+                item {
+                    CheckoutModeExplanationCard(isScheduledForLater = state.isScheduledForLater)
+                }
+
+                item {
+                    CheckoutItemsCard(theme, state)
+                }
 
                 item {
                     OrderSummaryCard(
@@ -259,6 +276,7 @@ private fun TableCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleCard(
     theme: AppSectionTheme,
@@ -267,10 +285,11 @@ private fun ScheduleCard(
     onScheduledAtChanged: (Date) -> Unit,
     onScheduleNow: () -> Unit,
 ) {
-    val context = LocalContext.current
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
-    val calendar = remember(scheduledAt) { Calendar.getInstance().apply { time = scheduledAt } }
+
+    var showDatePicker by rememberSaveable { mutableStateOf(false) }
+    var showTimePicker by rememberSaveable { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -312,54 +331,35 @@ private fun ScheduleCard(
             OutlinedButton(
                 enabled = isScheduledForLater,
                 onClick = onScheduleNow,
-            ) { Text("Ahora") }
+            ) {
+                Text("Ahora")
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    DatePickerDialog(
-                        context,
-                        { _, year, month, dayOfMonth ->
-                            val next = Calendar.getInstance().apply {
-                                time = scheduledAt
-                                set(Calendar.YEAR, year)
-                                set(Calendar.MONTH, month)
-                                set(Calendar.DAY_OF_MONTH, dayOfMonth)
-                                set(Calendar.SECOND, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }.time
-                            onScheduledAtChanged(next)
-                        },
-                        calendar.get(Calendar.YEAR),
-                        calendar.get(Calendar.MONTH),
-                        calendar.get(Calendar.DAY_OF_MONTH),
-                    ).show()
-                },
-            ) { Text("Fecha") }
+                onClick = { showDatePicker = true },
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CalendarMonth,
+                    contentDescription = null,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Fecha")
+            }
 
             OutlinedButton(
                 modifier = Modifier.weight(1f),
-                onClick = {
-                    TimePickerDialog(
-                        context,
-                        { _, hourOfDay, minute ->
-                            val next = Calendar.getInstance().apply {
-                                time = scheduledAt
-                                set(Calendar.HOUR_OF_DAY, hourOfDay)
-                                set(Calendar.MINUTE, minute)
-                                set(Calendar.SECOND, 0)
-                                set(Calendar.MILLISECOND, 0)
-                            }.time
-                            onScheduledAtChanged(next)
-                        },
-                        calendar.get(Calendar.HOUR_OF_DAY),
-                        calendar.get(Calendar.MINUTE),
-                        false,
-                    ).show()
-                },
-            ) { Text("Hora") }
+                onClick = { showTimePicker = true },
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Schedule,
+                    contentDescription = null,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Hora")
+            }
         }
 
         Text(
@@ -368,6 +368,198 @@ private fun ScheduleCard(
             color = palette.textSecondary,
         )
     }
+
+    if (showDatePicker) {
+        ScheduleDatePickerDialog(
+            scheduledAt = scheduledAt,
+            onDismiss = { showDatePicker = false },
+            onDateSelected = { next ->
+                onScheduledAtChanged(next)
+                showDatePicker = false
+            },
+        )
+    }
+
+    if (showTimePicker) {
+        ScheduleTimePickerDialog(
+            scheduledAt = scheduledAt,
+            onDismiss = { showTimePicker = false },
+            onTimeSelected = { next ->
+                onScheduledAtChanged(next)
+                showTimePicker = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleDatePickerDialog(
+    scheduledAt: Date,
+    onDismiss: () -> Unit,
+    onDateSelected: (Date) -> Unit,
+) {
+    val initialSelectedDateMillis = remember(scheduledAt.time) {
+        scheduledAt.toDatePickerUtcMillis()
+    }
+
+    val currentYear = remember {
+        Calendar.getInstance().get(Calendar.YEAR)
+    }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis,
+        yearRange = currentYear..(currentYear + 2),
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val selectedMillis = datePickerState.selectedDateMillis
+
+                    if (selectedMillis != null) {
+                        onDateSelected(
+                            scheduledAt.withDateFromDatePickerMillis(selectedMillis)
+                        )
+                    } else {
+                        onDismiss()
+                    }
+                },
+            ) {
+                Text("Aceptar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        },
+    ) {
+        DatePicker(
+            state = datePickerState,
+            title = {
+                Text(
+                    text = "Fecha de preparación",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        top = 16.dp,
+                    ),
+                )
+            },
+            headline = {
+                Text(
+                    text = "Selecciona el día",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        bottom = 12.dp,
+                    ),
+                )
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleTimePickerDialog(
+    scheduledAt: Date,
+    onDismiss: () -> Unit,
+    onTimeSelected: (Date) -> Unit,
+) {
+    val calendar = remember(scheduledAt.time) {
+        Calendar.getInstance().apply { time = scheduledAt }
+    }
+
+    val timePickerState = rememberTimePickerState(
+        initialHour = calendar.get(Calendar.HOUR_OF_DAY),
+        initialMinute = calendar.get(Calendar.MINUTE),
+        is24Hour = false,
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Hora de preparación")
+        },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                TimePicker(state = timePickerState)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onTimeSelected(
+                        scheduledAt.withTime(
+                            hourOfDay = timePickerState.hour,
+                            minute = timePickerState.minute,
+                        )
+                    )
+                },
+            ) {
+                Text("Aceptar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        },
+    )
+}
+
+private fun Date.toDatePickerUtcMillis(): Long {
+    val localCalendar = Calendar.getInstance().apply {
+        time = this@toDatePickerUtcMillis
+    }
+
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(
+            localCalendar.get(Calendar.YEAR),
+            localCalendar.get(Calendar.MONTH),
+            localCalendar.get(Calendar.DAY_OF_MONTH),
+            0,
+            0,
+            0,
+        )
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+private fun Date.withDateFromDatePickerMillis(selectedMillis: Long): Date {
+    val utcCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        timeInMillis = selectedMillis
+    }
+
+    return Calendar.getInstance().apply {
+        time = this@withDateFromDatePickerMillis
+        set(Calendar.YEAR, utcCalendar.get(Calendar.YEAR))
+        set(Calendar.MONTH, utcCalendar.get(Calendar.MONTH))
+        set(Calendar.DAY_OF_MONTH, utcCalendar.get(Calendar.DAY_OF_MONTH))
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time
+}
+
+private fun Date.withTime(
+    hourOfDay: Int,
+    minute: Int,
+): Date {
+    return Calendar.getInstance().apply {
+        time = this@withTime
+        set(Calendar.HOUR_OF_DAY, hourOfDay)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time
 }
 
 @Composable
@@ -618,6 +810,39 @@ private fun CheckoutBottomBar(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun CheckoutModeExplanationCard(
+    isScheduledForLater: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val palette = LocalBrandPalette.current
+    val title = if (isScheduledForLater) "Reserva de comida" else "Pedido inmediato"
+    val body = if (isScheduledForLater) {
+        "Elegiremos o confirmaremos la mesa antes de tu visita. También confirmamos disponibilidad de platos antes de preparar."
+    } else {
+        "La mesa es obligatoria y el stock se confirma ahora para preparar tu pedido."
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(20.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(title, fontWeight = FontWeight.Bold, color = palette.textPrimary)
+        Text(body, style = MaterialTheme.typography.bodySmall, color = palette.textSecondary)
+        Text(
+            "Confirmamos precios, disponibilidad y premios actuales al enviar.",
+            style = MaterialTheme.typography.labelSmall,
+            color = palette.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 

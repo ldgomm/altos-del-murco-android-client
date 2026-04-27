@@ -1,6 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.view
 
-import android.app.DatePickerDialog
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +11,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -28,18 +29,27 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.Divider
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -51,8 +61,11 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CompleteProfileScreen(
     state: SessionState.NeedsProfileCompletion,
@@ -61,8 +74,13 @@ fun CompleteProfileScreen(
     viewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val dateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "EC"))
+    val dateFormatter = remember {
+        SimpleDateFormat("dd MMM yyyy", Locale("es", "EC"))
+    }
+
+    var showBirthdayPicker by rememberSaveable {
+        mutableStateOf(false)
+    }
 
     LaunchedEffect(
         state.user.uid,
@@ -100,7 +118,10 @@ fun CompleteProfileScreen(
                             .height(54.dp),
                     ) {
                         if (uiState.isSaving) {
-                            CircularProgressIndicator()
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.dp,
+                            )
                         } else {
                             Text(
                                 text = "Guardar y entrar",
@@ -185,25 +206,18 @@ fun CompleteProfileScreen(
                 }
 
                 LabeledField(icon = Icons.Rounded.Cake, title = "Fecha de nacimiento") {
-                    TextButton(
-                        onClick = {
-                            val current = Calendar.getInstance().apply { time = uiState.birthday }
-                            DatePickerDialog(
-                                context,
-                                { _, year, month, dayOfMonth ->
-                                    val picked = Calendar.getInstance().apply {
-                                        set(year, month, dayOfMonth, 0, 0, 0)
-                                        set(Calendar.MILLISECOND, 0)
-                                    }
-                                    viewModel.onBirthdayChanged(picked.time)
-                                },
-                                current.get(Calendar.YEAR),
-                                current.get(Calendar.MONTH),
-                                current.get(Calendar.DAY_OF_MONTH),
-                            ).show()
-                        },
+                    OutlinedButton(
+                        onClick = { showBirthdayPicker = true },
+                        modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Seleccionar fecha: ${dateFormatter.format(uiState.birthday)}")
+                        Icon(
+                            imageVector = Icons.Rounded.Cake,
+                            contentDescription = null,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Seleccionar fecha: ${dateFormatter.format(uiState.birthday)}",
+                        )
                     }
                 }
 
@@ -266,6 +280,124 @@ fun CompleteProfileScreen(
             Spacer(modifier = Modifier.height(80.dp))
         }
     }
+
+    if (showBirthdayPicker) {
+        ComposeBirthdayPickerDialog(
+            birthday = uiState.birthday,
+            onDismiss = { showBirthdayPicker = false },
+            onBirthdaySelected = { selectedDate ->
+                viewModel.onBirthdayChanged(selectedDate)
+                showBirthdayPicker = false
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ComposeBirthdayPickerDialog(
+    birthday: Date,
+    onDismiss: () -> Unit,
+    onBirthdaySelected: (Date) -> Unit,
+) {
+    val initialSelectedDateMillis = remember(birthday.time) {
+        birthday.toDatePickerUtcMillis()
+    }
+
+    val currentYear = remember {
+        Calendar.getInstance().get(Calendar.YEAR)
+    }
+
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialSelectedDateMillis,
+        yearRange = 1900..currentYear,
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val selectedMillis = datePickerState.selectedDateMillis
+
+                    if (selectedMillis != null) {
+                        onBirthdaySelected(selectedMillis.toLocalDateFromDatePickerMillis())
+                    } else {
+                        onDismiss()
+                    }
+                },
+            ) {
+                Text("Aceptar")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancelar")
+            }
+        },
+    ) {
+        DatePicker(
+            state = datePickerState,
+            title = {
+                Text(
+                    text = "Fecha de nacimiento",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        top = 16.dp,
+                    ),
+                )
+            },
+            headline = {
+                Text(
+                    text = "Selecciona tu fecha",
+                    modifier = Modifier.padding(
+                        start = 24.dp,
+                        end = 12.dp,
+                        bottom = 12.dp,
+                    ),
+                )
+            },
+        )
+    }
+}
+
+private fun Date.toDatePickerUtcMillis(): Long {
+    val localCalendar = Calendar.getInstance().apply {
+        time = this@toDatePickerUtcMillis
+    }
+
+    return Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(
+            localCalendar.get(Calendar.YEAR),
+            localCalendar.get(Calendar.MONTH),
+            localCalendar.get(Calendar.DAY_OF_MONTH),
+            0,
+            0,
+            0,
+        )
+        set(Calendar.MILLISECOND, 0)
+    }.timeInMillis
+}
+
+private fun Long.toLocalDateFromDatePickerMillis(): Date {
+    val utcCalendar = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        timeInMillis = this@toLocalDateFromDatePickerMillis
+    }
+
+    return Calendar.getInstance().apply {
+        clear()
+        set(
+            utcCalendar.get(Calendar.YEAR),
+            utcCalendar.get(Calendar.MONTH),
+            utcCalendar.get(Calendar.DAY_OF_MONTH),
+            0,
+            0,
+            0,
+        )
+        set(Calendar.MILLISECOND, 0)
+    }.time
 }
 
 @Composable
@@ -298,11 +430,23 @@ private fun InfoCard(
 ) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(modifier = Modifier.padding(18.dp)) {
-            Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
             Spacer(modifier = Modifier.height(10.dp))
-            Text(text = title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -311,7 +455,11 @@ private fun InfoCard(
 private fun FormCard(title: String, content: @Composable () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(modifier = Modifier.padding(18.dp)) {
-            Text(text = title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(modifier = Modifier.height(14.dp))
             content()
         }
@@ -327,8 +475,16 @@ private fun LabeledField(
     Column {
         Box(modifier = Modifier.fillMaxWidth()) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Icon(imageVector = icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
                 content()
             }
         }

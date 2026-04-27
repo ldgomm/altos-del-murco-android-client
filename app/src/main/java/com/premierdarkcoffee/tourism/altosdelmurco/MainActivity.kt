@@ -11,10 +11,12 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        FirebaseApp.initializeApp(this)
         super.onCreate(savedInstanceState)
+
         enableEdgeToEdge()
+
         setContent {
-            FirebaseApp.initializeApp(this)
             AltosApp()
         }
     }
