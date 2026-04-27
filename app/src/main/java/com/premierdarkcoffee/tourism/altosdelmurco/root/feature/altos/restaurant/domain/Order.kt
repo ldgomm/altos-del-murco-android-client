@@ -20,6 +20,7 @@ enum class OrderServiceMode(val rawValue: String, val title: String) {
 
 data class Order(
     val id: String,
+    val clientId: String? = null,
     val nationalId: String?,
     val clientName: String,
     val tableNumber: String,
@@ -52,18 +53,39 @@ data class Order(
 
     val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
 
+    fun withClientId(uid: String): Order = copy(clientId = uid.trim().takeIf { it.isNotEmpty() })
+
+    fun withTrustedPricing(
+        trustedItems: List<OrderItem>,
+        appliedRewards: List<AppliedReward>,
+        discount: Double,
+    ): Order {
+        val trustedSubtotal = trustedItems.sumOf { it.totalPrice }.roundMoney()
+        val safeDiscount = discount.coerceIn(0.0, trustedSubtotal).roundMoney()
+
+        return copy(
+            items = trustedItems,
+            subtotal = trustedSubtotal,
+            loyaltyDiscountAmount = safeDiscount,
+            appliedRewards = appliedRewards,
+            totalAmount = (trustedSubtotal - safeDiscount).coerceAtLeast(0.0).roundMoney(),
+        )
+    }
+
     fun withLoyalty(
         appliedRewards: List<AppliedReward>,
         discount: Double,
     ): Order {
-        val safeDiscount = discount.coerceIn(0.0, subtotal)
+        val safeDiscount = discount.coerceIn(0.0, subtotal).roundMoney()
         return copy(
             loyaltyDiscountAmount = safeDiscount,
             appliedRewards = appliedRewards,
-            totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0),
+            totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0).roundMoney(),
         )
     }
 }
+
+private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
 
 object OrderScheduleFormatter {
     const val LATER_THRESHOLD_MS: Long = 5 * 60 * 1000L
@@ -76,7 +98,11 @@ object OrderScheduleFormatter {
     fun displayText(date: Date): String = displayFormatter.format(date)
 
     fun mode(createdAt: Date, scheduledAt: Date): OrderServiceMode =
-        if (scheduledAt.time - createdAt.time > LATER_THRESHOLD_MS) OrderServiceMode.SCHEDULED else OrderServiceMode.NOW
+        if (scheduledAt.time - createdAt.time > LATER_THRESHOLD_MS) {
+            OrderServiceMode.SCHEDULED
+        } else {
+            OrderServiceMode.NOW
+        }
 
     fun sanitizedScheduledAt(value: Date, now: Date = Date()): Date =
         if (value.time < now.time - 120_000L) now else value

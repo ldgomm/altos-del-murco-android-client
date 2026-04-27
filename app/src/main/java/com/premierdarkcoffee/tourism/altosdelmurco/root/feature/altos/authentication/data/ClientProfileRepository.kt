@@ -15,7 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class FirestoreClientProfileRepository @Inject constructor(
+class ClientProfileRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
 ) : ClientProfileRepositoriable {
 
@@ -32,17 +32,10 @@ class FirestoreClientProfileRepository @Inject constructor(
             return null
         }
 
-        Log.d(TAG, "fetchProfile -> requesting clients/$cleanUid")
-
         val snapshot = collection.document(cleanUid).get().awaitResult()
 
-        Log.d(
-            TAG,
-            "fetchProfile -> snapshot exists=${snapshot.exists()}, id=${snapshot.id}, keys=${snapshot.data?.keys?.sorted()}"
-        )
-
         if (!snapshot.exists()) {
-            Log.d(TAG, "fetchProfile -> document does not exist for uid=$cleanUid")
+            Log.d(TAG, "fetchProfile -> no profile for uid=${cleanUid.safeTail()}")
             return null
         }
 
@@ -50,49 +43,35 @@ class FirestoreClientProfileRepository @Inject constructor(
 
         Log.d(
             TAG,
-            "fetchProfile -> mapped profile null=${profile == null}, " +
-                    "id=${profile?.id}, " +
-                    "email=${profile?.email}, " +
-                    "fullName='${profile?.fullName}', " +
-                    "nationalId='${profile?.nationalId}', " +
-                    "phone='${profile?.phoneNumber}', " +
-                    "address='${profile?.address}', " +
-                    "emergencyName='${profile?.emergencyContactName}', " +
-                    "emergencyPhone='${profile?.emergencyContactPhone}', " +
-                    "isProfileComplete=${profile?.isProfileComplete}, " +
-                    "isComplete=${profile?.isComplete}"
+            "fetchProfile -> mapped=${profile != null}, uid=${cleanUid.safeTail()}, " +
+                    "complete=${profile?.isProfileComplete == true}"
         )
 
         return profile
     }
 
     override suspend fun saveProfile(profile: ClientProfile) {
+        val cleanUid = profile.id.trim()
+        require(cleanUid.isNotEmpty()) { "Profile id is required." }
+
         Log.d(
             TAG,
-            "saveProfile -> writing clients/${profile.id.trim()} " +
-                    "email=${profile.email}, " +
-                    "fullName='${profile.fullName}', " +
-                    "nationalId='${profile.nationalId}', " +
-                    "phone='${profile.phoneNumber}', " +
-                    "address='${profile.address}', " +
-                    "emergencyName='${profile.emergencyContactName}', " +
-                    "emergencyPhone='${profile.emergencyContactPhone}', " +
-                    "isProfileComplete=${profile.isProfileComplete}, " +
-                    "isComplete=${profile.isComplete}"
+            "saveProfile -> uid=${cleanUid.safeTail()}, complete=${profile.isProfileComplete}"
         )
 
         collection
-            .document(profile.id.trim())
+            .document(cleanUid)
             .set(ClientProfileDocument(profile), SetOptions.merge())
             .awaitResult()
 
-        Log.d(TAG, "saveProfile -> write success clients/${profile.id.trim()}")
+        Log.d(TAG, "saveProfile -> success uid=${cleanUid.safeTail()}")
     }
 
     override suspend fun deleteProfile(uid: String) {
         val cleanUid = uid.trim()
         if (cleanUid.isEmpty()) return
         collection.document(cleanUid).delete().awaitResult()
+        Log.d(TAG, "deleteProfile -> uid=${cleanUid.safeTail()}")
     }
 
     private fun DocumentSnapshot.toClientProfileOrNull(): ClientProfile? {
@@ -102,21 +81,23 @@ class FirestoreClientProfileRepository @Inject constructor(
                 email = getString("email").orEmpty().trim(),
                 appleUserIdentifier = getString("appleUserIdentifier").orEmpty().trim(),
                 fullName = getString("fullName").orEmpty().trim(),
-                nationalId = getString("nationalId").orEmpty().trim(),
-                phoneNumber = getString("phoneNumber").orEmpty().trim(),
+                nationalId = getString("nationalId").orEmpty().filter(Char::isDigit),
+                phoneNumber = getString("phoneNumber").orEmpty().filter(Char::isDigit),
                 birthday = getDateValue("birthday") ?: Date(0),
                 address = getString("address").orEmpty().trim(),
                 emergencyContactName = getString("emergencyContactName").orEmpty().trim(),
-                emergencyContactPhone = getString("emergencyContactPhone").orEmpty().trim(),
+                emergencyContactPhone = getString("emergencyContactPhone").orEmpty()
+                    .filter(Char::isDigit),
                 isProfileComplete = getBoolean("profileComplete") == true,
                 createdAt = getDateValue("createdAt") ?: Date(),
                 updatedAt = getDateValue("updatedAt") ?: Date(),
                 profileCompletedAt = getDateValue("profileCompletedAt"),
                 profileImageURL = getString("profileImageURL")?.trim()?.takeIf { it.isNotEmpty() },
-                profileImagePath = getString("profileImagePath")?.trim()?.takeIf { it.isNotEmpty() },
+                profileImagePath = getString("profileImagePath")?.trim()
+                    ?.takeIf { it.isNotEmpty() },
             )
         }.onFailure { error ->
-            Log.e(TAG, "toClientProfileOrNull -> mapping failed for docId=$id", error)
+            Log.e(TAG, "toClientProfileOrNull -> mapping failed doc=${id.safeTail()}", error)
         }.getOrNull()
     }
 
@@ -127,4 +108,10 @@ class FirestoreClientProfileRepository @Inject constructor(
             else -> null
         }
     }
+}
+
+private fun String.safeTail(): String {
+    val clean = trim()
+    if (clean.isEmpty()) return "<empty>"
+    return "…${clean.takeLast(6)}"
 }

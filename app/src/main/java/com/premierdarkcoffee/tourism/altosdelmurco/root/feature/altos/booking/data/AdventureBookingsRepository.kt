@@ -1,5 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.data
 
+import com.google.firebase.Timestamp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.data.AdventureBookingDto
@@ -12,6 +14,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventurePlanner
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodDraft
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingCancellationPolicy
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingsRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardReferenceType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardsRepositoriable
@@ -28,6 +31,7 @@ import kotlin.math.max
 @Singleton
 class AdventureBookingsRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
+    private val auth: FirebaseAuth,
     private val catalogRepository: AdventureCatalogRepositoriable,
     private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : AdventureBookingsRepositoriable {
@@ -35,32 +39,25 @@ class AdventureBookingsRepository @Inject constructor(
     override fun observeBookings(
         nationalId: String,
     ): Flow<List<AdventureBooking>> = callbackFlow {
-        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val uid = auth.currentUser?.uid?.trim().orEmpty()
 
-        if (cleanNationalId.isEmpty()) {
+        if (uid.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
-        val registration = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .orderBy("startAt", Query.Direction.ASCENDING)
+        val registration = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("clientId", uid).orderBy("startAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
                     return@addSnapshotListener
                 }
 
-                val bookings = snapshot
-                    ?.documents
-                    .orEmpty()
-                    .mapNotNull { document ->
-                        document.toObject(AdventureBookingDto::class.java)
-                            ?.toDomain(document.id)
-                    }
-                    .sortedBy { it.startAt.time }
+                val bookings = snapshot?.documents.orEmpty().mapNotNull { document ->
+                    document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+                }.sortedBy { it.startAt.time }
 
                 trySend(bookings).isSuccess
             }
@@ -86,7 +83,10 @@ class AdventureBookingsRepository @Inject constructor(
     }
 
     override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
+        val uid = requireCurrentUid()
         val catalog = catalogRepository.fetchCatalog()
+        val cleanNationalId = request.nationalId.filter(Char::isDigit)
+        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
         val basePlan = AdventurePlanner.buildPlan(
             day = request.date,
@@ -98,7 +98,7 @@ class AdventureBookingsRepository @Inject constructor(
         ) ?: error("Invalid reservation configuration.")
 
         val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
-            nationalId = request.nationalId,
+            nationalId = cleanNationalId,
             activityItems = request.items,
             foodItems = request.foodReservation?.items.orEmpty(),
             catalog = catalog,
@@ -120,18 +120,17 @@ class AdventureBookingsRepository @Inject constructor(
         )
 
         val normalizedRequest = request.copy(
-            nationalId = request.nationalId.filter(Char::isDigit),
+            clientId = uid,
+            nationalId = cleanNationalId,
             packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
             loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
             appliedRewards = rewardPreview.appliedRewards,
         )
 
         val createdAt = Date()
-        val bookingRef = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .document()
+        val bookingRef = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document()
 
-        val dto = AdventureBookingDto.Companion.from(
+        val dto = AdventureBookingDto.from(
             request = normalizedRequest,
             plan = finalPlan,
             createdAt = createdAt,
@@ -151,15 +150,12 @@ class AdventureBookingsRepository @Inject constructor(
     }
 
     override suspend fun cancelBooking(id: String, nationalId: String) {
-        val cleanNationalId = nationalId.filter(Char::isDigit)
+        val uid = requireCurrentUid()
         val cleanId = id.trim()
-
         require(cleanId.isNotEmpty()) { "Booking id is required." }
-        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
-        val bookingRef = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .document(cleanId)
+        val bookingRef =
+            firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS).document(cleanId)
 
         val snapshot = bookingRef.get().awaitResult()
 
@@ -170,17 +166,33 @@ class AdventureBookingsRepository @Inject constructor(
         val dto = snapshot.toObject(AdventureBookingDto::class.java)
             ?: error("Could not read booking data.")
 
-        if (dto.nationalId.filter(Char::isDigit) != cleanNationalId) {
+        val booking = dto.toDomain(cleanId)
+
+        if (booking.clientId != uid) {
             error("You are not allowed to cancel this booking.")
         }
 
-        bookingRef
-            .update("status", AdventureBookingStatus.CANCELED.rawValue)
-            .awaitResult()
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking)?.let { reason ->
+            error(reason)
+        }
+
+        bookingRef.update(
+            mapOf(
+                "status" to AdventureBookingStatus.CANCELED.rawValue,
+                "updatedAt" to Timestamp.now(),
+                "canceledAt" to Timestamp.now(),
+                "canceledByClientId" to uid,
+            )
+        ).awaitResult()
 
         loyaltyRewardsRepository.releaseRewards(
             nationalId = dto.nationalId,
             referenceId = cleanId,
         )
+    }
+
+    private fun requireCurrentUid(): String {
+        return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }
+            ?: error("Debes iniciar sesión nuevamente para continuar.")
     }
 }

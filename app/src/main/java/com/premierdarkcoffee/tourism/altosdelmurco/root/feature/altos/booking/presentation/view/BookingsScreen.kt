@@ -1,6 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,7 +37,6 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.DoneAll
-import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Fastfood
 import androidx.compose.material.icons.rounded.FilterList
@@ -47,7 +45,6 @@ import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LocalDining
 import androidx.compose.material.icons.rounded.MoreVert
-import androidx.compose.material.icons.rounded.Payments
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonSearch
 import androidx.compose.material.icons.rounded.ReceiptLong
@@ -93,7 +90,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -632,7 +628,8 @@ private fun BookingsScreenContent(
                                 },
                                 upcomingCount = allReservations.count {
                                     !it.isTerminal &&
-                                            AdventureDateHelper.startOfDay(it.serviceDate).after(today)
+                                            AdventureDateHelper.startOfDay(it.serviceDate)
+                                                .after(today)
                                 },
                                 historyCount = allReservations.count {
                                     it.isTerminal || it.endDate.before(today)
@@ -1539,7 +1536,10 @@ private fun AdventureBookingPreview(
                 Icon(
                     imageVector = Icons.Rounded.LocalDining,
                     contentDescription = null,
-                    tint = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                    tint = AppTheme.palette(
+                        AppSectionTheme.Adventure,
+                        LocalBrandDarkTheme.current
+                    ).primary,
                     modifier = Modifier.size(18.dp),
                 )
 
@@ -2262,7 +2262,12 @@ private fun AdventureBlockCard(
                 modifier = Modifier
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary),
+                    .background(
+                        AppTheme.palette(
+                            AppSectionTheme.Adventure,
+                            LocalBrandDarkTheme.current
+                        ).primary
+                    ),
             )
 
             Box(
@@ -2300,7 +2305,10 @@ private fun AdventureBlockCard(
                 Text(
                     text = block.subtotal.agendaPriceText(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                    color = AppTheme.palette(
+                        AppSectionTheme.Adventure,
+                        LocalBrandDarkTheme.current
+                    ).primary,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -2354,7 +2362,10 @@ private fun FoodDetailCard(
             Text(
                 text = "Subtotal: ${item.subtotal.agendaPriceText()}",
                 style = MaterialTheme.typography.labelMedium,
-                color = AppTheme.palette(AppSectionTheme.Adventure, LocalBrandDarkTheme.current).primary,
+                color = AppTheme.palette(
+                    AppSectionTheme.Adventure,
+                    LocalBrandDarkTheme.current
+                ).primary,
                 fontWeight = FontWeight.Bold,
             )
 
@@ -2814,7 +2825,7 @@ private fun List<UnifiedReservation>.visibleTotal(): Double {
     return filterNot { it.isCanceled }.sumOf { it.total }
 }
 
-private fun Order.recalculatedAgendaStatus(): OrderStatus {
+fun Order.recalculatedAgendaStatus(): OrderStatus {
     return when {
         status == OrderStatus.CANCELED -> OrderStatus.CANCELED
         requiresReconfirmation -> OrderStatus.PENDING

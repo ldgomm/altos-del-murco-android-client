@@ -6,8 +6,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
@@ -35,7 +35,7 @@ private sealed interface RestaurantDestination {
 @Composable
 fun RestaurantScreen(
     sessionState: SessionState.Authenticated,
-    modifier: Modifier = Modifier,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
     menuViewModel: MenuViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel(),
     checkoutViewModel: CheckoutViewModel = hiltViewModel(),
@@ -47,6 +47,7 @@ fun RestaurantScreen(
     val ordersState by ordersViewModel.uiState.collectAsStateWithLifecycle()
 
     var destination: RestaurantDestination by remember { mutableStateOf(RestaurantDestination.Menu) }
+    var pendingAddItemId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
         menuViewModel.onAppear(sessionState.profile.nationalId)
@@ -91,26 +92,25 @@ fun RestaurantScreen(
                 MenuItemDetailScreen(
                     item = item,
                     rewardPresentationProvider = { menuItem, quantity ->
-                        menuViewModel.rewardPresentation(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.rewardPresentation(menuItem, quantity)
                     },
                     displayedPriceProvider = { menuItem, quantity ->
-                        menuViewModel.displayedPrice(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.displayedPrice(menuItem, quantity)
                     },
                     incrementalDiscountProvider = { menuItem, quantity ->
-                        menuViewModel.incrementalDiscount(
-                            menuItem,
-                            quantity
-                        )
+                        menuViewModel.incrementalDiscount(menuItem, quantity)
                     },
                     onAddToCart = { menuItem, quantity, notes ->
-                        cartViewModel.addItem(menuItem, quantity, notes)
-                        destination = RestaurantDestination.Cart
+                        if (pendingAddItemId != null) return@MenuItemDetailScreen
+
+                        pendingAddItemId = menuItem.id
+
+                        cartViewModel.addItem(menuItem, quantity, notes) { success ->
+                            pendingAddItemId = null
+                            if (success) {
+                                destination = RestaurantDestination.Cart
+                            }
+                        }
                     },
                     onBack = { destination = RestaurantDestination.Menu },
                     modifier = modifier,

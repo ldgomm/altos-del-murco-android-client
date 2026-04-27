@@ -18,7 +18,7 @@ data class OrderDraft(
     val lastConfirmedRevision: Int? = null,
 ) {
     val totalItems: Int = items.sumOf { it.safeQuantity }
-    val subtotal: Double = items.sumOf { it.totalPrice }
+    val subtotal: Double = items.sumOf { it.totalPrice }.roundMoney()
     val totalAmount: Double = subtotal
     val isEmpty: Boolean = items.isEmpty()
     val hasValidClientName: Boolean = clientName.trim().isNotEmpty()
@@ -36,6 +36,7 @@ data class OrderDraft(
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
+        clientId: String? = null,
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
         val now = Date()
@@ -55,7 +56,8 @@ data class OrderDraft(
 
         return Order(
             id = orderId,
-            nationalId = nationalId?.trim()?.takeIf { it.isNotEmpty() },
+            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
+            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
             clientName = clientName.trim(),
             tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
             createdAt = now,
@@ -74,3 +76,5 @@ data class OrderDraft(
         )
     }
 }
+
+private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0

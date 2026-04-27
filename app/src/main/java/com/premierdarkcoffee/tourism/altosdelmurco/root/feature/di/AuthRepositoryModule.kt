@@ -1,7 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di
 
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data.FirebaseAuthenticationRepository
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data.FirestoreClientProfileRepository
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.data.ClientProfileRepository
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.AuthenticationRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.ClientProfileRepositoriable
 import dagger.Binds
@@ -20,6 +20,6 @@ abstract class AuthRepositoryModule {
 
     @Binds
     abstract fun bindClientProfileRepository(
-        repository: FirestoreClientProfileRepository,
+        repository: ClientProfileRepository,
     ): ClientProfileRepositoriable
 }

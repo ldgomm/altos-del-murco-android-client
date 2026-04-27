@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view.recalculatedAgendaStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.ErrorCardInline
@@ -586,14 +587,18 @@ private fun StatusPill(status: OrderStatus) {
 private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
     return when (state.grouping) {
         OrdersGroupingOption.DATE -> state.visibleOrders
-            .groupBy { OrdersViewModel.dateGroupTitle(it.createdAt) }
-            .map { it.key to it.value }
+            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map { it.key to it.value.sortedWith(
+                compareBy<Order> { order -> order.scheduledAt.time }
+                    .thenBy { order -> order.createdAt.time }
+            ) }
 
         OrdersGroupingOption.STATUS -> state.visibleOrders
-            .groupBy { it.status.title }
+            .groupBy { it.recalculatedAgendaStatus().title }
             .map { it.key to it.value }
     }
 }
+
 
 private fun Date.shortDateTime(): String {
     return SimpleDateFormat(

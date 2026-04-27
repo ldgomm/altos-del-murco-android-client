@@ -8,9 +8,9 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import kotlin.collections.map
 
-
 data class OrderDto(
     val id: String = "",
+    val clientId: String? = null,
     val nationalId: String? = null,
     val clientName: String = "",
     val tableNumber: String = "",
@@ -30,6 +30,7 @@ data class OrderDto(
 ) {
     constructor(domain: Order) : this(
         id = domain.id,
+        clientId = domain.clientId,
         nationalId = domain.nationalId,
         clientName = domain.clientName,
         tableNumber = domain.tableNumber,
@@ -53,7 +54,8 @@ data class OrderDto(
         val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
         return Order(
             id = id,
-            nationalId = nationalId,
+            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
+            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
             clientName = clientName,
             tableNumber = tableNumber,
             createdAt = safeCreatedAt,

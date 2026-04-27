@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureBooking
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.CancelAdventureBookingUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ObserveAdventureBookingsUseCase
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.domain.AdventureBookingCancellationPolicy
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -68,16 +69,18 @@ class AdventureBookingsViewModel @Inject constructor(
     }
 
     fun setStatusFilter(filter: AdventureReservationStatusFilter) {
-        _uiState.update {
-            it.copy(selectedStatusFilter = filter)
-        }
+        _uiState.update { it.copy(selectedStatusFilter = filter) }
     }
 
     fun setSortOrder(sortOrder: AdventureReservationSortOrder) {
-        _uiState.update {
-            it.copy(sortOrder = sortOrder)
-        }
+        _uiState.update { it.copy(sortOrder = sortOrder) }
     }
+
+    fun canCancel(booking: AdventureBooking): Boolean =
+        AdventureBookingCancellationPolicy.canClientCancel(booking, _uiState.value.now)
+
+    fun cancellationBlockedReason(booking: AdventureBooking): String? =
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
 
     fun cancelBooking(booking: AdventureBooking) {
         val nationalId = _uiState.value.nationalId
@@ -88,6 +91,12 @@ class AdventureBookingsViewModel @Inject constructor(
             }
             return
         }
+
+        AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
+            ?.let { reason ->
+                _uiState.update { it.copy(errorMessage = reason) }
+                return
+            }
 
         viewModelScope.launch {
             _uiState.update {
