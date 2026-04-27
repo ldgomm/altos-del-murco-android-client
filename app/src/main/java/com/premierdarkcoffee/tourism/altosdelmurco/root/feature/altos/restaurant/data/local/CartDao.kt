@@ -40,4 +40,20 @@ interface CartDao {
         deleteItemsForDraft(draftId)
         deleteDraft(draftId)
     }
+
+    @Query(
+        """
+    UPDATE cart_drafts
+    SET nationalId = :nationalId,
+        clientName = :clientName,
+        updatedAtMillis = :updatedAtMillis
+    WHERE id = :draftId
+    """
+    )
+    suspend fun updateClientInfo(
+        draftId: String = CartDraftEntity.DEFAULT_ID,
+        nationalId: String?,
+        clientName: String,
+        updatedAtMillis: Long,
+    ): Int
 }

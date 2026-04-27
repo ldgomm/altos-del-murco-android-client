@@ -15,14 +15,14 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import java.util.Date
-import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Date
+import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.round
 
@@ -59,15 +59,20 @@ class CartViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        val current = _uiState.value.draft
         val cleanNationalId = profile.nationalId.filter { it.isDigit() }
         currentNationalId = cleanNationalId
+
+        val current = _uiState.value.draft
 
         val updated = current.copy(
             nationalId = cleanNationalId,
             clientName = profile.fullName,
             updatedAt = Date(),
         )
+
+        _uiState.update {
+            it.copy(draft = updated)
+        }
 
         save(updated)
         refreshRewardPreview(updated)
@@ -77,6 +82,7 @@ class CartViewModel @Inject constructor(
         menuItem: MenuItem,
         quantity: Int,
         notes: String?,
+        onResult: (Boolean) -> Unit = {},
     ) {
         val safeQuantity = quantity.coerceAtLeast(1)
 
@@ -84,20 +90,24 @@ class CartViewModel @Inject constructor(
             _uiState.update {
                 it.copy(errorMessage = "${menuItem.name} está agotado o no disponible.")
             }
+            onResult(false)
             return
         }
 
         val trimmedNotes = notes?.trim()?.takeIf { it.isNotEmpty() }
         val current = _uiState.value.draft
+
         val existingIndex = current.items.indexOfFirst {
-            it.menuItem.id == menuItem.id && it.notes.orEmpty() == trimmedNotes.orEmpty()
+            it.menuItem.id == menuItem.id &&
+                    it.notes.orEmpty() == trimmedNotes.orEmpty()
         }
+
+        val maxAllowed = menuItem.remainingQuantity.coerceAtLeast(1)
 
         val updatedItems = if (existingIndex >= 0) {
             current.items.mapIndexed { index, item ->
                 if (index == existingIndex) {
                     val desired = item.safeQuantity + safeQuantity
-                    val maxAllowed = menuItem.remainingQuantity.coerceAtLeast(1)
                     item.copy(
                         menuItem = menuItem,
                         quantity = desired.coerceAtMost(maxAllowed),
@@ -110,24 +120,26 @@ class CartViewModel @Inject constructor(
         } else {
             current.items + CartItem(
                 menuItem = menuItem,
-                quantity = safeQuantity.coerceAtMost(menuItem.remainingQuantity.coerceAtLeast(1)),
+                quantity = safeQuantity.coerceAtMost(maxAllowed),
                 notes = trimmedNotes,
             )
         }
 
-        save(
-            current.copy(
-                items = updatedItems,
-                updatedAt = Date(),
-            ),
+        val updatedDraft = current.copy(
+            items = updatedItems,
+            updatedAt = Date(),
         )
 
         _uiState.update {
             it.copy(
+                draft = updatedDraft,
                 errorMessage = null,
                 lastAddedItemName = menuItem.name,
             )
         }
+
+        save(updatedDraft, onResult)
+        refreshRewardPreview(updatedDraft)
     }
 
     fun increaseItem(cartItemId: String) {
@@ -208,23 +220,35 @@ class CartViewModel @Inject constructor(
 
     private fun mutateItems(transform: (List<CartItem>) -> List<CartItem>) {
         val current = _uiState.value.draft
+
         val updated = current.copy(
             items = transform(current.items),
             updatedAt = Date(),
         )
+
+        _uiState.update {
+            it.copy(draft = updated)
+        }
+
         save(updated)
+        refreshRewardPreview(updated)
     }
 
-    private fun save(draft: OrderDraft) {
+    private fun save(
+        draft: OrderDraft,
+        onResult: (Boolean) -> Unit = {},
+    ) {
         viewModelScope.launch {
             try {
                 saveCartDraftUseCase.execute(draft)
+                onResult(true)
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(errorMessage = error.message ?: "No se pudo guardar el carrito.")
                 }
+                onResult(false)
             }
         }
     }

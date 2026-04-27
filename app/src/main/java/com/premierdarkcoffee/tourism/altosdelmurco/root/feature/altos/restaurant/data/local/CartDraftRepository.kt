@@ -98,4 +98,26 @@ class CartDraftRepository @Inject constructor(
     override suspend fun clear() {
         cartDao.clearAll()
     }
+
+    suspend fun updateClientInfo(
+        nationalId: String?,
+        clientName: String,
+    ) {
+        val updatedRows = cartDao.updateClientInfo(
+            nationalId = nationalId,
+            clientName = clientName,
+            updatedAtMillis = Date().time,
+        )
+
+        if (updatedRows == 0) {
+            cartDao.replaceDraft(
+                draft = OrderDraft(
+                    nationalId = nationalId,
+                    clientName = clientName,
+                    updatedAt = Date(),
+                ).toEntity(),
+                items = emptyList(),
+            )
+        }
+    }
 }

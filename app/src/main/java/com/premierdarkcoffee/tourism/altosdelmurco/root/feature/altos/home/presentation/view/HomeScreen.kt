@@ -110,6 +110,7 @@ fun HomeScreen(
     onOpenExperiences: () -> Unit = {},
     onOpenExperiencePackage: (String) -> Unit = {},
     onOpenBookings: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
 ) {
     val feedState by viewModel.uiState.collectAsStateWithLifecycle()
     val menuState by menuViewModel.uiState.collectAsStateWithLifecycle()
@@ -182,9 +183,12 @@ fun HomeScreen(
                         menuViewModel.incrementalDiscount(item, quantity)
                     },
                     onAddToCart = { item, quantity, notes ->
-                        cartViewModel.addItem(item, quantity, notes)
-                        selectedMenuItemId = null
-                        onOpenRestaurant()
+                        cartViewModel.addItem(item, quantity, notes) { added ->
+                            if (added) {
+                                selectedMenuItemId = null
+                                onOpenRestaurant()
+                            }
+                        }
                     },
                     onBack = { selectedMenuItemId = null },
                     modifier = modifier,
@@ -252,6 +256,7 @@ fun HomeScreen(
                         onOpenRestaurant = onOpenRestaurant,
                         onOpenExperiences = onOpenExperiences,
                         onOpenBookings = onOpenBookings,
+                        onOpenProfile = onOpenProfile,
                         onOpenFeaturedDishes = { route = HomeRoute.FEATURED_DISHES },
                         onOpenPackages = { route = HomeRoute.EXPERIENCE_PACKAGES },
                         onOpenRewards = { route = HomeRoute.REWARDS_CENTER },
@@ -338,6 +343,7 @@ private fun HomeMainContent(
     onOpenRestaurant: () -> Unit,
     onOpenExperiences: () -> Unit,
     onOpenBookings: () -> Unit,
+    onOpenProfile: () -> Unit,
     onOpenFeaturedDishes: () -> Unit,
     onOpenPackages: () -> Unit,
     onOpenRewards: () -> Unit,
@@ -369,6 +375,7 @@ private fun HomeMainContent(
                 onOpenPackages = onOpenPackages,
                 onOpenRewards = onOpenRewards,
                 onOpenBookings = onOpenBookings,
+                onOpenProfile = onOpenProfile,
             )
         }
 
@@ -494,6 +501,7 @@ private fun HomeQuickActions(
     onOpenPackages: () -> Unit,
     onOpenRewards: () -> Unit,
     onOpenBookings: () -> Unit,
+    onOpenProfile: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
