@@ -71,3 +71,5 @@ out/
 /keys.properties
 /app/release/app-release.aab
 /app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/constant/ClientId.kt
+export_swift_to_md.sh
+project_swift_files.md
