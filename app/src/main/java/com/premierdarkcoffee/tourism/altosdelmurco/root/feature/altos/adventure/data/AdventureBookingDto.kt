@@ -167,10 +167,9 @@ data class AdventureAppliedRewardDto(
 }
 
 data class AdventureBookingDto(
-    val clientId: String? = null,
+    val userId: String = "",
     val clientName: String = "",
     val whatsappNumber: String = "",
-    val nationalId: String = "",
     val startDayKey: String = "",
     val startAt: Timestamp = Timestamp.now(),
     val endAt: Timestamp = Timestamp.now(),
@@ -195,10 +194,9 @@ data class AdventureBookingDto(
 ) {
     fun toDomain(documentId: String): AdventureBooking = AdventureBooking(
         id = documentId,
-        clientId = clientId,
-        clientName = clientName,
+        userId = userId,
+        clientName = clientName.ifBlank { "Cliente" },
         whatsappNumber = whatsappNumber,
-        nationalId = nationalId,
         startDayKey = startDayKey,
         startAt = startAt.toDate(),
         endAt = endAt.toDate(),
@@ -229,10 +227,9 @@ data class AdventureBookingDto(
             createdAt: Date,
             status: AdventureBookingStatus = AdventureBookingStatus.PENDING,
         ): AdventureBookingDto = AdventureBookingDto(
-            clientId = request.clientId,
-            clientName = request.clientName,
-            whatsappNumber = request.whatsappNumber,
-            nationalId = request.nationalId,
+            userId = request.userId,
+            clientName = request.clientName.trim().ifBlank { "Cliente" },
+            whatsappNumber = request.whatsappNumber.trim(),
             startDayKey = AdventureDateHelper.dayKey(plan.startAt),
             startAt = Timestamp(plan.startAt),
             endAt = Timestamp(plan.endAt),

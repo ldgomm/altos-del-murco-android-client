@@ -17,7 +17,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Badge
 import androidx.compose.material.icons.rounded.Cake
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Email
@@ -180,17 +179,6 @@ fun CompleteProfileScreen(
                         singleLine = true,
                         label = { Text("Correo") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    )
-                }
-
-                LabeledField(icon = Icons.Rounded.Badge, title = "Cédula") {
-                    OutlinedTextField(
-                        value = uiState.nationalId,
-                        onValueChange = viewModel::onNationalIdChanged,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Cédula") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                 }
 

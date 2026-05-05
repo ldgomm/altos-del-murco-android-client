@@ -81,12 +81,14 @@ class ProfileViewModel @Inject constructor(
     }
 
     fun onEditFullNameChanged(value: String) = updateEdit { copy(fullName = value) }
-    fun onEditNationalIdChanged(value: String) = updateEdit { copy(nationalId = value) }
     fun onEditPhoneChanged(value: String) = updateEdit { copy(phoneNumber = value) }
     fun onEditBirthdayChanged(value: Date) = updateEdit { copy(birthday = value) }
     fun onEditAddressChanged(value: String) = updateEdit { copy(address = value) }
-    fun onEditEmergencyNameChanged(value: String) = updateEdit { copy(emergencyContactName = value) }
-    fun onEditEmergencyPhoneChanged(value: String) = updateEdit { copy(emergencyContactPhone = value) }
+    fun onEditEmergencyNameChanged(value: String) =
+        updateEdit { copy(emergencyContactName = value) }
+
+    fun onEditEmergencyPhoneChanged(value: String) =
+        updateEdit { copy(emergencyContactPhone = value) }
 
     fun saveEditedProfile() {
         val profile = _uiState.value.profile ?: return
@@ -121,7 +123,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isSavingProfile = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo actualizar el perfil."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo actualizar el perfil."
+                        ),
                     )
                 }
             }
@@ -158,7 +162,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isUploadingProfileImage = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo subir la foto."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo subir la foto."
+                        ),
                     )
                 }
             }
@@ -195,7 +201,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isUploadingProfileImage = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la foto."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo eliminar la foto."
+                        ),
                     )
                 }
             }
@@ -211,7 +219,11 @@ class ProfileViewModel @Inject constructor(
                 sessionRepositoriable.refresh()
             }.onFailure { error ->
                 _uiState.update {
-                    it.copy(message = ProfileMessage.Error(error.message ?: "No se pudo cerrar sesión."))
+                    it.copy(
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo cerrar sesión."
+                        )
+                    )
                 }
             }
 
@@ -242,7 +254,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isDeletingAccount = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la cuenta."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo eliminar la cuenta."
+                        ),
                     )
                 }
             }
@@ -269,10 +283,15 @@ class ProfileViewModel @Inject constructor(
     }
 
     private fun observeStats(profile: ClientProfile, forceRestart: Boolean = false) {
-        val nationalId = profile.nationalId.onlyDigits()
-        if (nationalId.isEmpty()) {
+        val userId = profile.userId.trim()
+        if (userId.isEmpty()) {
             statsJob?.cancel()
-            _uiState.update { it.copy(stats = ProfileStats.Companion.EMPTY, isLoadingStats = false) }
+            _uiState.update {
+                it.copy(
+                    stats = ProfileStats.Companion.EMPTY,
+                    isLoadingStats = false
+                )
+            }
             return
         }
 
@@ -282,12 +301,14 @@ class ProfileViewModel @Inject constructor(
         statsJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingStats = true) }
 
-            observeProfileStatsUseCase.execute(nationalId)
+            observeProfileStatsUseCase.execute(userId)
                 .catch { error ->
                     _uiState.update {
                         it.copy(
                             isLoadingStats = false,
-                            message = ProfileMessage.Error(error.message ?: "No se pudieron cargar tus estadísticas."),
+                            message = ProfileMessage.Error(
+                                error.message ?: "No se pudieron cargar tus estadísticas."
+                            ),
                         )
                     }
                 }

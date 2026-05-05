@@ -21,7 +21,6 @@ class DeveloperBypassSessionRepository @Inject constructor() : SessionRepositori
                         email = "developer@preview.local",
                         appleUserIdentifier = "",
                         fullName = "Developer Preview",
-                        nationalId = "0000000000",
                         phoneNumber = "0000000000",
                         birthday = Date(),
                         address = "Preview",

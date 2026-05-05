@@ -273,7 +273,7 @@ private sealed interface UnifiedReservation {
                 order.id,
                 order.clientName,
                 order.tableNumber,
-                order.nationalId.orEmpty(),
+                order.userId.orEmpty(),
                 order.serviceMode.title,
                 order.items.joinToString(" ") { "${it.name} ${it.notes.orEmpty()}" },
             ).joinToString(" ").lowercase(Locale.US)
@@ -301,7 +301,7 @@ private sealed interface UnifiedReservation {
                 booking.id,
                 booking.clientName,
                 booking.whatsappNumber,
-                booking.nationalId,
+                booking.userId,
                 booking.eventDisplayTitle,
                 booking.visitTypeTitle,
                 booking.items.joinToString(" ") { it.title },
@@ -971,7 +971,7 @@ private fun ControlsSection(
                 )
             },
             label = {
-                Text("Buscar cliente, cédula, plato o actividad")
+                Text("Buscar cliente, cuenta, plato o actividad")
             },
         )
 
@@ -1654,6 +1654,9 @@ private fun RestaurantOrderDetailContent(
         subtitle = "Resumen de servicio del pedido.",
     ) {
         DetailRow("Cliente", order.clientName)
+        if (order.isScheduledForLater) {
+            DetailRow("WhatsApp", order.displayWhatsApp)
+        }
         DetailRow("Mesa", order.tableNumber)
         DetailRow("Servicio", order.serviceMode.title)
         DetailRow("Programado", order.scheduledDateText)
@@ -1897,7 +1900,7 @@ private fun AdventureBookingDetailContent(
     ) {
         DetailRow("Nombre", booking.clientName)
         DetailRow("WhatsApp", booking.whatsappNumber)
-        DetailRow("Cédula", booking.nationalId)
+        DetailRow("Cuenta", booking.userId)
         DetailRow("Invitados", "${booking.guestCount}")
     }
 

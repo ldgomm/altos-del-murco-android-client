@@ -7,9 +7,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentica
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionRepositoriable
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.util.Calendar
-import java.util.Date
-import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,13 +16,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.Date
+import javax.inject.Inject
 
 data class CompleteProfileUiState(
     val user: AuthenticatedUser? = null,
     val existingProfile: ClientProfile? = null,
     val fullName: String = "",
     val email: String = "",
-    val nationalId: String = "",
     val phoneNumber: String = "",
     val birthday: Date = Calendar.getInstance()
         .apply {
@@ -41,14 +40,9 @@ data class CompleteProfileUiState(
 ) {
     val canSubmit: Boolean
         get() = fullName.trim().isNotEmpty() &&
-            email.trim().isNotEmpty() &&
-            email.trim().contains("@") &&
-            nationalId.onlyDigits().length >= 8 &&
-            phoneNumber.onlyDigits().length >= 8 &&
-            address.trim().isNotEmpty() &&
-            emergencyContactName.trim().isNotEmpty() &&
-            emergencyContactPhone.onlyDigits().length >= 8 &&
-            birthday <= Date()
+                email.trim().isNotEmpty() &&
+                email.trim().contains("@") &&
+                birthday <= Date()
 }
 
 @HiltViewModel
@@ -87,7 +81,6 @@ class CompleteProfileViewModel @Inject constructor(
             existingProfile = existingProfile,
             fullName = existingProfile?.fullName ?: user.displayName,
             email = existingProfile?.email ?: user.email,
-            nationalId = existingProfile?.nationalId.orEmpty(),
             phoneNumber = existingProfile?.phoneNumber.orEmpty(),
             birthday = existingProfile?.birthday ?: defaultBirthday,
             address = existingProfile?.address.orEmpty(),
@@ -100,12 +93,13 @@ class CompleteProfileViewModel @Inject constructor(
 
     fun onFullNameChanged(value: String) = update { copy(fullName = value) }
     fun onEmailChanged(value: String) = update { copy(email = value) }
-    fun onNationalIdChanged(value: String) = update { copy(nationalId = value) }
     fun onPhoneNumberChanged(value: String) = update { copy(phoneNumber = value) }
     fun onBirthdayChanged(value: Date) = update { copy(birthday = value) }
     fun onAddressChanged(value: String) = update { copy(address = value) }
     fun onEmergencyContactNameChanged(value: String) = update { copy(emergencyContactName = value) }
-    fun onEmergencyContactPhoneChanged(value: String) = update { copy(emergencyContactPhone = value) }
+    fun onEmergencyContactPhoneChanged(value: String) =
+        update { copy(emergencyContactPhone = value) }
+
     fun clearError() = update { copy(errorMessage = null) }
 
     fun saveProfile() {
@@ -127,12 +121,11 @@ class CompleteProfileViewModel @Inject constructor(
                 email = snapshot.email.trim(),
                 appleUserIdentifier = user.appleUserIdentifier,
                 fullName = snapshot.fullName.trim(),
-                nationalId = snapshot.nationalId.onlyDigits(),
-                phoneNumber = snapshot.phoneNumber.onlyDigits(),
+                phoneNumber = snapshot.phoneNumber.trim(),
                 birthday = snapshot.birthday,
                 address = snapshot.address.trim(),
                 emergencyContactName = snapshot.emergencyContactName.trim(),
-                emergencyContactPhone = snapshot.emergencyContactPhone.onlyDigits(),
+                emergencyContactPhone = snapshot.emergencyContactPhone.trim(),
                 isProfileComplete = true,
                 createdAt = existingProfile?.createdAt ?: now,
                 updatedAt = now,
@@ -172,4 +165,3 @@ class CompleteProfileViewModel @Inject constructor(
     }
 }
 
-private fun String.onlyDigits(): String = filter(Char::isDigit)

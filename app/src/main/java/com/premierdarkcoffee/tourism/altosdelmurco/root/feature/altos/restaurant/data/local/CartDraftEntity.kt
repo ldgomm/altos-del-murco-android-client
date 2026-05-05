@@ -6,8 +6,9 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "cart_drafts")
 data class CartDraftEntity(
     @PrimaryKey val id: String = DEFAULT_ID,
-    val nationalId: String?,
+    val userId: String,
     val clientName: String,
+    val whatsappNumber: String,
     val tableNumber: String,
     val scheduledAtMillis: Long,
     val revision: Int?,

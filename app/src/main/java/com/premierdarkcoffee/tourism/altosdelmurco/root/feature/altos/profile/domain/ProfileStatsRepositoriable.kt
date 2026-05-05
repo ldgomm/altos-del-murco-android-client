@@ -3,6 +3,6 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 import kotlinx.coroutines.flow.Flow
 
 interface ProfileStatsRepositoriable {
-    suspend fun loadStats(nationalId: String): ProfileStats
-    fun observeStats(nationalId: String): Flow<ProfileStats>
+    suspend fun loadStats(userId: String): ProfileStats
+    fun observeStats(userId: String): Flow<ProfileStats>
 }

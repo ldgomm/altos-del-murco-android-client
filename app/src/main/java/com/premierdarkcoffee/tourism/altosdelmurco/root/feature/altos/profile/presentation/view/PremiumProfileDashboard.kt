@@ -84,13 +84,33 @@ fun PremiumProfileDashboard(
         LoyaltyProgressCard(stats = stats)
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PremiumMetricTile("Pedidos", stats.completedOrders.toString(), Icons.Rounded.ReceiptLong, Modifier.weight(1f))
-            PremiumMetricTile("Reservas", stats.completedBookings.toString(), Icons.Rounded.CalendarMonth, Modifier.weight(1f))
+            PremiumMetricTile(
+                "Pedidos",
+                stats.completedOrders.toString(),
+                Icons.Rounded.ReceiptLong,
+                Modifier.weight(1f)
+            )
+            PremiumMetricTile(
+                "Reservas",
+                stats.completedBookings.toString(),
+                Icons.Rounded.CalendarMonth,
+                Modifier.weight(1f)
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PremiumMetricTile("Restaurante", stats.restaurantSpent.premiumMoney(), Icons.Rounded.LocalDining, Modifier.weight(1f))
-            PremiumMetricTile("Experiencias", stats.adventureSpent.premiumMoney(), Icons.Rounded.Star, Modifier.weight(1f))
+            PremiumMetricTile(
+                "Restaurante",
+                stats.restaurantSpent.premiumMoney(),
+                Icons.Rounded.LocalDining,
+                Modifier.weight(1f)
+            )
+            PremiumMetricTile(
+                "Experiencias",
+                stats.adventureSpent.premiumMoney(),
+                Icons.Rounded.Star,
+                Modifier.weight(1f)
+            )
         }
 
         PremiumSectionHeader(
@@ -103,19 +123,30 @@ fun PremiumProfileDashboard(
         if (rewards.isEmpty()) {
             PremiumCard {
                 Text("No tienes premios activos en este momento.", fontWeight = FontWeight.Bold)
-                Text("Sigue acumulando visitas y consumo para desbloquear nuevos beneficios.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Sigue acumulando visitas y consumo para desbloquear nuevos beneficios.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         } else {
             rewards.forEach { template ->
                 PremiumCard {
-                    Text(template.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        template.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(
                         text = template.subtitle.ifBlank { template.displaySummary },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text("Disponible para ${template.scope.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Disponible para ${template.scope.title}",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -149,7 +180,10 @@ private fun ProfileIdentityCard(
     onEditProfile: () -> Unit,
 ) {
     PremiumCard(emphasized = true) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
                     .size(74.dp)
@@ -164,10 +198,20 @@ private fun ProfileIdentityCard(
                     modifier = Modifier.size(40.dp),
                 )
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(profile.fullName.ifBlank { "Cliente Altos" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                Text("Cédula ${profile.nationalId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Nivel ${stats.level.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Column(
+                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    profile.fullName.ifBlank { "Cliente Altos" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text("Cuenta ${profile.userId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Nivel ${stats.level.title}",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
             }
             Button(onClick = onEditProfile) {
                 Icon(Icons.Rounded.Edit, contentDescription = null)
@@ -176,8 +220,14 @@ private fun ProfileIdentityCard(
             }
         }
         Divider()
-        Text(profile.phoneNumber.ifBlank { "Sin teléfono registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(profile.email.ifBlank { "Sin email registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            profile.phoneNumber.ifBlank { "Sin teléfono registrado" },
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            profile.email.ifBlank { "Sin email registrado" },
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -187,22 +237,45 @@ private fun LoyaltyProgressCard(stats: ProfileStats) {
     val progress = LoyaltyLevel.progress(stats.totalSpent).toFloat().coerceIn(0f, 1f)
 
     PremiumCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             PremiumIconBubble(Icons.Rounded.EmojiEvents, selected = true)
             Column(modifier = Modifier.weight(1f)) {
-                Text("Murco Loyalty", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Nivel ${stats.level.title} • ${stats.points} puntos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Murco Loyalty",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    "Nivel ${stats.level.title} • ${stats.points} puntos",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text(stats.totalSpent.premiumMoney(), fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Text(
+                stats.totalSpent.premiumMoney(),
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
         Text(
-            text = nextLevel?.let { "Siguiente meta: ${it.title} (${it.spendRangeText})" } ?: "Ya estás en el nivel máximo.",
+            text = nextLevel?.let { "Siguiente meta: ${it.title} (${it.spendRangeText})" }
+                ?: "Ya estás en el nivel máximo.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         stats.level.benefits.forEach { benefit ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    Icons.Rounded.Star,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
                 Text(benefit, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

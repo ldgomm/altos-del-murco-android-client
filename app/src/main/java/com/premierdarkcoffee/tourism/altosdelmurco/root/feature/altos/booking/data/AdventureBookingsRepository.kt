@@ -37,18 +37,20 @@ class AdventureBookingsRepository @Inject constructor(
 ) : AdventureBookingsRepositoriable {
 
     override fun observeBookings(
-        nationalId: String,
+        userId: String,
     ): Flow<List<AdventureBooking>> = callbackFlow {
         val uid = auth.currentUser?.uid?.trim().orEmpty()
+        val trustedUserId = uid.ifBlank { userId.trim() }
 
-        if (uid.isEmpty()) {
+        if (trustedUserId.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
         val registration = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("clientId", uid).orderBy("startAt", Query.Direction.ASCENDING)
+            .whereEqualTo("userId", trustedUserId)
+            .orderBy("startAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
@@ -85,8 +87,6 @@ class AdventureBookingsRepository @Inject constructor(
     override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
         val uid = requireCurrentUid()
         val catalog = catalogRepository.fetchCatalog()
-        val cleanNationalId = request.nationalId.filter(Char::isDigit)
-        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
         val basePlan = AdventurePlanner.buildPlan(
             day = request.date,
@@ -98,7 +98,7 @@ class AdventureBookingsRepository @Inject constructor(
         ) ?: error("Invalid reservation configuration.")
 
         val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
-            nationalId = cleanNationalId,
+            userId = uid,
             activityItems = request.items,
             foodItems = request.foodReservation?.items.orEmpty(),
             catalog = catalog,
@@ -120,8 +120,8 @@ class AdventureBookingsRepository @Inject constructor(
         )
 
         val normalizedRequest = request.copy(
-            clientId = uid,
-            nationalId = cleanNationalId,
+            userId = uid,
+            whatsappNumber = normalizedOptionalEcuadorWhatsApp(request.whatsappNumber),
             packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
             loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
             appliedRewards = rewardPreview.appliedRewards,
@@ -140,7 +140,7 @@ class AdventureBookingsRepository @Inject constructor(
         bookingRef.set(dto).awaitResult()
 
         loyaltyRewardsRepository.reserveRewards(
-            nationalId = normalizedRequest.nationalId,
+            userId = normalizedRequest.userId,
             referenceType = LoyaltyRewardReferenceType.BOOKING,
             referenceId = bookingRef.id,
             appliedRewards = normalizedRequest.appliedRewards,
@@ -149,7 +149,7 @@ class AdventureBookingsRepository @Inject constructor(
         return dto.toDomain(bookingRef.id)
     }
 
-    override suspend fun cancelBooking(id: String, nationalId: String) {
+    override suspend fun cancelBooking(id: String) {
         val uid = requireCurrentUid()
         val cleanId = id.trim()
         require(cleanId.isNotEmpty()) { "Booking id is required." }
@@ -168,7 +168,7 @@ class AdventureBookingsRepository @Inject constructor(
 
         val booking = dto.toDomain(cleanId)
 
-        if (booking.clientId != uid) {
+        if (booking.userId != uid) {
             error("You are not allowed to cancel this booking.")
         }
 
@@ -181,14 +181,26 @@ class AdventureBookingsRepository @Inject constructor(
                 "status" to AdventureBookingStatus.CANCELED.rawValue,
                 "updatedAt" to Timestamp.now(),
                 "canceledAt" to Timestamp.now(),
-                "canceledByClientId" to uid,
+                "canceledByUserId" to uid,
             )
         ).awaitResult()
 
         loyaltyRewardsRepository.releaseRewards(
-            nationalId = dto.nationalId,
+            userId = uid,
             referenceId = cleanId,
         )
+    }
+
+    private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
+        val digits = rawValue.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+
+        return when {
+            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
+            digits.length == 12 && digits.startsWith("5939") -> digits
+            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+            else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
+        }
     }
 
     private fun requireCurrentUid(): String {

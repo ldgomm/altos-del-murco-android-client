@@ -8,38 +8,38 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
 interface LoyaltyRewardsRepositoriable {
-    suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot
+    suspend fun loadWalletSnapshot(userId: String): RewardWalletSnapshot
 
-    fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> = flow {
-        emit(loadWalletSnapshot(nationalId))
+    fun observeWalletSnapshot(userId: String): Flow<RewardWalletSnapshot> = flow {
+        emit(loadWalletSnapshot(userId))
     }
 
     suspend fun previewRestaurantRewards(
-        nationalId: String,
+        userId: String,
         items: List<OrderItem>,
     ): RewardComputationResult
 
     suspend fun previewAdventureRewards(
-        nationalId: String,
+        userId: String,
         activityItems: List<AdventureReservationItemDraft>,
         foodItems: List<ReservationFoodItemDraft>,
         catalog: AdventureCatalogSnapshot,
     ): RewardComputationResult
 
     suspend fun reserveRewards(
-        nationalId: String,
+        userId: String,
         referenceType: LoyaltyRewardReferenceType,
         referenceId: String,
         appliedRewards: List<AppliedReward>,
     )
 
     suspend fun consumeRewards(
-        nationalId: String,
+        userId: String,
         referenceId: String,
     )
 
     suspend fun releaseRewards(
-        nationalId: String,
+        userId: String,
         referenceId: String,
     )
 }

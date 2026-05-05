@@ -73,7 +73,7 @@ data class AdventureBookingsDateGroup(
 }
 
 data class AdventureBookingsUiState(
-    val nationalId: String = "",
+    val userId: String = "",
     val allBookings: List<AdventureBooking> = emptyList(),
     val selectedTimelineFilter: AdventureReservationTimelineFilter = AdventureReservationTimelineFilter.ALL,
     val selectedStatusFilter: AdventureReservationStatusFilter = AdventureReservationStatusFilter.ALL,

@@ -37,14 +37,14 @@ class CartViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CartUiState())
     val uiState: StateFlow<CartUiState> = _uiState.asStateFlow()
 
-    private var currentNationalId: String = ""
+    private var currentUserId: String = ""
     private var rewardPreviewJob: Job? = null
 
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
-                val draftNationalId = draft.nationalId?.filter(Char::isDigit).orEmpty()
-                if (draftNationalId.isNotEmpty()) currentNationalId = draftNationalId
+                val draftUserId = draft.userId.trim()
+                if (draftUserId.isNotEmpty()) currentUserId = draftUserId
 
                 _uiState.update {
                     it.copy(
@@ -59,14 +59,15 @@ class CartViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter { it.isDigit() }
-        currentNationalId = cleanNationalId
+        val cleanUserId = profile.userId
+        currentUserId = cleanUserId
 
         val current = _uiState.value.draft
 
         val updated = current.copy(
-            nationalId = cleanNationalId,
+            userId = cleanUserId,
             clientName = profile.fullName,
+            whatsappNumber = current.whatsappNumber.ifBlank { profile.phoneNumber },
             updatedAt = Date(),
         )
 
@@ -98,8 +99,7 @@ class CartViewModel @Inject constructor(
         val current = _uiState.value.draft
 
         val existingIndex = current.items.indexOfFirst {
-            it.menuItem.id == menuItem.id &&
-                    it.notes.orEmpty() == trimmedNotes.orEmpty()
+            it.menuItem.id == menuItem.id && it.notes.orEmpty() == trimmedNotes.orEmpty()
         }
 
         val maxAllowed = menuItem.remainingQuantity.coerceAtLeast(1)
@@ -147,8 +147,11 @@ class CartViewModel @Inject constructor(
             items.map { item ->
                 if (item.id == cartItemId) {
                     item.copy(
-                        quantity = (item.safeQuantity + 1)
-                            .coerceAtMost(item.menuItem.remainingQuantity.coerceAtLeast(1)),
+                        quantity = (item.safeQuantity + 1).coerceAtMost(
+                                item.menuItem.remainingQuantity.coerceAtLeast(
+                                    1
+                                )
+                            ),
                     )
                 } else {
                     item
@@ -203,7 +206,7 @@ class CartViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(currentNationalId),
+                            RewardWalletSnapshot.empty(currentUserId),
                         ),
                         isLoadingRewards = false,
                     )
@@ -256,17 +259,14 @@ class CartViewModel @Inject constructor(
     private fun refreshRewardPreview(draft: OrderDraft) {
         rewardPreviewJob?.cancel()
 
-        val cleanNationalId = draft.nationalId
-            ?.filter(Char::isDigit)
-            ?.takeIf { it.isNotEmpty() }
-            ?: currentNationalId
+        val cleanUserId = draft.userId.trim().ifEmpty { currentUserId }
 
-        if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
+        if (cleanUserId.isEmpty() || draft.items.isEmpty()) {
             _uiState.update {
                 it.copy(
                     isLoadingRewards = false,
                     rewardPreview = RewardComputationResult.empty(
-                        RewardWalletSnapshot.empty(cleanNationalId),
+                        RewardWalletSnapshot.empty(cleanUserId),
                     ),
                 )
             }
@@ -283,7 +283,7 @@ class CartViewModel @Inject constructor(
 
             try {
                 val preview = buildRewardPreview(
-                    nationalId = cleanNationalId,
+                    userId = cleanUserId,
                     draft = draft,
                 )
 
@@ -300,7 +300,7 @@ class CartViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(cleanNationalId),
+                            RewardWalletSnapshot.empty(cleanUserId),
                         ),
                         isLoadingRewards = false,
                         errorMessage = error.message ?: "No se pudieron calcular beneficios.",
@@ -311,7 +311,7 @@ class CartViewModel @Inject constructor(
     }
 
     private suspend fun buildRewardPreview(
-        nationalId: String,
+        userId: String,
         draft: OrderDraft,
     ): RewardComputationResult {
         val previewItems = draft.items.map {
@@ -325,11 +325,10 @@ class CartViewModel @Inject constructor(
         }
 
         return loyaltyRewardsRepository.previewRestaurantRewards(
-            nationalId = nationalId,
+            userId = userId,
             items = previewItems,
         )
     }
 }
 
 fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
-

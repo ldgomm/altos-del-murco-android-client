@@ -6,13 +6,13 @@ import javax.inject.Inject
 class LoadProfileStatsUseCase @Inject constructor(
     private val repository: ProfileStatsRepositoriable,
 ) {
-    suspend fun execute(nationalId: String): ProfileStats = repository.loadStats(nationalId)
+    suspend fun execute(userId: String): ProfileStats = repository.loadStats(userId)
 }
 
 class ObserveProfileStatsUseCase @Inject constructor(
     private val repository: ProfileStatsRepositoriable,
 ) {
-    fun execute(nationalId: String): Flow<ProfileStats> = repository.observeStats(nationalId)
+    fun execute(userId: String): Flow<ProfileStats> = repository.observeStats(userId)
 }
 
 class LoadProfileImageUseCase @Inject constructor(

@@ -672,9 +672,8 @@ private fun RewardCouponCard(
 
         val appliesToText = when {
             eligibleItems.isNotEmpty() -> {
-                "Aplica a: " +
-                        eligibleItems.take(3).joinToString { it.name } +
-                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
+                "Aplica a: " + eligibleItems.take(3)
+                    .joinToString { it.name } + if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
             }
 
             template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> {

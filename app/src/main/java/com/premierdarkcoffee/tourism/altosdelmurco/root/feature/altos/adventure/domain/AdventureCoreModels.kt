@@ -22,12 +22,18 @@ enum class AdventureActivityType(
     val legacySystemImage: String,
     val legacyDurationOptions: List<Int>,
 ) {
-    OFF_ROAD("offRoad", "Off-road 4x4", "car.fill", listOf(60, 120, 180)),
-    PAINTBALL("paintball", "Paintball", "shield.lefthalf.filled", listOf(30, 60, 90, 120)),
-    GO_KARTS("goKarts", "Go karts", "flag.checkered", listOf(30, 60, 90, 120)),
-    SHOOTING_RANGE("shootingRange", "Campo de tiro", "target", listOf(30, 60, 90, 120)),
-    CAMPING("camping", "Camping", "tent.fill", emptyList()),
-    EXTREME_SLIDE("extremeSlide", "Resbaladera extrema", "figure.fall", listOf(30));
+    OFF_ROAD("offRoad", "Off-road 4x4", "car.fill", listOf(60, 120, 180)), PAINTBALL(
+        "paintball", "Paintball", "shield.lefthalf.filled", listOf(30, 60, 90, 120)
+    ),
+    GO_KARTS(
+        "goKarts", "Go karts", "flag.checkered", listOf(30, 60, 90, 120)
+    ),
+    SHOOTING_RANGE(
+        "shootingRange", "Campo de tiro", "target", listOf(30, 60, 90, 120)
+    ),
+    CAMPING("camping", "Camping", "tent.fill", emptyList()), EXTREME_SLIDE(
+        "extremeSlide", "Resbaladera extrema", "figure.fall", listOf(30)
+    );
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureActivityType? {
@@ -95,20 +101,17 @@ enum class AdventureActivityType(
             }
 
         fun defaultDraft(
-            activity: AdventureActivityType,
-            catalog: AdventureCatalogSnapshot?
+            activity: AdventureActivityType, catalog: AdventureCatalogSnapshot?
         ): AdventureReservationItemDraft =
             catalog?.activity(activity)?.defaultDraft ?: defaultDraft(activity)
     }
 }
 
 enum class AdventureResourceType(val rawValue: String) {
-    OFF_ROAD_VEHICLES("offRoadVehicles"),
-    PAINTBALL_PEOPLE("paintballPeople"),
-    GO_KART_PEOPLE("goKartPeople"),
-    SHOOTING_PEOPLE("shootingPeople"),
-    CAMPING_PEOPLE("campingPeople"),
-    EXTREME_SLIDE_PEOPLE("extremeSlidePeople");
+    OFF_ROAD_VEHICLES("offRoadVehicles"), PAINTBALL_PEOPLE("paintballPeople"), GO_KART_PEOPLE("goKartPeople"), SHOOTING_PEOPLE(
+        "shootingPeople"
+    ),
+    CAMPING_PEOPLE("campingPeople"), EXTREME_SLIDE_PEOPLE("extremeSlidePeople");
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureResourceType? {
@@ -121,29 +124,29 @@ enum class AdventureResourceType(val rawValue: String) {
 }
 
 enum class AdventureBookingStatus(val rawValue: String, val title: String) {
-    PENDING("pending", "Pendiente"),
-    CONFIRMED("confirmed", "Confirmada"),
-    COMPLETED("completed", "Completada"),
+    PENDING("pending", "Pendiente"), CONFIRMED("confirmed", "Confirmada"), COMPLETED(
+        "completed", "Completada"
+    ),
     CANCELED("canceled", "Cancelada");
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureBookingStatus {
             val key = rawValue?.normalizedAdventureKey().orEmpty()
             return entries.firstOrNull {
-                it.rawValue.normalizedAdventureKey() == key ||
-                        it.name.normalizedAdventureKey() == key
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
             } ?: PENDING
         }
     }
 }
 
 enum class ReservationEventType(val rawValue: String, val title: String) {
-    REGULAR_VISIT("regularVisit", "Visita regular"),
-    BIRTHDAY("birthday", "Cumpleaños"),
-    ANNIVERSARY("anniversary", "Aniversario"),
-    CORPORATE("corporate", "Evento corporativo"),
-    FAMILY_GATHERING("familyGathering", "Reunión familiar"),
-    CUSTOM("custom", "Otro");
+    REGULAR_VISIT("regularVisit", "Visita regular"), BIRTHDAY(
+        "birthday", "Cumpleaños"
+    ),
+    ANNIVERSARY("anniversary", "Aniversario"), CORPORATE(
+        "corporate", "Evento corporativo"
+    ),
+    FAMILY_GATHERING("familyGathering", "Reunión familiar"), CUSTOM("custom", "Otro");
 
     companion object {
         fun fromRaw(rawValue: String?): ReservationEventType {
@@ -156,8 +159,9 @@ enum class ReservationEventType(val rawValue: String, val title: String) {
 }
 
 enum class ReservationServingMoment(val rawValue: String, val title: String) {
-    ON_ARRIVAL("onArrival", "Al llegar"),
-    AFTER_ACTIVITIES("afterActivities", "Después de actividades"),
+    ON_ARRIVAL("onArrival", "Al llegar"), AFTER_ACTIVITIES(
+        "afterActivities", "Después de actividades"
+    ),
     SPECIFIC_TIME("specificTime", "Hora específica");
 
     companion object {
@@ -184,9 +188,7 @@ data class AdventureReservationItemDraft(
     val summaryText: String
         get() = when (activity) {
             AdventureActivityType.OFF_ROAD -> "${durationMinutes / 60}h • $vehicleCount vehículo(s) • $offRoadRiderCount persona(s)"
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> "$durationMinutes min • $peopleCount persona(s)"
+            AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> "$durationMinutes min • $peopleCount persona(s)"
 
             AdventureActivityType.CAMPING -> "$nights noche(s) • $peopleCount persona(s)"
             AdventureActivityType.EXTREME_SLIDE -> "1 sesión • $peopleCount persona(s) • transporte incluido"
@@ -263,10 +265,10 @@ data class AdventureAvailabilitySlot(
 )
 
 data class AdventureBookingRequest(
-    val clientId: String?,
+    /** Firebase Auth UID. Canonical owner field for all reads/writes. */
+    val userId: String,
     val clientName: String,
     val whatsappNumber: String,
-    val nationalId: String,
     val date: Date,
     val selectedStartAt: Date,
     val guestCount: Int,
@@ -286,10 +288,9 @@ data class AdventureBookingRequest(
 
 data class AdventureBooking(
     val id: String,
-    val clientId: String?,
+    val userId: String,
     val clientName: String,
     val whatsappNumber: String,
-    val nationalId: String,
     val startDayKey: String,
     val startAt: Date,
     val endAt: Date,
@@ -358,14 +359,13 @@ object AdventureDateHelper {
     fun timeText(date: Date): String = timeFormatter.format(date)
     fun shortDateText(date: Date): String = shortDateFormatter.format(date)
 
-    fun dateOn(day: Date, hour: Int, minute: Int): Date =
-        Calendar.getInstance().apply {
-            time = day
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.time
+    fun dateOn(day: Date, hour: Int, minute: Int): Date = Calendar.getInstance().apply {
+        time = day
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time
 
     fun addMinutes(value: Int, date: Date): Date = Calendar.getInstance().apply {
         time = date
@@ -397,9 +397,7 @@ object AdventureDateHelper {
     fun isNightPremiumTime(startAt: Date, endAt: Date): Boolean {
         val startHour = Calendar.getInstance().apply { time = startAt }.get(Calendar.HOUR_OF_DAY)
         val endHour = Calendar.getInstance().apply { time = endAt }.get(Calendar.HOUR_OF_DAY)
-        return startHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR ||
-                endHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR ||
-                startHour < AdventureSchedule.DAYTIME_START_HOUR
+        return startHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR || endHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR || startHour < AdventureSchedule.DAYTIME_START_HOUR
     }
 
     fun combineDayAndTime(day: Date, time: Date): Date {
@@ -419,38 +417,32 @@ object AdventurePricingEngine {
         (config.basePrice - config.discountAmount).coerceAtLeast(0.0).adventureRoundMoney()
 
     fun lineBaseSubtotal(
-        item: AdventureReservationItemDraft,
-        config: AdventureActivityCatalogItem
-    ): Double =
-        when (item.activity) {
-            AdventureActivityType.OFF_ROAD -> config.basePrice * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> config.basePrice * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+        item: AdventureReservationItemDraft, config: AdventureActivityCatalogItem
+    ): Double = when (item.activity) {
+        AdventureActivityType.OFF_ROAD -> config.basePrice * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+        AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> config.basePrice * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
 
-            AdventureActivityType.CAMPING -> config.basePrice * item.peopleCount * item.nights.coerceAtLeast(
-                1
-            )
+        AdventureActivityType.CAMPING -> config.basePrice * item.peopleCount * item.nights.coerceAtLeast(
+            1
+        )
 
-            AdventureActivityType.EXTREME_SLIDE -> config.basePrice * item.peopleCount
-        }.adventureRoundMoney()
+        AdventureActivityType.EXTREME_SLIDE -> config.basePrice * item.peopleCount
+    }.adventureRoundMoney()
 
     fun subtotal(
-        item: AdventureReservationItemDraft,
-        config: AdventureActivityCatalogItem
-    ): Double =
-        when (item.activity) {
-            AdventureActivityType.OFF_ROAD -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+        item: AdventureReservationItemDraft, config: AdventureActivityCatalogItem
+    ): Double = when (item.activity) {
+        AdventureActivityType.OFF_ROAD -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+        AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> finalUnitPrice(
+            config
+        ) * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
 
-            AdventureActivityType.CAMPING -> finalUnitPrice(config) * item.peopleCount * item.nights.coerceAtLeast(
-                1
-            )
+        AdventureActivityType.CAMPING -> finalUnitPrice(config) * item.peopleCount * item.nights.coerceAtLeast(
+            1
+        )
 
-            AdventureActivityType.EXTREME_SLIDE -> finalUnitPrice(config) * item.peopleCount
-        }.adventureRoundMoney()
+        AdventureActivityType.EXTREME_SLIDE -> finalUnitPrice(config) * item.peopleCount
+    }.adventureRoundMoney()
 
     fun subtotal(item: AdventureReservationItemDraft, catalog: AdventureCatalogSnapshot): Double {
         val config = catalog.activity(item.activity) ?: return 0.0
@@ -458,8 +450,7 @@ object AdventurePricingEngine {
     }
 
     fun lineDiscountAmount(
-        item: AdventureReservationItemDraft,
-        catalog: AdventureCatalogSnapshot
+        item: AdventureReservationItemDraft, catalog: AdventureCatalogSnapshot
     ): Double {
         val config = catalog.activity(item.activity) ?: return 0.0
         return (lineBaseSubtotal(item, config) - subtotal(item, config)).coerceAtLeast(0.0)
@@ -467,16 +458,12 @@ object AdventurePricingEngine {
     }
 
     fun estimatedSubtotal(
-        items: List<AdventureReservationItemDraft>,
-        catalog: AdventureCatalogSnapshot
-    ): Double =
-        items.sumOf { subtotal(it, catalog) }.adventureRoundMoney()
+        items: List<AdventureReservationItemDraft>, catalog: AdventureCatalogSnapshot
+    ): Double = items.sumOf { subtotal(it, catalog) }.adventureRoundMoney()
 
     fun estimatedDiscountAmount(
-        items: List<AdventureReservationItemDraft>,
-        catalog: AdventureCatalogSnapshot
-    ): Double =
-        items.sumOf { lineDiscountAmount(it, catalog) }.adventureRoundMoney()
+        items: List<AdventureReservationItemDraft>, catalog: AdventureCatalogSnapshot
+    ): Double = items.sumOf { lineDiscountAmount(it, catalog) }.adventureRoundMoney()
 
     fun foodSubtotal(foodReservation: ReservationFoodDraft?): Double =
         (foodReservation?.subtotal ?: 0.0).adventureRoundMoney()
@@ -485,9 +472,9 @@ object AdventurePricingEngine {
         items: List<AdventureReservationItemDraft>,
         packageDiscountAmount: Double,
         catalog: AdventureCatalogSnapshot,
-    ): Double = (estimatedSubtotal(items, catalog) - packageDiscountAmount.coerceAtLeast(0.0))
-        .coerceAtLeast(0.0)
-        .adventureRoundMoney()
+    ): Double = (estimatedSubtotal(
+        items, catalog
+    ) - packageDiscountAmount.coerceAtLeast(0.0)).coerceAtLeast(0.0).adventureRoundMoney()
 }
 
 object AdventurePlanner {
@@ -510,8 +497,7 @@ object AdventurePlanner {
 
         if (items.isEmpty()) {
             val end = AdventureDateHelper.addMinutes(
-                AdventureSchedule.FOOD_ONLY_DEFAULT_DURATION_MINUTES,
-                startAt
+                AdventureSchedule.FOOD_ONLY_DEFAULT_DURATION_MINUTES, startAt
             )
             if (end.after(dayEnd)) return null
             return AdventureBuildPlan(
@@ -581,14 +567,11 @@ object AdventurePlanner {
                     cursor = end
                 }
 
-                AdventureActivityType.PAINTBALL ->
-                    if (!addSimpleBlock(AdventureResourceType.PAINTBALL_PEOPLE)) return null
+                AdventureActivityType.PAINTBALL -> if (!addSimpleBlock(AdventureResourceType.PAINTBALL_PEOPLE)) return null
 
-                AdventureActivityType.GO_KARTS ->
-                    if (!addSimpleBlock(AdventureResourceType.GO_KART_PEOPLE)) return null
+                AdventureActivityType.GO_KARTS -> if (!addSimpleBlock(AdventureResourceType.GO_KART_PEOPLE)) return null
 
-                AdventureActivityType.SHOOTING_RANGE ->
-                    if (!addSimpleBlock(AdventureResourceType.SHOOTING_PEOPLE)) return null
+                AdventureActivityType.SHOOTING_RANGE -> if (!addSimpleBlock(AdventureResourceType.SHOOTING_PEOPLE)) return null
 
                 AdventureActivityType.EXTREME_SLIDE -> {
                     val transportVehicles = max(
@@ -664,8 +647,12 @@ object AdventurePlanner {
         }
 
         val last = blocks.lastOrNull() ?: return null
-        val hasNightPremium = items.any { it.activity == AdventureActivityType.CAMPING } ||
-                blocks.any { AdventureDateHelper.isNightPremiumTime(it.startAt, it.endAt) }
+        val hasNightPremium =
+            items.any { it.activity == AdventureActivityType.CAMPING } || blocks.any {
+                AdventureDateHelper.isNightPremiumTime(
+                    it.startAt, it.endAt
+                )
+            }
 
         val packageDiscount = packageDiscountAmount.coerceAtLeast(0.0)
         val totalDiscountAmount = (activityDiscountAmount + packageDiscount).adventureRoundMoney()
@@ -697,8 +684,7 @@ object AdventurePlanner {
         return (0 until days).map {
             AdventureDateHelper.dayKey(
                 AdventureDateHelper.addDays(
-                    it,
-                    day
+                    it, day
                 )
             )
         }

@@ -36,8 +36,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
@@ -64,6 +67,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
     val uiState: StateFlow<AdventureComboBuilderUiState> = _uiState.asStateFlow()
 
     private val rewardPreviewRequests = MutableStateFlow<RewardPreviewInput?>(null)
+    private val _openWhatsAppAfterSubmit = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openWhatsAppAfterSubmit: SharedFlow<Unit> = _openWhatsAppAfterSubmit.asSharedFlow()
+
     private var catalogJob: Job? = null
     private var availabilityJob: Job? = null
     private var rewardPreviewJob: Job? = null
@@ -83,11 +89,11 @@ class AdventureComboBuilderViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        _uiState.update {
-            it.copy(
-                clientName = profile.fullName,
-                whatsappNumber = profile.phoneNumber,
-                nationalId = profile.nationalId.filter(Char::isDigit),
+        _uiState.update { current ->
+            current.copy(
+                userId = profile.userId,
+                clientName = current.clientName.ifBlank { profile.fullName },
+                whatsappNumber = current.whatsappNumber.ifBlank { profile.phoneNumber },
             )
         }
         requestRewardPreview()
@@ -117,8 +123,8 @@ class AdventureComboBuilderViewModel @Inject constructor(
     fun setClientName(value: String) = updateState { copy(clientName = value) }
     fun setWhatsapp(value: String) = updateState { copy(whatsappNumber = value) }
 
-    fun setNationalId(value: String) {
-        updateState { copy(nationalId = value.filter(Char::isDigit)) }
+    fun setUserId(value: String) {
+        updateState { copy(userId = value.trim()) }
         requestRewardPreview()
     }
 
@@ -258,9 +264,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
         } else {
             current.add(
                 ReservationFoodItemDraft(
-                    menuItem = menuItem,
-                    quantity = quantity,
-                    notes = cleanNotes
+                    menuItem = menuItem, quantity = quantity, notes = cleanNotes
                 )
             )
         }
@@ -294,7 +298,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
         _uiState.update { it.copy(selectedSlot = slot) }
     }
 
-    fun submit(clientId: String?) {
+    fun submit(userId: String?, openWhatsAppAfterSubmit: Boolean = false) {
         val state = _uiState.value
         val selectedSlot = state.selectedSlot
         val validationMessage = validateBeforeSubmit(state)
@@ -308,20 +312,23 @@ class AdventureComboBuilderViewModel @Inject constructor(
         }
 
         val pricingBreakdown = pricingBreakdownFor(state)
+        val resolvedUserId = userId?.trim().orEmpty().ifBlank { state.userId.trim() }
+
+        if (resolvedUserId.isBlank()) {
+            presentError("Debes iniciar sesión nuevamente para continuar.")
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
-                    isSubmitting = true,
-                    errorMessage = null,
-                    successMessage = null
+                    isSubmitting = true, errorMessage = null, successMessage = null
                 )
             }
             val request = AdventureBookingRequest(
-                clientId = clientId,
+                userId = resolvedUserId,
                 clientName = state.clientName.trim(),
                 whatsappNumber = state.whatsappNumber.trim(),
-                nationalId = state.nationalId.filter(Char::isDigit),
                 date = state.selectedDate,
                 selectedStartAt = selectedSlot.startAt,
                 guestCount = state.guestCount.coerceAtLeast(1),
@@ -347,6 +354,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
                         selectedSlot = null,
                     )
                 }
+                if (openWhatsAppAfterSubmit) {
+                    _openWhatsAppAfterSubmit.tryEmit(Unit)
+                }
                 refreshAvailability()
             }.onFailure { error ->
                 _uiState.update {
@@ -370,8 +380,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
 
     val estimatedAdventureSubtotal: Double
         get() = AdventurePricingEngine.estimatedSubtotal(
-            _uiState.value.items,
-            _uiState.value.catalog
+            _uiState.value.items, _uiState.value.catalog
         )
 
     val estimatedFoodSubtotal: Double
@@ -427,20 +436,19 @@ class AdventureComboBuilderViewModel @Inject constructor(
         (item.subtotal - rewardAmount(item)).coerceAtLeast(0.0).adventureRoundMoney()
 
     fun rewardAmount(item: ReservationFoodItemDraft): Double =
-        _uiState.value.rewardPreview.appliedRewards
-            .filter { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
-            .sumOf { it.amount }
-            .adventureRoundMoney()
+        _uiState.value.rewardPreview.appliedRewards.filter { reward ->
+            reward.affectedMenuItemIds.contains(item.menuItemId)
+        }.sumOf { it.amount }.adventureRoundMoney()
 
     fun appliedRewardPresentation(item: AdventureReservationItemDraft): RewardPresentation? =
-        _uiState.value.rewardPreview.appliedRewards
-            .firstOrNull { reward -> reward.affectedActivityIds.contains(item.activity.rawValue) }
-            ?.let(RewardPresentation::fromAppliedReward)
+        _uiState.value.rewardPreview.appliedRewards.firstOrNull { reward ->
+            reward.affectedActivityIds.contains(item.activity.rawValue)
+        }?.let(RewardPresentation::fromAppliedReward)
 
     fun appliedRewardPresentation(item: ReservationFoodItemDraft): RewardPresentation? =
-        _uiState.value.rewardPreview.appliedRewards
-            .firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
-            ?.let(RewardPresentation::fromAppliedReward)
+        _uiState.value.rewardPreview.appliedRewards.firstOrNull { reward ->
+            reward.affectedMenuItemIds.contains(item.menuItemId)
+        }?.let(RewardPresentation::fromAppliedReward)
 
     fun catalogRewardPresentation(activity: AdventureActivityCatalogItem): RewardPresentation? =
         RewardPresentationFactory.activityPresentation(
@@ -508,9 +516,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
             availabilityJob?.cancel()
             _uiState.update {
                 it.copy(
-                    availableSlots = emptyList(),
-                    selectedSlot = null,
-                    isLoadingAvailability = false
+                    availableSlots = emptyList(), selectedSlot = null, isLoadingAvailability = false
                 )
             }
             return
@@ -556,52 +562,46 @@ class AdventureComboBuilderViewModel @Inject constructor(
         if (catalogJob?.isActive == true) return
         catalogJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingCatalog = true, errorMessage = null) }
-            observeAdventureCatalogUseCase.execute()
-                .catch { error ->
-                    if (error is CancellationException) throw error
-                    _uiState.update {
-                        it.copy(
-                            isLoadingCatalog = false,
-                            errorMessage = error.message ?: "No se pudo cargar aventura.",
-                        )
-                    }
+            observeAdventureCatalogUseCase.execute().catch { error ->
+                if (error is CancellationException) throw error
+                _uiState.update {
+                    it.copy(
+                        isLoadingCatalog = false,
+                        errorMessage = error.message ?: "No se pudo cargar aventura.",
+                    )
                 }
-                .collectLatest { catalog ->
-                    _uiState.update { state ->
-                        val validItems =
-                            state.items.filter { catalog.activity(it.activity)?.isActive == true }
-                        state.copy(
-                            catalog = catalog,
-                            items = validItems,
-                            packageDiscountAmount = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).comboDiscountAmount,
-                            selectedPackageId = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).matchedPackageId,
-                            selectedPackageTitle = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).matchedPackageTitle,
-                            isLoadingCatalog = false,
-                            errorMessage = null,
-                        )
-                    }
-                    requestRewardPreview()
-                    refreshAvailability()
+            }.collectLatest { catalog ->
+                _uiState.update { state ->
+                    val validItems =
+                        state.items.filter { catalog.activity(it.activity)?.isActive == true }
+                    state.copy(
+                        catalog = catalog,
+                        items = validItems,
+                        packageDiscountAmount = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).comboDiscountAmount,
+                        selectedPackageId = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).matchedPackageId,
+                        selectedPackageTitle = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).matchedPackageTitle,
+                        isLoadingCatalog = false,
+                        errorMessage = null,
+                    )
                 }
+                requestRewardPreview()
+                refreshAvailability()
+            }
         }
     }
 
     private fun startRewardPreviewLoop() {
         rewardPreviewJob?.cancel()
         rewardPreviewJob = viewModelScope.launch {
-            rewardPreviewRequests
-                .filter { it != null }
-                .map { requireNotNull(it) }
-                .distinctUntilChanged()
-                .debounce(180)
-                .collectLatest { input ->
-                    if (input.nationalId.isBlank()) {
+            rewardPreviewRequests.filter { it != null }.map { requireNotNull(it) }
+                .distinctUntilChanged().debounce(180).collectLatest { input ->
+                    if (input.userId.isBlank()) {
                         _uiState.update {
                             it.copy(
                                 rewardPreview = RewardComputationResult.empty(
@@ -615,7 +615,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoadingRewards = true) }
                     runCatching {
                         loyaltyRewardsRepository.previewAdventureRewards(
-                            nationalId = input.nationalId,
+                            userId = input.userId,
                             activityItems = input.activityItems,
                             foodItems = input.foodItems,
                             catalog = input.catalog,
@@ -633,7 +633,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                             it.copy(
                                 rewardPreview = RewardComputationResult.empty(
                                     RewardWalletSnapshot.empty(
-                                        input.nationalId
+                                        input.userId
                                     )
                                 ),
                                 isLoadingRewards = false,
@@ -647,7 +647,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
     private fun requestRewardPreview() {
         val state = _uiState.value
         rewardPreviewRequests.value = RewardPreviewInput(
-            nationalId = state.nationalId.filter(Char::isDigit),
+            userId = state.userId.trim(),
             activityItems = state.items,
             foodItems = state.foodItems,
             catalog = state.catalog,
@@ -687,10 +687,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
     }
 
     private fun rewardAmountForActivity(activity: AdventureActivityType): Double =
-        _uiState.value.rewardPreview.appliedRewards
-            .filter { reward -> reward.affectedActivityIds.contains(activity.rawValue) }
-            .sumOf { it.amount }
-            .adventureRoundMoney()
+        _uiState.value.rewardPreview.appliedRewards.filter { reward ->
+            reward.affectedActivityIds.contains(activity.rawValue)
+        }.sumOf { it.amount }.adventureRoundMoney()
 
     private fun pricingBreakdownFor(state: AdventureComboBuilderUiState): ExperienceComboPricingBreakdown =
         ExperienceComboPricingPolicy.calculate(
@@ -714,11 +713,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
 
     private fun validateBeforeSubmit(state: AdventureComboBuilderUiState): String? {
         if (state.items.isEmpty() && state.foodItems.isEmpty()) return "Agrega al menos una actividad o comida."
-        if (state.clientName.trim().isEmpty()) return "Tu perfil no tiene nombre registrado."
-        if (state.whatsappNumber.trim().isEmpty()) return "Tu perfil no tiene WhatsApp registrado."
-        if (state.nationalId.filter(Char::isDigit)
-                .isEmpty()
-        ) return "Tu perfil no tiene cédula registrada."
+        if (state.clientName.trim().isEmpty()) return "Ingresa tu nombre para enviar la reserva."
         if (state.eventType == ReservationEventType.CUSTOM && state.customEventTitle.trim()
                 .isEmpty()
         ) {
@@ -731,4 +726,3 @@ class AdventureComboBuilderViewModel @Inject constructor(
         _uiState.update(transform)
     }
 }
-

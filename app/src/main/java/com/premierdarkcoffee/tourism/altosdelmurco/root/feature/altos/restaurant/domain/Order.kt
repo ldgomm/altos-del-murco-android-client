@@ -12,17 +12,20 @@ enum class OrderServiceMode(val rawValue: String, val title: String) {
 
     companion object {
         fun fromRaw(rawValue: String?): OrderServiceMode {
-            return entries.firstOrNull { it.rawValue.equals(rawValue, ignoreCase = true) || it.name.equals(rawValue, ignoreCase = true) }
-                ?: NOW
+            return entries.firstOrNull {
+                it.rawValue.equals(rawValue, ignoreCase = true) ||
+                        it.name.equals(rawValue, ignoreCase = true)
+            } ?: NOW
         }
     }
 }
 
 data class Order(
     val id: String,
-    val clientId: String? = null,
-    val nationalId: String?,
+    /** Firebase Auth UID. Canonical owner field for Firestore rules and user queries. */
+    val userId: String,
     val clientName: String,
+    val whatsappNumber: String = "",
     val tableNumber: String,
     val createdAt: Date,
     val updatedAt: Date,
@@ -53,7 +56,10 @@ data class Order(
 
     val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
 
-    fun withClientId(uid: String): Order = copy(clientId = uid.trim().takeIf { it.isNotEmpty() })
+    val displayWhatsApp: String
+        get() = whatsappNumber.trim().ifEmpty { "Lo escribirá por WhatsApp" }
+
+    fun withUserId(uid: String): Order = copy(userId = uid.trim())
 
     fun withTrustedPricing(
         trustedItems: List<OrderItem>,

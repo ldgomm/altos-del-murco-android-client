@@ -32,17 +32,17 @@ class AdventureBookingsViewModel @Inject constructor(
     private var bookingsJob: Job? = null
 
     fun onAppear(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter(Char::isDigit)
+        val cleanUserId = profile.userId
         val current = _uiState.value
 
         _uiState.update {
             it.copy(
-                nationalId = cleanNationalId,
+                userId = cleanUserId,
                 now = Date(),
             )
         }
 
-        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) {
+        if (current.userId == cleanUserId && bookingsJob?.isActive == true) {
             return
         }
 
@@ -83,11 +83,11 @@ class AdventureBookingsViewModel @Inject constructor(
         AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
 
     fun cancelBooking(booking: AdventureBooking) {
-        val nationalId = _uiState.value.nationalId
+        val userId = _uiState.value.userId
 
-        if (nationalId.isBlank()) {
+        if (userId.isBlank()) {
             _uiState.update {
-                it.copy(errorMessage = "No se encontró una cédula asociada a esta cuenta.")
+                it.copy(errorMessage = "No se encontró una sesión activa para esta cuenta.")
             }
             return
         }
@@ -109,10 +109,7 @@ class AdventureBookingsViewModel @Inject constructor(
             }
 
             runCatching {
-                cancelAdventureBookingUseCase.execute(
-                    id = booking.id,
-                    nationalId = nationalId,
-                )
+                cancelAdventureBookingUseCase.execute(id = booking.id)
             }.onSuccess {
                 _uiState.update {
                     it.copy(
@@ -146,12 +143,10 @@ class AdventureBookingsViewModel @Inject constructor(
     }
 
     private fun observeBookings() {
-        val nationalId = _uiState.value.nationalId
-
+        val userId = _uiState.value.userId
         bookingsJob?.cancel()
 
-        if (nationalId.isBlank()) {
-            bookingsJob = null
+        if (userId.isBlank()) {
             _uiState.update {
                 it.copy(
                     allBookings = emptyList(),
@@ -163,24 +158,15 @@ class AdventureBookingsViewModel @Inject constructor(
         }
 
         bookingsJob = viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isLoading = true,
-                    errorMessage = null,
-                    now = Date(),
-                )
-            }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-            observeAdventureBookingsUseCase.execute(nationalId)
+            observeAdventureBookingsUseCase.execute(userId)
                 .catch { error ->
                     if (error is CancellationException) throw error
-
                     _uiState.update {
                         it.copy(
-                            allBookings = emptyList(),
                             isLoading = false,
                             errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
-                            now = Date(),
                         )
                     }
                 }

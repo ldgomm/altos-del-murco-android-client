@@ -5,7 +5,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodItemDraft
 
 data class RewardPreviewInput(
-    val nationalId: String,
+    val userId: String,
     val activityItems: List<AdventureReservationItemDraft>,
     val foodItems: List<ReservationFoodItemDraft>,
     val catalog: AdventureCatalogSnapshot,

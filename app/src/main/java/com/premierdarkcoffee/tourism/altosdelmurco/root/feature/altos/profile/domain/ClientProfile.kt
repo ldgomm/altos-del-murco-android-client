@@ -7,7 +7,6 @@ data class ClientProfile(
     val email: String,
     val appleUserIdentifier: String,
     val fullName: String,
-    val nationalId: String,
     val phoneNumber: String,
     val birthday: Date,
     val address: String,
@@ -20,14 +19,10 @@ data class ClientProfile(
     val profileImageURL: String?,
     val profileImagePath: String?,
 ) {
+    val userId: String get() = id.trim()
+
     val isComplete: Boolean
-        get() = isProfileComplete &&
-                fullName.isNotBlank() &&
-                nationalId.isNotBlank() &&
-                phoneNumber.isNotBlank() &&
-                address.isNotBlank() &&
-                emergencyContactName.isNotBlank() &&
-                emergencyContactPhone.isNotBlank()
+        get() = isProfileComplete && fullName.isNotBlank()
 
     val hasProfileImage: Boolean
         get() = !profileImageURL.isNullOrBlank()

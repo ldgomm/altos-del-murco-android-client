@@ -5,7 +5,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 
 data class OrdersUiState(
-    val nationalId: String = "",
+    val userId: String = "",
     val orders: List<Order> = emptyList(),
     val isLoading: Boolean = false,
     val grouping: OrdersGroupingOption = OrdersGroupingOption.DATE,

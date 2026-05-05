@@ -35,8 +35,8 @@ data class ProfileUiState(
     val phoneText: String
         get() = profile?.phoneNumber?.takeIf { it.isNotBlank() } ?: "No registrado"
 
-    val nationalIdText: String
-        get() = profile?.nationalId?.takeIf { it.isNotBlank() } ?: "No registrado"
+    val userIdText: String
+        get() = profile?.userId?.takeIf { it.isNotBlank() } ?: "No registrado"
 
     val birthdayText: String
         get() = profile?.birthday?.formatDateLong() ?: "No registrado"
@@ -55,20 +55,71 @@ data class ProfileUiState(
         get() = profile?.createdAt?.formatDateShort() ?: "Ahora"
 
     val initials: String
-        get() = displayName
-            .split(" ")
-            .filter { it.isNotBlank() }
-            .take(2)
-            .joinToString("") { it.first().uppercaseChar().toString() }
-            .ifBlank { "AM" }
+        get() = displayName.split(" ").filter { it.isNotBlank() }.take(2)
+            .joinToString("") { it.first().uppercaseChar().toString() }.ifBlank { "AM" }
 
     val hasProfileImage: Boolean
         get() = avatarBytes != null || profile?.hasProfileImage == true
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ProfileUiState
+
+        if (isLoadingAvatar != other.isLoadingAvatar) return false
+        if (isLoadingStats != other.isLoadingStats) return false
+        if (isUploadingProfileImage != other.isUploadingProfileImage) return false
+        if (isSavingProfile != other.isSavingProfile) return false
+        if (isSigningOut != other.isSigningOut) return false
+        if (isDeletingAccount != other.isDeletingAccount) return false
+        if (profile != other.profile) return false
+        if (stats != other.stats) return false
+        if (!avatarBytes.contentEquals(other.avatarBytes)) return false
+        if (editState != other.editState) return false
+        if (message != other.message) return false
+        if (hasProfileImage != other.hasProfileImage) return false
+        if (displayName != other.displayName) return false
+        if (emailText != other.emailText) return false
+        if (phoneText != other.phoneText) return false
+        if (userIdText != other.userIdText) return false
+        if (birthdayText != other.birthdayText) return false
+        if (addressText != other.addressText) return false
+        if (emergencyContactText != other.emergencyContactText) return false
+        if (memberSinceText != other.memberSinceText) return false
+        if (initials != other.initials) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = isLoadingAvatar.hashCode()
+        result = 31 * result + isLoadingStats.hashCode()
+        result = 31 * result + isUploadingProfileImage.hashCode()
+        result = 31 * result + isSavingProfile.hashCode()
+        result = 31 * result + isSigningOut.hashCode()
+        result = 31 * result + isDeletingAccount.hashCode()
+        result = 31 * result + (profile?.hashCode() ?: 0)
+        result = 31 * result + stats.hashCode()
+        result = 31 * result + (avatarBytes?.contentHashCode() ?: 0)
+        result = 31 * result + (editState?.hashCode() ?: 0)
+        result = 31 * result + (message?.hashCode() ?: 0)
+        result = 31 * result + hasProfileImage.hashCode()
+        result = 31 * result + displayName.hashCode()
+        result = 31 * result + emailText.hashCode()
+        result = 31 * result + phoneText.hashCode()
+        result = 31 * result + userIdText.hashCode()
+        result = 31 * result + birthdayText.hashCode()
+        result = 31 * result + addressText.hashCode()
+        result = 31 * result + emergencyContactText.hashCode()
+        result = 31 * result + memberSinceText.hashCode()
+        result = 31 * result + initials.hashCode()
+        return result
+    }
 }
 
 data class EditProfileUiState(
     val fullName: String = "",
-    val nationalId: String = "",
     val phoneNumber: String = "",
     val birthday: Date = defaultBirthday(),
     val address: String = "",
@@ -76,17 +127,11 @@ data class EditProfileUiState(
     val emergencyContactPhone: String = "",
 ) {
     val canSave: Boolean
-        get() = fullName.trim().isNotEmpty() &&
-                nationalId.onlyDigits().length >= 8 &&
-                phoneNumber.onlyDigits().length >= 8 &&
-                address.trim().isNotEmpty() &&
-                emergencyContactName.trim().isNotEmpty() &&
-                emergencyContactPhone.onlyDigits().length >= 8
+        get() = fullName.trim().isNotEmpty()
 
     companion object {
         fun fromProfile(profile: ClientProfile): EditProfileUiState = EditProfileUiState(
             fullName = profile.fullName,
-            nationalId = profile.nationalId,
             phoneNumber = profile.phoneNumber,
             birthday = profile.birthday,
             address = profile.address,
@@ -103,12 +148,11 @@ data class AccountActionUiState(
 
 fun ClientProfile.updatedFromEdit(edit: EditProfileUiState): ClientProfile = copy(
     fullName = edit.fullName.trim(),
-    nationalId = edit.nationalId.onlyDigits(),
-    phoneNumber = edit.phoneNumber.onlyDigits(),
+    phoneNumber = edit.phoneNumber.trim(),
     birthday = edit.birthday,
     address = edit.address.trim(),
     emergencyContactName = edit.emergencyContactName.trim(),
-    emergencyContactPhone = edit.emergencyContactPhone.onlyDigits(),
+    emergencyContactPhone = edit.emergencyContactPhone.trim(),
     isProfileComplete = true,
     updatedAt = Date(),
     profileCompletedAt = profileCompletedAt ?: Date(),
@@ -121,8 +165,8 @@ fun ThemeMode.displayTitle(): String = when (this) {
 }
 
 fun Date.formatDateShort(): String = SimpleDateFormat("d MMM yyyy", Locale("es", "EC")).format(this)
-fun Date.formatDateLong(): String = SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es", "EC")).format(this)
-fun String.onlyDigits(): String = filter(Char::isDigit)
+fun Date.formatDateLong(): String =
+    SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es", "EC")).format(this)
 
 private fun defaultBirthday(): Date = Calendar.getInstance().apply {
     add(Calendar.YEAR, -18)

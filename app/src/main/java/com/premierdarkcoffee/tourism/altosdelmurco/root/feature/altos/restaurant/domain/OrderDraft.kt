@@ -7,8 +7,10 @@ private const val DEFAULT_DRAFT_ID = "active_cart"
 
 data class OrderDraft(
     val id: String = DEFAULT_DRAFT_ID,
-    val nationalId: String? = null,
+    /** Firebase Auth UID. Canonical owner field. */
+    val userId: String = "",
     val clientName: String = "",
+    val whatsappNumber: String = "",
     val tableNumber: String = "",
     val scheduledAt: Date = Date(),
     val createdAt: Date = Date(),
@@ -27,16 +29,19 @@ data class OrderDraft(
     val normalizedScheduledAt: Date = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
     val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(Date(), normalizedScheduledAt)
     val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED
-    val canSubmit: Boolean = !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
+    val canSubmit: Boolean =
+        !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
 
     fun normalizedForSubmit(now: Date = Date()): OrderDraft = copy(
+        userId = userId.trim(),
+        whatsappNumber = if (isScheduledForLater) whatsappNumber.trim() else "",
         scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now),
         updatedAt = now,
     )
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
-        clientId: String? = null,
+        userId: String = this.userId,
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
         val now = Date()
@@ -53,12 +58,13 @@ data class OrderDraft(
         }
 
         val cleanTable = tableNumber.trim()
+        val cleanWhatsApp = whatsappNumber.trim()
 
         return Order(
             id = orderId,
-            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
-            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
+            userId = userId.trim(),
             clientName = clientName.trim(),
+            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) cleanWhatsApp else "",
             tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
             createdAt = now,
             updatedAt = now,

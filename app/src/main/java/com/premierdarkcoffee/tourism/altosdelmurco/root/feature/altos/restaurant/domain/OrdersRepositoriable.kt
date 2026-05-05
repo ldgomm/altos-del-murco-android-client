@@ -4,5 +4,5 @@ import kotlinx.coroutines.flow.Flow
 
 interface OrdersRepositoriable {
     suspend fun submit(order: Order)
-    fun observeOrders(nationalId: String): Flow<List<Order>>
+    fun observeOrders(userId: String): Flow<List<Order>>
 }

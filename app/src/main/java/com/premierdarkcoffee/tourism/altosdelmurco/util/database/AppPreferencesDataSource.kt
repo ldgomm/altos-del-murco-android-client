@@ -7,12 +7,12 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.di.IoDispatcher
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.ThemeMode
 import dagger.hilt.android.qualifiers.ApplicationContext
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import javax.inject.Singleton
 
 private val Context.appPreferencesDataStore by preferencesDataStore(name = "app_preferences")
 

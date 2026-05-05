@@ -288,7 +288,6 @@ fun ProfileScreen(
                     route = ProfileRoute.ROOT
                 },
                 onFullNameChanged = viewModel::onEditFullNameChanged,
-                onNationalIdChanged = viewModel::onEditNationalIdChanged,
                 onPhoneChanged = viewModel::onEditPhoneChanged,
                 onBirthdayChanged = viewModel::onEditBirthdayChanged,
                 onAddressChanged = viewModel::onEditAddressChanged,
@@ -373,7 +372,7 @@ private fun ProfileHomeScreen(
             )
             ProfileMenuRow(
                 title = "Editar perfil",
-                subtitle = "Nombre, cédula, teléfono, dirección y contacto de emergencia",
+                subtitle = "Nombre, cuenta, teléfono, dirección y contacto de emergencia",
                 icon = Icons.Rounded.Edit,
                 onClick = onOpenEdit,
             )
@@ -720,7 +719,6 @@ private fun EditProfileScreen(
     state: ProfileUiState,
     onBack: () -> Unit,
     onFullNameChanged: (String) -> Unit,
-    onNationalIdChanged: (String) -> Unit,
     onPhoneChanged: (String) -> Unit,
     onBirthdayChanged: (java.util.Date) -> Unit,
     onAddressChanged: (String) -> Unit,
@@ -794,14 +792,6 @@ private fun EditProfileScreen(
                     singleLine = true,
                     label = { Text("Correo") },
                     leadingIcon = { Icon(Icons.Rounded.Email, contentDescription = null) },
-                )
-                OutlinedTextField(
-                    value = edit.nationalId,
-                    onValueChange = onNationalIdChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Cédula") },
-                    leadingIcon = { Icon(Icons.Rounded.AccountCircle, contentDescription = null) },
                 )
                 OutlinedTextField(
                     value = edit.phoneNumber,

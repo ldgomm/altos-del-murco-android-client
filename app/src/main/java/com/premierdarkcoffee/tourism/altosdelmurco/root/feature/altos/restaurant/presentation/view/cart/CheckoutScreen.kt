@@ -23,6 +23,8 @@ import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.RestaurantMenu
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TableRestaurant
@@ -88,15 +90,57 @@ fun CheckoutScreen(
     profile: ClientProfile,
     onBack: () -> Unit,
     onTableNumberChanged: (String) -> Unit,
+    onWhatsappChanged: (String) -> Unit,
     onScheduledAtChanged: (Date) -> Unit,
     onScheduleNow: () -> Unit,
-    onSubmit: () -> Unit,
+    onSubmit: (openWhatsAppAfterSubmit: Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = AppSectionTheme.Restaurant
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
+
+    var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
+
+    val isScheduledWhatsAppMissing = state.isScheduledForLater &&
+            state.draft.whatsappNumber.filter(Char::isDigit).isEmpty()
+
+    fun handleSubmitTapped() {
+        if (isScheduledWhatsAppMissing) {
+            showMissingWhatsAppDialog = true
+        } else {
+            onSubmit(false)
+        }
+    }
+
+    if (showMissingWhatsAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showMissingWhatsAppDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMissingWhatsAppDialog = false
+                        onSubmit(true)
+                    },
+                ) {
+                    Text("Enviar y escribir por WhatsApp", color = palette.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMissingWhatsAppDialog = false }) {
+                    Text("Agregar WhatsApp aquí")
+                }
+            },
+            title = { Text("Confirmar por WhatsApp") },
+            text = {
+                Text("Puedes enviar la reserva sin número. Al finalizar abriremos WhatsApp para que nos escribas.")
+            },
+            containerColor = palette.elevatedCard,
+            titleContentColor = palette.textPrimary,
+            textContentColor = palette.textSecondary,
+        )
+    }
 
     BrandScreen(
         theme = theme,
@@ -130,7 +174,7 @@ fun CheckoutScreen(
                     canSubmit = state.canSubmit,
                     isSubmitting = state.isSubmitting,
                     isScheduledForLater = state.isScheduledForLater,
-                    onSubmit = onSubmit,
+                    onSubmit = { handleSubmitTapped() },
                 )
             },
         ) { innerPadding ->
@@ -161,6 +205,16 @@ fun CheckoutScreen(
                 }
 
                 item { CheckoutClientCard(theme, profile) }
+
+                if (state.isScheduledForLater) {
+                    item {
+                        CheckoutContactCard(
+                            theme = theme,
+                            whatsappNumber = state.draft.whatsappNumber,
+                            onWhatsappChanged = onWhatsappChanged,
+                        )
+                    }
+                }
 
                 item {
                     TableCard(
@@ -215,10 +269,81 @@ private fun CheckoutClientCard(theme: AppSectionTheme, profile: ClientProfile) {
         BrandSectionHeader(
             theme = theme,
             title = "Cliente",
-            subtitle = "Estos datos vienen de tu perfil."
+            subtitle = "Solo el nombre es obligatorio. Los datos de contacto son opcionales."
         )
         InfoRow(theme, "Nombre", profile.fullName)
-        InfoRow(theme, "Cédula", profile.nationalId)
+    }
+}
+
+@Composable
+private fun CheckoutContactCard(
+    theme: AppSectionTheme,
+    whatsappNumber: String,
+    onWhatsappChanged: (String) -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Contacto para confirmar",
+            subtitle = "Solo se usa para reservas programadas. Puedes dejarlo vacío y escribirnos por WhatsApp después de enviar.",
+        )
+
+        OutlinedTextField(
+            value = whatsappNumber,
+            onValueChange = onWhatsappChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("WhatsApp opcional") },
+            leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
+            singleLine = true,
+            shape = RoundedCornerShape(AppTheme.Radius.large),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = palette.textPrimary,
+                unfocusedTextColor = palette.textPrimary,
+                focusedContainerColor = palette.elevatedCard,
+                unfocusedContainerColor = palette.elevatedCard,
+                focusedBorderColor = palette.primary,
+                unfocusedBorderColor = palette.stroke,
+                focusedLabelColor = palette.primary,
+                unfocusedLabelColor = palette.textSecondary,
+                cursorColor = palette.primary,
+            ),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(palette.chipGradient)
+                .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Info,
+                contentDescription = null,
+                tint = palette.primary,
+            )
+
+            Text(
+                text = if (whatsappNumber.filter(Char::isDigit).isEmpty()) {
+                    "Si no ingresas número, enviaremos la reserva y abriremos WhatsApp para que nos escribas."
+                } else {
+                    "Usaremos este número únicamente para confirmar la reserva programada."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+        }
     }
 }
 

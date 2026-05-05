@@ -2,7 +2,6 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.AppliedReward
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardEngine
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardRuleType
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.LoyaltyRewardTemplate
@@ -28,6 +27,7 @@ import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.round
 
+
 @HiltViewModel
 class MenuViewModel @Inject constructor(
     private val observeMenuUseCase: ObserveMenuUseCase,
@@ -39,20 +39,20 @@ class MenuViewModel @Inject constructor(
 
     private var menuJob: Job? = null
     private var rewardsJob: Job? = null
-    private var currentRewardsNationalId: String? = null
+    private var currentRewardsUserId: String? = null
 
-    fun onAppear(nationalId: String?) {
+    fun onAppear(userId: String?) {
         startMenuObservationIfNeeded()
-        setNationalId(nationalId)
+        setUserId(userId)
     }
 
-    fun setNationalId(nationalId: String?) {
-        val cleanNationalId = nationalId?.filter(Char::isDigit).orEmpty()
+    fun setUserId(userId: String?) {
+        val cleanUserId = userId?.trim().orEmpty()
 
-        if (cleanNationalId.isEmpty()) {
+        if (cleanUserId.isEmpty()) {
             rewardsJob?.cancel()
             rewardsJob = null
-            currentRewardsNationalId = null
+            currentRewardsUserId = null
             _uiState.update {
                 it.copy(
                     isLoadingRewards = false,
@@ -62,20 +62,20 @@ class MenuViewModel @Inject constructor(
             return
         }
 
-        if (currentRewardsNationalId == cleanNationalId && rewardsJob?.isActive == true) return
+        if (currentRewardsUserId == cleanUserId && rewardsJob?.isActive == true) return
 
-        currentRewardsNationalId = cleanNationalId
+        currentRewardsUserId = cleanUserId
         rewardsJob?.cancel()
         rewardsJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRewards = true, errorMessage = null) }
             loyaltyRewardsRepository
-                .observeWalletSnapshot(cleanNationalId)
+                .observeWalletSnapshot(cleanUserId)
                 .catch { error ->
                     if (error is CancellationException) throw error
                     _uiState.update {
                         it.copy(
                             isLoadingRewards = false,
-                            walletSnapshot = RewardWalletSnapshot.empty(cleanNationalId),
+                            walletSnapshot = RewardWalletSnapshot.empty(cleanUserId),
                             errorMessage = error.message ?: "No se pudieron cargar tus beneficios.",
                         )
                     }

@@ -6,9 +6,7 @@ import java.util.Calendar
 import java.util.Date
 
 enum class LoyaltyRewardScope(val title: String) {
-    RESTAURANT("Restaurante"),
-    ADVENTURE("Aventura"),
-    BOTH("Ambos");
+    RESTAURANT("Restaurante"), ADVENTURE("Aventura"), BOTH("Ambos");
 
     fun matchesRestaurant(): Boolean = this == RESTAURANT || this == BOTH
 
@@ -16,16 +14,11 @@ enum class LoyaltyRewardScope(val title: String) {
 }
 
 enum class LoyaltyRewardTriggerMode {
-    AUTOMATIC,
-    MANUAL,
+    AUTOMATIC, MANUAL,
 }
 
 enum class LoyaltyRewardRuleType {
-    MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
-    SPECIFIC_MENU_ITEM_PERCENTAGE,
-    ACTIVITY_PERCENTAGE,
-    FREE_MENU_ITEM,
-    BUY_X_GET_Y_FREE,
+    MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE, SPECIFIC_MENU_ITEM_PERCENTAGE, ACTIVITY_PERCENTAGE, FREE_MENU_ITEM, BUY_X_GET_Y_FREE,
 }
 
 data class LoyaltyRewardRule(
@@ -109,24 +102,23 @@ data class LoyaltyRewardTemplate(
 ) {
     val displaySummary: String
         get() = when (rule.type) {
-            LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en el plato elegible más caro"
+            LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en el plato elegible más caro"
 
-            LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en item específico"
+            LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en item específico"
 
-            LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en actividad específica"
+            LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en actividad específica"
 
-            LoyaltyRewardRuleType.FREE_MENU_ITEM ->
-                "${(rule.quantity ?: 1).coerceAtLeast(1)} item(s) gratis"
+            LoyaltyRewardRuleType.FREE_MENU_ITEM -> "${(rule.quantity ?: 1).coerceAtLeast(1)} item(s) gratis"
 
-            LoyaltyRewardRuleType.BUY_X_GET_Y_FREE ->
-                "Compra ${(rule.buyQuantity ?: 1).coerceAtLeast(1)} y recibe ${
-                    (rule.freeQuantity ?: 1).coerceAtLeast(
-                        1
-                    )
-                } gratis"
+            LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Compra ${
+                (rule.buyQuantity ?: 1).coerceAtLeast(
+                    1
+                )
+            } y recibe ${
+                (rule.freeQuantity ?: 1).coerceAtLeast(
+                    1
+                )
+            } gratis"
         }
 
     fun isEligible(level: LoyaltyLevel): Boolean = level.minimumSpent >= minimumLevel.minimumSpent
@@ -155,15 +147,11 @@ data class LoyaltyRewardTemplate(
 }
 
 enum class LoyaltyRewardReferenceType {
-    ORDER,
-    BOOKING,
+    ORDER, BOOKING,
 }
 
 enum class LoyaltyWalletEventStatus {
-    RESERVED,
-    CONSUMED,
-    RELEASED,
-    EXPIRED,
+    RESERVED, CONSUMED, RELEASED, EXPIRED,
 }
 
 data class LoyaltyWalletEvent(
@@ -189,7 +177,7 @@ data class AppliedReward(
 )
 
 data class RewardWalletSnapshot(
-    val nationalId: String,
+    val userId: String,
     val currentLevel: LoyaltyLevel,
     val totalSpent: Double,
     val points: Int,
@@ -199,8 +187,8 @@ data class RewardWalletSnapshot(
     val releasedEvents: List<LoyaltyWalletEvent>,
 ) {
     companion object {
-        fun empty(nationalId: String): RewardWalletSnapshot = RewardWalletSnapshot(
-            nationalId = nationalId,
+        fun empty(userId: String): RewardWalletSnapshot = RewardWalletSnapshot(
+            userId = userId,
             currentLevel = LoyaltyLevel.BRONZE,
             totalSpent = 0.0,
             points = 0,
@@ -280,18 +268,14 @@ data class LoyaltyRewardTemplateDto(
             ?: LoyaltyRewardScope.BOTH,
         minimumLevel = LoyaltyLevel.entries.firstOrNull {
             it.name.equals(
-                minimumLevel,
-                ignoreCase = true
+                minimumLevel, ignoreCase = true
             )
-        }
-            ?: LoyaltyLevel.BRONZE,
+        } ?: LoyaltyLevel.BRONZE,
         triggerMode = LoyaltyRewardTriggerMode.entries.firstOrNull {
             it.name.equals(
-                triggerMode,
-                ignoreCase = true
+                triggerMode, ignoreCase = true
             )
-        }
-            ?: LoyaltyRewardTriggerMode.AUTOMATIC,
+        } ?: LoyaltyRewardTriggerMode.AUTOMATIC,
         isActive = isActive,
         canStack = canStack,
         priority = priority,
@@ -344,7 +328,7 @@ data class LoyaltyWalletEventDto(
 }
 
 data class LoyaltyWalletDocument(
-    val nationalId: String,
+    val userId: String,
     val updatedAt: Date,
     val events: List<LoyaltyWalletEvent>,
 )

@@ -19,7 +19,7 @@ data class ProfileStats(
             adventureSpent = 0.0,
             totalSpent = 0.0,
             level = LoyaltyLevel.BRONZE,
-            wallet = RewardWalletSnapshot.empty(nationalId = ""),
+            wallet = RewardWalletSnapshot.empty(userId = ""),
         )
     }
 }

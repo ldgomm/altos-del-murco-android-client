@@ -37,33 +37,25 @@ class ProfileStatsRepository @Inject constructor(
     private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : ProfileStatsRepositoriable {
 
-    override suspend fun loadStats(nationalId: String): ProfileStats {
-        val cleanNationalId = nationalId.onlyDigits()
-        if (cleanNationalId.isEmpty()) return ProfileStats.EMPTY
+    override suspend fun loadStats(userId: String): ProfileStats {
+        val cleanUserId = userId.trim()
+        if (cleanUserId.isEmpty()) return ProfileStats.EMPTY
 
-        val orderSnapshot = firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .get()
-            .awaitResult()
+        val orderSnapshot = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("userId", cleanUserId).get().awaitResult()
 
-        val bookingSnapshot = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .get()
-            .awaitResult()
+        val bookingSnapshot = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("userId", cleanUserId).get().awaitResult()
 
-        val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanNationalId)
+        val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanUserId)
 
-        val completedOrders = orderSnapshot.documents
-            .mapNotNull { document -> document.toObject(OrderDto::class.java)?.toDomain() }
-            .filter { order -> order.status == OrderStatus.COMPLETED }
+        val completedOrders = orderSnapshot.documents.mapNotNull { document ->
+            document.toObject(OrderDto::class.java)?.toDomain()
+        }.filter { order -> order.status == OrderStatus.COMPLETED }
 
-        val completedBookings = bookingSnapshot.documents
-            .mapNotNull { document ->
-                document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-            }
-            .filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
+        val completedBookings = bookingSnapshot.documents.mapNotNull { document ->
+            document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+        }.filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
 
         val restaurantSpent = completedOrders.sumOf { it.totalAmount }.roundMoney()
         val adventureSpent = completedBookings.sumOf { it.totalAmount }.roundMoney()
@@ -87,9 +79,9 @@ class ProfileStatsRepository @Inject constructor(
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-    override fun observeStats(nationalId: String): Flow<ProfileStats> = callbackFlow {
-        val cleanNationalId = nationalId.onlyDigits()
-        if (cleanNationalId.isEmpty()) {
+    override fun observeStats(userId: String): Flow<ProfileStats> = callbackFlow {
+        val cleanUserId = userId.trim()
+        if (cleanUserId.isEmpty()) {
             trySend(ProfileStats.EMPTY).isSuccess
             close()
             return@callbackFlow
@@ -103,41 +95,31 @@ class ProfileStatsRepository @Inject constructor(
         }
 
         val loaderJob: Job = launch {
-            refreshRequests
-                .onStart { emit(Unit) }
-                .debounce(160)
-                .mapLatest { loadStats(cleanNationalId) }
-                .catch { error ->
+            refreshRequests.onStart { emit(Unit) }.debounce(160)
+                .mapLatest { loadStats(cleanUserId) }.catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }
-                .collect { stats ->
+                }.collect { stats ->
                     trySend(stats).isSuccess
                 }
         }
 
-        registrations += firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
+        registrations += firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
-        registrations += firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
+        registrations += firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
-        val walletJob = loyaltyRewardsRepository
-            .observeWalletSnapshot(cleanNationalId)
-            .onEach { requestRefresh() }
-            .catch { error ->
-                if (error is CancellationException) throw error
-                close(error)
-            }
-            .launchIn(this)
+        val walletJob =
+            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId).onEach { requestRefresh() }
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    close(error)
+                }.launchIn(this)
 
         awaitClose {
             registrations.forEach { it.remove() }
@@ -147,6 +129,5 @@ class ProfileStatsRepository @Inject constructor(
     }
 }
 
-private fun String.onlyDigits(): String = filter(Char::isDigit)
 
 private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0

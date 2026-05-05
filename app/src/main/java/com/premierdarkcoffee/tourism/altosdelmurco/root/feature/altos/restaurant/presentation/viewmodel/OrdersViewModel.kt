@@ -6,10 +6,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.do
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ObserveOrdersUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +14,10 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import javax.inject.Inject
 
 @HiltViewModel
 class OrdersViewModel @Inject constructor(
@@ -30,18 +30,18 @@ class OrdersViewModel @Inject constructor(
     private var observeJob: Job? = null
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter { it.isDigit() }
-        if (cleanNationalId == _uiState.value.nationalId && observeJob != null) return
+        val cleanUserId = profile.userId
+        if (cleanUserId == _uiState.value.userId && observeJob != null) return
 
         _uiState.update {
             it.copy(
-                nationalId = cleanNationalId,
-                isLoading = cleanNationalId.isNotEmpty(),
+                userId = cleanUserId,
+                isLoading = cleanUserId.isNotEmpty(),
                 errorMessage = null,
             )
         }
 
-        observeOrders(cleanNationalId)
+        observeOrders(cleanUserId)
     }
 
     fun setGrouping(value: OrdersGroupingOption) {
@@ -60,10 +60,10 @@ class OrdersViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    private fun observeOrders(nationalId: String) {
+    private fun observeOrders(userId: String) {
         observeJob?.cancel()
 
-        if (nationalId.isBlank()) {
+        if (userId.isBlank()) {
             _uiState.update {
                 it.copy(
                     orders = emptyList(),
@@ -75,16 +75,14 @@ class OrdersViewModel @Inject constructor(
         }
 
         observeJob = viewModelScope.launch {
-            observeOrdersUseCase.execute(nationalId)
-                .catch { error ->
+            observeOrdersUseCase.execute(userId).catch { error ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             errorMessage = error.message ?: "No se pudieron cargar pedidos.",
                         )
                     }
-                }
-                .collectLatest { orders ->
+                }.collectLatest { orders ->
                     _uiState.update {
                         it.copy(
                             orders = orders,

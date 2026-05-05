@@ -31,9 +31,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollec
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
-import java.util.Date
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -44,6 +41,9 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
+import java.util.Date
+import javax.inject.Inject
+import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.round
 
@@ -52,13 +52,13 @@ class LoyaltyRewardsRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
 ) : LoyaltyRewardsRepositoriable {
 
-    override suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty()) return RewardWalletSnapshot.empty("")
+    override suspend fun loadWalletSnapshot(userId: String): RewardWalletSnapshot {
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty()) return RewardWalletSnapshot.empty("")
 
         val templates = fetchTemplates()
-        val totals = computeTotals(cleanNationalId)
-        val walletEvents = fetchWalletEvents(cleanNationalId)
+        val totals = computeTotals(cleanUserId)
+        val walletEvents = fetchWalletEvents(cleanUserId)
         val currentLevel = LoyaltyLevel.fromTotalSpent(totals.totalSpent)
 
         val eligibleTemplates = templates
@@ -75,7 +75,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
 
         return RewardWalletSnapshot(
-            nationalId = cleanNationalId,
+            userId = cleanUserId,
             currentLevel = currentLevel,
             totalSpent = totals.totalSpent.roundMoney(),
             points = totals.totalSpent.toInt(),
@@ -87,10 +87,10 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-    override fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> =
+    override fun observeWalletSnapshot(userId: String): Flow<RewardWalletSnapshot> =
         callbackFlow {
-            val cleanNationalId = nationalId.cleanNationalId()
-            if (cleanNationalId.isEmpty()) {
+            val cleanUserId = userId.cleanUserId()
+            if (cleanUserId.isEmpty()) {
                 trySend(RewardWalletSnapshot.empty(""))
                 close()
                 return@callbackFlow
@@ -103,7 +103,7 @@ class LoyaltyRewardsRepository @Inject constructor(
                 refreshRequests
                     .onStart { emit(Unit) }
                     .debounce(160)
-                    .mapLatest { loadWalletSnapshot(cleanNationalId) }
+                    .mapLatest { loadWalletSnapshot(cleanUserId) }
                     .catch { error ->
                         if (error is CancellationException) throw error
                         close(error)
@@ -119,7 +119,7 @@ class LoyaltyRewardsRepository @Inject constructor(
 
             registrations += firestore
                 .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-                .document(cleanNationalId)
+                .document(cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
@@ -132,14 +132,14 @@ class LoyaltyRewardsRepository @Inject constructor(
 
             registrations += firestore
                 .collection(FirestoreCollections.RESTAURANT_ORDERS)
-                .whereEqualTo("nationalId", cleanNationalId)
+                .whereEqualTo("userId", cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
 
             registrations += firestore
                 .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-                .whereEqualTo("nationalId", cleanNationalId)
+                .whereEqualTo("userId", cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
@@ -154,10 +154,10 @@ class LoyaltyRewardsRepository @Inject constructor(
         }
 
     override suspend fun previewRestaurantRewards(
-        nationalId: String,
+        userId: String,
         items: List<OrderItem>,
     ): RewardComputationResult {
-        val wallet = loadWalletSnapshot(nationalId)
+        val wallet = loadWalletSnapshot(userId)
         val lines = items.map {
             RewardMenuLine(
                 menuItemId = it.menuItemId,
@@ -175,12 +175,12 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     override suspend fun previewAdventureRewards(
-        nationalId: String,
+        userId: String,
         activityItems: List<AdventureReservationItemDraft>,
         foodItems: List<ReservationFoodItemDraft>,
         catalog: AdventureCatalogSnapshot,
     ): RewardComputationResult {
-        val wallet = loadWalletSnapshot(nationalId)
+        val wallet = loadWalletSnapshot(userId)
 
         val activityLines = activityItems.mapNotNull { item ->
             val activity = catalog.activity(item.activity) ?: return@mapNotNull null
@@ -209,17 +209,17 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     override suspend fun reserveRewards(
-        nationalId: String,
+        userId: String,
         referenceType: LoyaltyRewardReferenceType,
         referenceId: String,
         appliedRewards: List<AppliedReward>,
     ) {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty() || referenceId.isBlank() || appliedRewards.isEmpty()) return
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty() || referenceId.isBlank() || appliedRewards.isEmpty()) return
 
         val walletRef = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(cleanNationalId)
+            .document(cleanUserId)
 
         firestore.runTransaction { transaction ->
             val snapshot = transaction.get(walletRef)
@@ -258,7 +258,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             transaction.set(
                 walletRef,
                 mapOf(
-                    "nationalId" to cleanNationalId,
+                    "userId" to cleanUserId,
                     "updatedAt" to Timestamp(now),
                     "events" to events.map { it.toFirestoreMap() },
                 ),
@@ -268,25 +268,25 @@ class LoyaltyRewardsRepository @Inject constructor(
         }.awaitResult()
     }
 
-    override suspend fun consumeRewards(nationalId: String, referenceId: String) {
-        mutateReferenceStatus(nationalId, referenceId, LoyaltyWalletEventStatus.CONSUMED)
+    override suspend fun consumeRewards(userId: String, referenceId: String) {
+        mutateReferenceStatus(userId, referenceId, LoyaltyWalletEventStatus.CONSUMED)
     }
 
-    override suspend fun releaseRewards(nationalId: String, referenceId: String) {
-        mutateReferenceStatus(nationalId, referenceId, LoyaltyWalletEventStatus.RELEASED)
+    override suspend fun releaseRewards(userId: String, referenceId: String) {
+        mutateReferenceStatus(userId, referenceId, LoyaltyWalletEventStatus.RELEASED)
     }
 
     private suspend fun mutateReferenceStatus(
-        nationalId: String,
+        userId: String,
         referenceId: String,
         targetStatus: LoyaltyWalletEventStatus,
     ) {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty() || referenceId.isBlank()) return
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty() || referenceId.isBlank()) return
 
         val walletRef = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(cleanNationalId)
+            .document(cleanUserId)
 
         firestore.runTransaction { transaction ->
             val snapshot = transaction.get(walletRef)
@@ -301,7 +301,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             transaction.set(
                 walletRef,
                 mapOf(
-                    "nationalId" to cleanNationalId,
+                    "userId" to cleanUserId,
                     "updatedAt" to Timestamp(Date()),
                     "events" to events.map { it.toFirestoreMap() },
                 ),
@@ -322,26 +322,26 @@ class LoyaltyRewardsRepository @Inject constructor(
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
     }
 
-    private suspend fun fetchWalletEvents(nationalId: String): List<LoyaltyWalletEvent> {
+    private suspend fun fetchWalletEvents(userId: String): List<LoyaltyWalletEvent> {
         val snapshot = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(nationalId)
+            .document(userId)
             .get()
             .awaitResult()
 
         return snapshot.walletEvents()
     }
 
-    private suspend fun computeTotals(nationalId: String): LoyaltyTotals {
+    private suspend fun computeTotals(userId: String): LoyaltyTotals {
         val ordersSnapshot = firestore
             .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", nationalId)
+            .whereEqualTo("userId", userId)
             .get()
             .awaitResult()
 
         val bookingsSnapshot = firestore
             .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", nationalId)
+            .whereEqualTo("userId", userId)
             .get()
             .awaitResult()
 
@@ -546,7 +546,7 @@ class LoyaltyRewardsRepository @Inject constructor(
         .trim()
         .lowercase()
 
-    private fun String.cleanNationalId(): String = filter { it.isDigit() }
+    private fun String.cleanUserId(): String = trim()
 
     private fun DocumentSnapshot.stringValueOrNull(field: String): String? =
         getString(field)?.trim()

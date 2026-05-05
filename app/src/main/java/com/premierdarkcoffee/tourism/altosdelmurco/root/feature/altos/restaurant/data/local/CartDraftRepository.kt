@@ -4,16 +4,17 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CartItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderDraft
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 
 internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
     id = id,
-    nationalId = nationalId,
+    userId = userId,
     clientName = clientName,
+    whatsappNumber = whatsappNumber,
     tableNumber = tableNumber,
     scheduledAtMillis = scheduledAt.time,
     revision = revision,
@@ -45,7 +46,8 @@ internal fun CartItem.toEntity(draftId: String): CartItemEntity = CartItemEntity
 
 internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
     id = draft.id,
-    nationalId = draft.nationalId,
+    userId = draft.userId,
+    whatsappNumber = draft.whatsappNumber,
     clientName = draft.clientName,
     tableNumber = draft.tableNumber,
     scheduledAt = Date(draft.scheduledAtMillis),
@@ -100,20 +102,23 @@ class CartDraftRepository @Inject constructor(
     }
 
     suspend fun updateClientInfo(
-        nationalId: String?,
+        userId: String,
         clientName: String,
+        whatsappNumber: String,
     ) {
         val updatedRows = cartDao.updateClientInfo(
-            nationalId = nationalId,
+            userId = userId,
             clientName = clientName,
+            whatsappNumber = whatsappNumber,
             updatedAtMillis = Date().time,
         )
 
         if (updatedRows == 0) {
             cartDao.replaceDraft(
                 draft = OrderDraft(
-                    nationalId = nationalId,
+                    userId = userId,
                     clientName = clientName,
+                    whatsappNumber = whatsappNumber,
                     updatedAt = Date(),
                 ).toEntity(),
                 items = emptyList(),

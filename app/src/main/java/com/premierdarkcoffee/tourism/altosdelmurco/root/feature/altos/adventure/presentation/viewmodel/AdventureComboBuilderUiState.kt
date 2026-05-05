@@ -12,7 +12,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.do
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardWalletSnapshot
 import java.util.Date
 
-
 data class AdventureComboBuilderUiState(
     val selectedDate: Date = Date(),
     val items: List<AdventureReservationItemDraft> = emptyList(),
@@ -26,7 +25,7 @@ data class AdventureComboBuilderUiState(
     val foodNotes: String = "",
     val clientName: String = "",
     val whatsappNumber: String = "",
-    val nationalId: String = "",
+    val userId: String = "",
     val notes: String = "",
     val packageDiscountAmount: Double = 0.0,
     val selectedPackageId: String? = null,

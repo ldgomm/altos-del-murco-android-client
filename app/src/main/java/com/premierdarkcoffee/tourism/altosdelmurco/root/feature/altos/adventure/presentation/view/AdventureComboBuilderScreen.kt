@@ -1,6 +1,8 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view
 
 import android.app.TimePickerDialog
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,11 +29,8 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Event
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.LocalDining
-import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Schedule
@@ -75,6 +74,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityCatalogItem
@@ -105,6 +105,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalAppSectionTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
+import java.net.URLEncoder
 import java.util.Calendar
 import java.util.Date
 import java.util.TimeZone
@@ -167,7 +168,7 @@ private fun AdventureScreenContent(
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
         catalogViewModel.onAppear()
         builderViewModel.onAppear(sessionState.profile)
-        menuViewModel.onAppear(sessionState.profile.nationalId)
+        menuViewModel.onAppear(sessionState.profile.userId)
     }
 
     LaunchedEffect(
@@ -278,7 +279,7 @@ private fun AdventureScreenContent(
                 menuSections = menuState.sections,
                 onBack = { mode = AdventureMode.Catalog },
                 onAddFood = { showFoodPicker = true },
-                clientId = sessionState.profile.id,
+                userId = sessionState.profile.userId,
             )
         }
     }
@@ -588,13 +589,69 @@ private fun AdventureBuilderContent(
     menuSections: List<MenuSection>,
     onBack: () -> Unit,
     onAddFood: () -> Unit,
-    clientId: String?,
+    userId: String?,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val palette = LocalBrandPalette.current
+    val context = LocalContext.current
 
     var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
+    var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.openWhatsAppAfterSubmit.collect {
+            context.openAltosWhatsAppForAdventureConfirmation()
+        }
+    }
+
+    fun handleSubmitTapped() {
+        when {
+            state.clientName.trim().isEmpty() -> {
+                viewModel.presentError("Ingresa tu nombre para enviar la reserva.")
+            }
+
+            state.whatsappNumber.filter(Char::isDigit).isEmpty() -> {
+                showMissingWhatsAppDialog = true
+            }
+
+            else -> {
+                viewModel.submit(userId)
+            }
+        }
+    }
+
+    if (showMissingWhatsAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showMissingWhatsAppDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMissingWhatsAppDialog = false
+                        viewModel.submit(userId, openWhatsAppAfterSubmit = true)
+                    },
+                ) {
+                    Text("Enviar y escribir por WhatsApp", color = palette.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMissingWhatsAppDialog = false }) {
+                    Text("Agregar WhatsApp aquí", color = palette.textSecondary)
+                }
+            },
+            title = {
+                Text("Confirmar por WhatsApp", color = palette.textPrimary)
+            },
+            text = {
+                Text(
+                    text = "Puedes enviar la reserva sin número. Al finalizar abriremos WhatsApp para que nos escribas.",
+                    color = palette.textSecondary,
+                )
+            },
+            containerColor = palette.elevatedCard,
+        )
+    }
+
     var editingFood by remember { mutableStateOf<ReservationFoodItemDraft?>(null) }
 
     editingItem?.let { item ->
@@ -632,7 +689,7 @@ private fun AdventureBuilderContent(
             ) {
                 BrandPrimaryButton(
                     theme = AdventureTheme,
-                    onClick = { viewModel.submit(clientId) },
+                    onClick = { handleSubmitTapped() },
                     enabled = !state.isSubmitting && state.selectedSlot != null,
                 ) {
                     if (state.isSubmitting) {
@@ -1310,12 +1367,30 @@ private fun AdventureContactSection(
     AdventureCard {
         AdventureSectionTitle(
             title = "Contacto",
-            subtitle = "Datos sincronizados desde tu perfil.",
+            subtitle = "Solo el nombre es obligatorio. WhatsApp es opcional.",
         )
 
-        ContactLine(Icons.Rounded.Person, "Nombre", state.clientName)
-        ContactLine(Icons.Rounded.Phone, "WhatsApp", state.whatsappNumber)
-        ContactLine(Icons.Rounded.Event, "Cédula", state.nationalId)
+        AdventureOutlinedTextField(
+            value = state.clientName,
+            onValueChange = viewModel::setClientName,
+            label = "Nombre para la reserva",
+        )
+
+        AdventureOutlinedTextField(
+            value = state.whatsappNumber,
+            onValueChange = viewModel::setWhatsapp,
+            label = "WhatsApp opcional",
+        )
+
+        Text(
+            text = if (state.clientName.trim().isEmpty()) {
+                "Necesitamos un nombre para identificar tu reserva."
+            } else {
+                "Puedes dejar el número vacío y escribirnos por WhatsApp después de enviar la reserva."
+            },
+            color = LocalBrandPalette.current.textSecondary,
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         AdventureOutlinedTextField(
             value = state.notes,
@@ -2040,3 +2115,14 @@ private fun adventureTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTrailingIconColor = LocalBrandPalette.current.primary,
     unfocusedTrailingIconColor = LocalBrandPalette.current.textSecondary,
 )
+
+private fun Context.openAltosWhatsAppForAdventureConfirmation() {
+    val message =
+        "Hola Altos del Murco, acabo de enviar una reserva desde la app y quiero confirmar disponibilidad lo antes posible."
+    val encoded = URLEncoder.encode(message, "UTF-8")
+    val uri = "https://wa.me/593967188093?text=$encoded".toUri()
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { startActivity(intent) }
+}

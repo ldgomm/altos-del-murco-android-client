@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 import java.util.Date
 
 interface AdventureBookingsRepositoriable {
-    fun observeBookings(nationalId: String): Flow<List<AdventureBooking>>
+    fun observeBookings(userId: String): Flow<List<AdventureBooking>>
 
     suspend fun fetchAvailability(
         date: Date,
@@ -20,5 +20,5 @@ interface AdventureBookingsRepositoriable {
 
     suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking
 
-    suspend fun cancelBooking(id: String, nationalId: String)
+    suspend fun cancelBooking(id: String)
 }

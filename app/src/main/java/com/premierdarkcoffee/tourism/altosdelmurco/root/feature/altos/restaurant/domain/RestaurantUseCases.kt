@@ -1,14 +1,12 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
-class ObserveOrdersUseCase(
-    private val repository: OrdersRepositoriable,
-) {
-    fun execute(nationalId: String) = repository.observeOrders(nationalId)
+import javax.inject.Inject
+
+class ObserveOrdersUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
+    fun execute(userId: String) = repository.observeOrders(userId)
 }
 
-class SubmitOrderUseCase(
-    private val repository: OrdersRepositoriable,
-) {
+class SubmitOrderUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
     suspend fun execute(order: Order) = repository.submit(order)
 }
 

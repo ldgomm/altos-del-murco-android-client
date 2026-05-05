@@ -91,10 +91,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.premiumMoney
 
 private enum class HomeRoute {
-    MAIN,
-    FEATURED_DISHES,
-    EXPERIENCE_PACKAGES,
-    REWARDS_CENTER,
+    MAIN, FEATURED_DISHES, EXPERIENCE_PACKAGES, REWARDS_CENTER,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -123,7 +120,7 @@ fun HomeScreen(
 
     LaunchedEffect(profile?.id, profile?.updatedAt) {
         viewModel.start()
-        menuViewModel.onAppear(profile?.nationalId)
+        menuViewModel.onAppear(profile?.userId)
         adventureCatalogViewModel.onAppear()
         profile?.let(cartViewModel::syncProfile)
     }
@@ -197,8 +194,8 @@ fun HomeScreen(
         }
 
         selectedPackageId != null -> {
-            val selectedPackage = catalogState.catalog.activePackagesSorted
-                .firstOrNull { it.id == selectedPackageId }
+            val selectedPackage =
+                catalogState.catalog.activePackagesSorted.firstOrNull { it.id == selectedPackageId }
 
             if (selectedPackage == null) {
                 LaunchedEffect(selectedPackageId, catalogState.catalog.activePackagesSorted.size) {
@@ -240,7 +237,7 @@ fun HomeScreen(
                 onBack = { route = HomeRoute.MAIN },
                 onRefresh = {
                     viewModel.refresh()
-                    menuViewModel.onAppear(profile?.nationalId)
+                    menuViewModel.onAppear(profile?.userId)
                     adventureCatalogViewModel.refresh()
                 },
             ) { padding ->
@@ -393,8 +390,7 @@ private fun HomeMainContent(
                         FeaturedMenuHomeCard(
                             item = item,
                             reward = RewardPresentationFactory.menuPresentation(
-                                item,
-                                walletSnapshot
+                                item, walletSnapshot
                             ),
                             onClick = { onOpenDishDetail(item) },
                         )
@@ -808,8 +804,7 @@ private fun HomeFeaturedDishWideCard(
         ) {
             PremiumIconBubble(Icons.Rounded.LocalDining)
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
+                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Text(
                     item.name,
@@ -1041,8 +1036,7 @@ private fun HomeExperiencePackageDetailScreen(
                         Text("Reservar este combo • ${finalTotal.premiumMoney()}")
                     }
                     OutlinedButton(
-                        onClick = onOpenExperiences,
-                        modifier = Modifier.fillMaxWidth()
+                        onClick = onOpenExperiences, modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Crear otro combo")
                     }
@@ -1056,8 +1050,7 @@ private fun HomeExperiencePackageDetailScreen(
             item {
                 PremiumCard {
                     PremiumSectionHeader(
-                        title = "Actividades incluidas",
-                        icon = Icons.Rounded.Explore
+                        title = "Actividades incluidas", icon = Icons.Rounded.Explore
                     )
                     packageModel.items.forEach { draft ->
                         val config = catalog.activity(draft.activity)
@@ -1076,8 +1069,7 @@ private fun HomeExperiencePackageDetailScreen(
                 item {
                     PremiumCard {
                         PremiumSectionHeader(
-                            title = "Comida incluida",
-                            icon = Icons.Rounded.LocalDining
+                            title = "Comida incluida", icon = Icons.Rounded.LocalDining
                         )
                         packageModel.foodItems.forEach { food ->
                             val item = menuItemsById[food.menuItemId]

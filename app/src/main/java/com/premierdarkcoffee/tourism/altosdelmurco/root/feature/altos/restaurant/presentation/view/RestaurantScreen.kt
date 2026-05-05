@@ -1,5 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view
 
+import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -8,6 +10,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
@@ -22,6 +27,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.CheckoutViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.OrdersViewModel
+import java.net.URLEncoder
 
 private sealed interface RestaurantDestination {
     data object Menu : RestaurantDestination
@@ -35,7 +41,7 @@ private sealed interface RestaurantDestination {
 @Composable
 fun RestaurantScreen(
     sessionState: SessionState.Authenticated,
-    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    modifier: Modifier = Modifier,
     menuViewModel: MenuViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel(),
     checkoutViewModel: CheckoutViewModel = hiltViewModel(),
@@ -48,9 +54,10 @@ fun RestaurantScreen(
 
     var destination: RestaurantDestination by remember { mutableStateOf(RestaurantDestination.Menu) }
     var pendingAddItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
-        menuViewModel.onAppear(sessionState.profile.nationalId)
+        menuViewModel.onAppear(sessionState.profile.userId)
         cartViewModel.syncProfile(sessionState.profile)
         checkoutViewModel.syncProfile(sessionState.profile)
         ordersViewModel.syncProfile(sessionState.profile)
@@ -59,6 +66,12 @@ fun RestaurantScreen(
     LaunchedEffect(Unit) {
         checkoutViewModel.createdOrder.collect { order ->
             destination = RestaurantDestination.Success(order)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        checkoutViewModel.openWhatsAppAfterSubmit.collect {
+            context.openAltosWhatsAppForOrderConfirmation()
         }
     }
 
@@ -138,6 +151,7 @@ fun RestaurantScreen(
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
                 onTableNumberChanged = checkoutViewModel::updateTableNumber,
+                onWhatsappChanged = checkoutViewModel::updateWhatsappNumber,
                 onScheduledAtChanged = checkoutViewModel::updateScheduledAt,
                 onScheduleNow = checkoutViewModel::scheduleForNow,
                 onSubmit = checkoutViewModel::submit,
@@ -166,5 +180,16 @@ fun RestaurantScreen(
                 modifier = modifier,
             )
         }
+    }
+}
+
+
+private fun Context.openAltosWhatsAppForOrderConfirmation() {
+    val message =
+        "Hola Altos del Murco, acabo de enviar una reserva de comida desde la app y quiero confirmar disponibilidad lo antes posible."
+    val encodedMessage = URLEncoder.encode(message, "UTF-8")
+    val url = "https://wa.me/593967188093?text=$encodedMessage"
+    runCatching {
+        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
     }
 }

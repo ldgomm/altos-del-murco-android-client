@@ -6,13 +6,12 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderScheduleFormatter
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderServiceMode
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
-import kotlin.collections.map
 
 data class OrderDto(
     val id: String = "",
-    val clientId: String? = null,
-    val nationalId: String? = null,
+    val userId: String = "",
     val clientName: String = "",
+    val whatsappNumber: String? = null,
     val tableNumber: String = "",
     val createdAt: Timestamp = Timestamp.now(),
     val updatedAt: Timestamp? = null,
@@ -30,9 +29,12 @@ data class OrderDto(
 ) {
     constructor(domain: Order) : this(
         id = domain.id,
-        clientId = domain.clientId,
-        nationalId = domain.nationalId,
+        userId = domain.userId,
         clientName = domain.clientName,
+        whatsappNumber = domain.whatsappNumber
+            .takeIf { domain.isScheduledForLater }
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() },
         tableNumber = domain.tableNumber,
         createdAt = Timestamp(domain.createdAt),
         updatedAt = Timestamp(domain.updatedAt),
@@ -52,18 +54,20 @@ data class OrderDto(
     fun toDomain(): Order {
         val safeCreatedAt = createdAt.toDate()
         val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
+        val safeMode = serviceMode?.let(OrderServiceMode::fromRaw)
+            ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt)
         return Order(
             id = id,
-            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
-            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
+            userId = userId.trim(),
             clientName = clientName,
+            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) whatsappNumber.orEmpty()
+                .trim() else "",
             tableNumber = tableNumber,
             createdAt = safeCreatedAt,
             updatedAt = updatedAt?.toDate() ?: safeCreatedAt,
             scheduledAt = safeScheduledAt,
             scheduledDayKey = scheduledDayKey ?: OrderScheduleFormatter.dayKey(safeScheduledAt),
-            serviceMode = serviceMode?.let(OrderServiceMode::fromRaw)
-                ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt),
+            serviceMode = safeMode,
             items = items.map { it.toDomain() },
             subtotal = subtotal,
             loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),

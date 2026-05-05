@@ -1,9 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
-import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
 
-class ObserveMenuUseCase(
-    private val repository: MenuRepositoriable,
-) {
-    fun execute(): Flow<List<MenuSection>> = repository.observeMenu()
+class ObserveMenuUseCase @Inject constructor(private val repository: MenuRepositoriable) {
+    fun execute() = repository.observeMenu()
 }

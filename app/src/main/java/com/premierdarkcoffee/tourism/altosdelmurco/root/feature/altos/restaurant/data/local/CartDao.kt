@@ -44,16 +44,18 @@ interface CartDao {
     @Query(
         """
     UPDATE cart_drafts
-    SET nationalId = :nationalId,
+    SET userId = :userId,
         clientName = :clientName,
+        whatsappNumber = :whatsappNumber,
         updatedAtMillis = :updatedAtMillis
     WHERE id = :draftId
     """
     )
     suspend fun updateClientInfo(
         draftId: String = CartDraftEntity.DEFAULT_ID,
-        nationalId: String?,
+        userId: String,
         clientName: String,
+        whatsappNumber: String,
         updatedAtMillis: Long,
     ): Int
 }

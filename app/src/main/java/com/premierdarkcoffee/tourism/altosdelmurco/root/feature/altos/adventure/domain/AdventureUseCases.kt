@@ -43,14 +43,14 @@ class CreateAdventureBookingUseCase @Inject constructor(
 class ObserveAdventureBookingsUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    fun execute(nationalId: String): Flow<List<AdventureBooking>> =
-        repository.observeBookings(nationalId = nationalId)
+    fun execute(userId: String): Flow<List<AdventureBooking>> =
+        repository.observeBookings(userId = userId)
 }
 
 class CancelAdventureBookingUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    suspend fun execute(id: String, nationalId: String) {
-        repository.cancelBooking(id = id, nationalId = nationalId)
+    suspend fun execute(id: String) {
+        repository.cancelBooking(id = id)
     }
 }

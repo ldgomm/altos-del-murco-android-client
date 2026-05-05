@@ -4,10 +4,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel.AuthGateRoute
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AltosTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppThemeViewModel
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 
 @Composable
 fun AltosApp(

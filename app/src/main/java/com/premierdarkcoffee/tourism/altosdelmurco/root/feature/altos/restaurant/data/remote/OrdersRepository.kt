@@ -41,10 +41,9 @@ class OrdersRepository @Inject constructor(
             submitFutureFoodReservation(trustedOrder)
         }
 
-        val nationalId = trustedOrder.nationalId?.filter(Char::isDigit).orEmpty()
-        if (nationalId.isNotEmpty() && trustedOrder.appliedRewards.isNotEmpty()) {
+        if (trustedOrder.appliedRewards.isNotEmpty()) {
             loyaltyRewardsRepository.reserveRewards(
-                nationalId = nationalId,
+                userId = trustedOrder.userId,
                 referenceType = LoyaltyRewardReferenceType.ORDER,
                 referenceId = trustedOrder.id,
                 appliedRewards = trustedOrder.appliedRewards,
@@ -54,12 +53,9 @@ class OrdersRepository @Inject constructor(
 
     private suspend fun buildTrustedOrder(order: Order): Order {
         val uid = requireCurrentUid()
-        val cleanNationalId = order.nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() }
-            ?: error("No se encontró una cédula asociada a esta cuenta.")
 
         val trustedItems = order.items.map { requestedItem ->
-            val menuRef = firestore
-                .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+            val menuRef = firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
                 .document(requestedItem.menuItemId)
 
             val menuDto = menuRef.get().awaitResult().toObject(MenuItemDto::class.java)
@@ -79,39 +75,37 @@ class OrdersRepository @Inject constructor(
         }
 
         val preview = loyaltyRewardsRepository.previewRestaurantRewards(
-            nationalId = cleanNationalId,
+            userId = uid,
             items = trustedItems,
         )
 
-        return order
-            .copy(
-                clientId = uid,
-                nationalId = cleanNationalId,
-                clientName = order.clientName.trim(),
-                tableNumber = order.tableNumber.trim().ifBlank {
-                    if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
-                },
-                updatedAt = Date(),
-            )
-            .withTrustedPricing(
-                trustedItems = trustedItems,
-                appliedRewards = preview.appliedRewards,
-                discount = preview.totalDiscount,
-            )
+        return order.copy(
+            userId = uid,
+            clientName = order.clientName.trim(),
+            whatsappNumber = if (order.isScheduledForLater) {
+                normalizedOptionalEcuadorWhatsApp(order.whatsappNumber)
+            } else {
+                ""
+            },
+            tableNumber = order.tableNumber.trim().ifBlank {
+                if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
+            },
+            updatedAt = Date(),
+        ).withTrustedPricing(
+            trustedItems = trustedItems,
+            appliedRewards = preview.appliedRewards,
+            discount = preview.totalDiscount,
+        )
     }
 
     private suspend fun submitFutureFoodReservation(order: Order) {
-        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .document(order.id)
-            .set(OrderDto(order))
-            .awaitResult()
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            .set(OrderDto(order)).awaitResult()
     }
 
     private suspend fun submitAndConsumeCurrentStock(order: Order) {
-        val quantitiesByMenuItemId = order.items
-            .groupBy { it.menuItemId }
-            .mapValues { (_, items) -> items.sumOf { it.quantity } }
-            .filterValues { it > 0 }
+        val quantitiesByMenuItemId = order.items.groupBy { it.menuItemId }
+            .mapValues { (_, items) -> items.sumOf { it.quantity } }.filterValues { it > 0 }
 
         val menuItemsToProcess: List<Pair<DocumentReference, Int>> =
             quantitiesByMenuItemId.map { (menuItemId, totalQuantity) ->
@@ -150,47 +144,55 @@ class OrdersRepository @Inject constructor(
         }.awaitResult()
     }
 
-    override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
+    override fun observeOrders(userId: String): Flow<List<Order>> = callbackFlow {
         val uid = auth.currentUser?.uid?.trim().orEmpty()
+        val trustedUserId = uid.ifBlank { userId.trim() }
 
-        if (uid.isEmpty()) {
+        if (trustedUserId.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
-        val registration: ListenerRegistration = firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("clientId", uid)
-            .orderBy("scheduledAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                when {
-                    error != null -> close(error)
-                    snapshot == null -> trySend(emptyList()).isSuccess
-                    else -> {
-                        val orders = snapshot.documents.mapNotNull { doc ->
-                            runCatching { doc.toObject(OrderDto::class.java)?.toDomain() }
-                                .onFailure {
+        val registration: ListenerRegistration =
+            firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+                .whereEqualTo("userId", trustedUserId)
+                .orderBy("scheduledAt", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    when {
+                        error != null -> close(error)
+                        snapshot == null -> trySend(emptyList()).isSuccess
+                        else -> {
+                            val orders = snapshot.documents.mapNotNull { doc ->
+                                runCatching {
+                                    doc.toObject(OrderDto::class.java)?.toDomain()
+                                }.onFailure {
                                     Log.e(
-                                        "AltosOrders",
-                                        "Could not decode order ${doc.id}",
-                                        it
+                                        "AltosOrders", "Could not decode order ${doc.id}", it
                                     )
-                                }
-                                .getOrNull()
-                        }.sortedWith(
-                            compareByDescending<Order> { it.scheduledAt.time }
-                                .thenByDescending { it.createdAt.time },
-                        )
-                        trySend(orders).isSuccess
+                                }.getOrNull()
+                            }.sortedWith(
+                                compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time },
+                            )
+                            trySend(orders).isSuccess
+                        }
                     }
                 }
-            }
 
         awaitClose { registration.remove() }
     }
 
-    private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
+    private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
+        val digits = rawValue.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+
+        return when {
+            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
+            digits.length == 12 && digits.startsWith("5939") -> digits
+            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+            else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
+        }
+    }
 
     private fun requireCurrentUid(): String {
         return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }

@@ -473,6 +473,14 @@ private fun OrderCard(order: Order) {
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+
+                if (order.isScheduledForLater) {
+                    Text(
+                        text = "WhatsApp: ${order.displayWhatsApp}",
+                        color = palette.textSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
 
             StatusPill(order.status)
@@ -586,15 +594,12 @@ private fun StatusPill(status: OrderStatus) {
 
 private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
     return when (state.grouping) {
-        OrdersGroupingOption.DATE -> state.visibleOrders
-            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
-            .map { it.key to it.value.sortedWith(
-                compareBy<Order> { order -> order.scheduledAt.time }
-                    .thenBy { order -> order.createdAt.time }
-            ) }
+        OrdersGroupingOption.DATE -> state.visibleOrders.groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map {
+                it.key to it.value.sortedWith(compareBy<Order> { order -> order.scheduledAt.time }.thenBy { order -> order.createdAt.time })
+            }
 
-        OrdersGroupingOption.STATUS -> state.visibleOrders
-            .groupBy { it.recalculatedAgendaStatus().title }
+        OrdersGroupingOption.STATUS -> state.visibleOrders.groupBy { it.recalculatedAgendaStatus().title }
             .map { it.key to it.value }
     }
 }
