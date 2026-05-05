@@ -2,6 +2,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Phone
+import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RestaurantMenu
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.TableRestaurant
@@ -60,6 +62,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -103,8 +106,8 @@ fun CheckoutScreen(
 
     var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
 
-    val isScheduledWhatsAppMissing = state.isScheduledForLater &&
-            state.draft.whatsappNumber.filter(Char::isDigit).isEmpty()
+    val isScheduledWhatsAppMissing =
+        state.isScheduledForLater && state.draft.whatsappNumber.filter(Char::isDigit).isEmpty()
 
     fun handleSubmitTapped() {
         if (isScheduledWhatsAppMissing) {
@@ -234,11 +237,7 @@ fun CheckoutScreen(
                         onScheduleNow = onScheduleNow,
                     )
                 }
-
-                item {
-                    CheckoutModeExplanationCard(isScheduledForLater = state.isScheduledForLater)
-                }
-
+                
                 item {
                     CheckoutItemsCard(theme, state)
                 }
@@ -424,82 +423,58 @@ private fun ScheduleCard(
     ) {
         BrandSectionHeader(
             theme = theme,
-            title = "Cuándo preparar",
-            subtitle = "Reserva solo comida para más tarde sin usar actividades de aventura.",
+            title = "¿Cuándo quieres tu comida?",
+            subtitle = "Elige si debemos prepararla ahora o reservarla para más tarde.",
         )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            BrandIconBubble(
+            ScheduleModeOption(
                 theme = theme,
-                icon = if (isScheduledForLater) Icons.Rounded.CalendarMonth else Icons.Rounded.Schedule,
-                size = 44.dp,
+                title = "Preparar ahora",
+                subtitle = "El restaurante recibe el pedido como inmediato. La mesa es obligatoria y WhatsApp no se guarda.",
+                icon = Icons.Rounded.Schedule,
+                selected = !isScheduledForLater,
+                onClick = onScheduleNow,
             )
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isScheduledForLater) "Reserva de comida" else "Pedido inmediato",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = palette.textPrimary,
-                )
-                Text(
-                    text = OrderScheduleFormatter.displayText(scheduledAt),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = palette.textSecondary,
-                )
-            }
-
-            OutlinedButton(
-                enabled = isScheduledForLater,
-                onClick = onScheduleNow,
-            ) {
-                Text("Ahora")
-            }
+            ScheduleModeOption(
+                theme = theme,
+                title = "Programar para después",
+                subtitle = "Reserva solo comida para una fecha y hora específica. La mesa puede quedar por asignar.",
+                icon = Icons.Rounded.CalendarMonth,
+                selected = isScheduledForLater,
+                onClick = {
+                    onScheduledAtChanged(
+                        scheduledAt.coerceToFutureRestaurantSchedule()
+                    )
+                },
+            )
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = { showDatePicker = true },
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.CalendarMonth,
-                    contentDescription = null,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Fecha")
-            }
-
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = { showTimePicker = true },
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Schedule,
-                    contentDescription = null,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Hora")
-            }
+        if (isScheduledForLater) {
+            ScheduledOrderPanel(
+                theme = theme,
+                scheduledAt = scheduledAt,
+                onScheduleNow = onScheduleNow,
+                onPickDate = { showDatePicker = true },
+                onPickTime = { showTimePicker = true },
+            )
+        } else {
+            ImmediateOrderPanel(
+                theme = theme,
+                scheduledAt = scheduledAt,
+            )
         }
-
-        Text(
-            text = "Por defecto es ahora. Si eliges otro día, el pedido se guardará con scheduledAt en restaurant_orders.",
-            style = MaterialTheme.typography.bodySmall,
-            color = palette.textSecondary,
-        )
     }
 
     if (showDatePicker) {
         ScheduleDatePickerDialog(
-            scheduledAt = scheduledAt,
+            scheduledAt = scheduledAt.coerceToFutureRestaurantSchedule(),
             onDismiss = { showDatePicker = false },
             onDateSelected = { next ->
-                onScheduledAtChanged(next)
+                onScheduledAtChanged(next.coerceToFutureRestaurantSchedule())
                 showDatePicker = false
             },
         )
@@ -507,14 +482,310 @@ private fun ScheduleCard(
 
     if (showTimePicker) {
         ScheduleTimePickerDialog(
-            scheduledAt = scheduledAt,
+            scheduledAt = scheduledAt.coerceToFutureRestaurantSchedule(),
             onDismiss = { showTimePicker = false },
             onTimeSelected = { next ->
-                onScheduledAtChanged(next)
+                onScheduledAtChanged(next.coerceToFutureRestaurantSchedule())
                 showTimePicker = false
             },
         )
     }
+}
+
+@Composable
+private fun ScheduleModeOption(
+    theme: AppSectionTheme,
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val shape = RoundedCornerShape(AppTheme.Radius.large)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                if (selected) {
+                    palette.primary.copy(alpha = if (darkTheme) 0.22f else 0.10f)
+                } else {
+                    palette.elevatedCard
+                }
+            )
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) palette.primary else palette.stroke,
+                shape = shape,
+            )
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = icon,
+            size = 44.dp,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                if (selected) {
+                    Text(
+                        text = "Seleccionado",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = palette.primary,
+                    )
+                }
+            }
+
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+        }
+
+        Icon(
+            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = if (selected) palette.primary else palette.textTertiary,
+        )
+    }
+}
+
+@Composable
+private fun ImmediateOrderPanel(
+    theme: AppSectionTheme,
+    scheduledAt: Date,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(20.dp))
+            .padding(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        BrandIconBubble(
+            theme = theme,
+            icon = Icons.Rounded.Schedule,
+            size = 42.dp,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(
+                text = "Se preparará lo antes posible",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = "Este pedido se enviará como inmediato. La mesa es obligatoria para que podamos llevar la comida correctamente.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+
+            Text(
+                text = "Hora estimada: ${OrderScheduleFormatter.displayText(scheduledAt)}",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = palette.primary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ScheduledOrderPanel(
+    theme: AppSectionTheme,
+    scheduledAt: Date,
+    onScheduleNow: () -> Unit,
+    onPickDate: () -> Unit,
+    onPickTime: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+    val warning = restaurantScheduleWarning(scheduledAt)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(20.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = Icons.Rounded.CalendarMonth,
+                size = 42.dp,
+            )
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text(
+                    text = "Comida programada",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = "Prepararemos o confirmaremos tu comida para la fecha elegida. La mesa puede quedar por asignar y WhatsApp ayuda a confirmar disponibilidad.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+
+                Text(
+                    text = OrderScheduleFormatter.displayText(scheduledAt),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.primary,
+                )
+            }
+
+            OutlinedButton(onClick = onScheduleNow) {
+                Text("Ahora")
+            }
+        }
+
+        HorizontalDivider(color = palette.stroke)
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = onPickDate,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.CalendarMonth,
+                    contentDescription = null,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Cambiar fecha")
+            }
+
+            OutlinedButton(
+                modifier = Modifier.weight(1f),
+                onClick = onPickTime,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Schedule,
+                    contentDescription = null,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Cambiar hora")
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = if (warning == null) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+                contentDescription = null,
+                tint = if (warning == null) palette.success else palette.destructive,
+            )
+
+            Text(
+                text = warning
+                    ?: "Esta reserva se guardará con scheduledAt en restaurant_orders para que ADM la vea como comida programada.",
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+private fun Date.coerceToFutureRestaurantSchedule(now: Date = Date()): Date {
+    val minimum = Calendar.getInstance().apply {
+        time = now
+        add(Calendar.MINUTE, 30)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time.roundToNextQuarterHour()
+
+    val candidate = if (before(minimum)) minimum else this
+    return candidate.roundToNextQuarterHour()
+}
+
+private fun Date.roundToNextQuarterHour(): Date {
+    return Calendar.getInstance().apply {
+        time = this@roundToNextQuarterHour
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+
+        val minute = get(Calendar.MINUTE)
+        val remainder = minute % 15
+        if (remainder != 0) {
+            add(Calendar.MINUTE, 15 - remainder)
+        }
+    }.time
+}
+
+private fun restaurantScheduleWarning(
+    scheduledAt: Date,
+    now: Date = Date(),
+): String? {
+    val minimum = Calendar.getInstance().apply {
+        time = now
+        add(Calendar.MINUTE, 30)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time.roundToNextQuarterHour()
+
+    if (scheduledAt.before(minimum)) {
+        return "Programa tu pedido con al menos 30 minutos de anticipación."
+    }
+
+    val calendar = Calendar.getInstance().apply { time = scheduledAt }
+    val hour = calendar.get(Calendar.HOUR_OF_DAY)
+    val minute = calendar.get(Calendar.MINUTE)
+    val minutesFromStartOfDay = hour * 60 + minute
+
+    if (minutesFromStartOfDay !in (7 * 60)..(20 * 60)) {
+        return "Elige una hora entre 7:00 y 20:00 para evitar confusiones con cocina."
+    }
+
+    return null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -766,16 +1037,11 @@ private fun OrderSummaryCard(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         BrandSectionHeader(
-            theme = theme,
-            title = "Resumen",
-            subtitle = "Revisa el total antes de enviar."
+            theme = theme, title = "Resumen", subtitle = "Revisa el total antes de enviar."
         )
         SummaryLine("Subtotal", subtotal.priceLabel(), palette.textSecondary, palette.textPrimary)
         if (discount > 0.0) SummaryLine(
-            "Beneficios",
-            "-${discount.priceLabel()}",
-            palette.textSecondary,
-            palette.success
+            "Beneficios", "-${discount.priceLabel()}", palette.textSecondary, palette.success
         )
         SummaryLine(
             if (isScheduledForLater) "Reserva" else "Hora",
@@ -785,11 +1051,7 @@ private fun OrderSummaryCard(
         )
         HorizontalDivider(color = palette.stroke.copy(alpha = 0.72f))
         SummaryLine(
-            "Total",
-            total.priceLabel(),
-            palette.textPrimary,
-            palette.textPrimary,
-            emphasized = true
+            "Total", total.priceLabel(), palette.textPrimary, palette.textPrimary, emphasized = true
         )
     }
 }

@@ -217,10 +217,9 @@ data class AdventureAppliedRewardDto(
 }
 
 data class AdventureBookingDto(
-    val clientId: String? = null,
+    val userId: String = "",
     val clientName: String = "",
     val whatsappNumber: String = "",
-    val nationalId: String = "",
     val startDayKey: String = "",
     val startAt: Timestamp = Timestamp.now(),
     val endAt: Timestamp = Timestamp.now(),
@@ -245,10 +244,9 @@ data class AdventureBookingDto(
 ) {
     fun toDomain(documentId: String): AdventureBooking = AdventureBooking(
         id = documentId,
-        clientId = clientId,
-        clientName = clientName,
+        userId = userId,
+        clientName = clientName.ifBlank { "Cliente" },
         whatsappNumber = whatsappNumber,
-        nationalId = nationalId,
         startDayKey = startDayKey,
         startAt = startAt.toDate(),
         endAt = endAt.toDate(),
@@ -279,10 +277,9 @@ data class AdventureBookingDto(
             createdAt: Date,
             status: AdventureBookingStatus = AdventureBookingStatus.PENDING,
         ): AdventureBookingDto = AdventureBookingDto(
-            clientId = request.clientId,
-            clientName = request.clientName,
-            whatsappNumber = request.whatsappNumber,
-            nationalId = request.nationalId,
+            userId = request.userId,
+            clientName = request.clientName.trim().ifBlank { "Cliente" },
+            whatsappNumber = request.whatsappNumber.trim(),
             startDayKey = AdventureDateHelper.dayKey(plan.startAt),
             startAt = Timestamp(plan.startAt),
             endAt = Timestamp(plan.endAt),
@@ -983,12 +980,18 @@ enum class AdventureActivityType(
     val legacySystemImage: String,
     val legacyDurationOptions: List<Int>,
 ) {
-    OFF_ROAD("offRoad", "Off-road 4x4", "car.fill", listOf(60, 120, 180)),
-    PAINTBALL("paintball", "Paintball", "shield.lefthalf.filled", listOf(30, 60, 90, 120)),
-    GO_KARTS("goKarts", "Go karts", "flag.checkered", listOf(30, 60, 90, 120)),
-    SHOOTING_RANGE("shootingRange", "Campo de tiro", "target", listOf(30, 60, 90, 120)),
-    CAMPING("camping", "Camping", "tent.fill", emptyList()),
-    EXTREME_SLIDE("extremeSlide", "Resbaladera extrema", "figure.fall", listOf(30));
+    OFF_ROAD("offRoad", "Off-road 4x4", "car.fill", listOf(60, 120, 180)), PAINTBALL(
+        "paintball", "Paintball", "shield.lefthalf.filled", listOf(30, 60, 90, 120)
+    ),
+    GO_KARTS(
+        "goKarts", "Go karts", "flag.checkered", listOf(30, 60, 90, 120)
+    ),
+    SHOOTING_RANGE(
+        "shootingRange", "Campo de tiro", "target", listOf(30, 60, 90, 120)
+    ),
+    CAMPING("camping", "Camping", "tent.fill", emptyList()), EXTREME_SLIDE(
+        "extremeSlide", "Resbaladera extrema", "figure.fall", listOf(30)
+    );
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureActivityType? {
@@ -1056,20 +1059,17 @@ enum class AdventureActivityType(
             }
 
         fun defaultDraft(
-            activity: AdventureActivityType,
-            catalog: AdventureCatalogSnapshot?
+            activity: AdventureActivityType, catalog: AdventureCatalogSnapshot?
         ): AdventureReservationItemDraft =
             catalog?.activity(activity)?.defaultDraft ?: defaultDraft(activity)
     }
 }
 
 enum class AdventureResourceType(val rawValue: String) {
-    OFF_ROAD_VEHICLES("offRoadVehicles"),
-    PAINTBALL_PEOPLE("paintballPeople"),
-    GO_KART_PEOPLE("goKartPeople"),
-    SHOOTING_PEOPLE("shootingPeople"),
-    CAMPING_PEOPLE("campingPeople"),
-    EXTREME_SLIDE_PEOPLE("extremeSlidePeople");
+    OFF_ROAD_VEHICLES("offRoadVehicles"), PAINTBALL_PEOPLE("paintballPeople"), GO_KART_PEOPLE("goKartPeople"), SHOOTING_PEOPLE(
+        "shootingPeople"
+    ),
+    CAMPING_PEOPLE("campingPeople"), EXTREME_SLIDE_PEOPLE("extremeSlidePeople");
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureResourceType? {
@@ -1082,29 +1082,29 @@ enum class AdventureResourceType(val rawValue: String) {
 }
 
 enum class AdventureBookingStatus(val rawValue: String, val title: String) {
-    PENDING("pending", "Pendiente"),
-    CONFIRMED("confirmed", "Confirmada"),
-    COMPLETED("completed", "Completada"),
+    PENDING("pending", "Pendiente"), CONFIRMED("confirmed", "Confirmada"), COMPLETED(
+        "completed", "Completada"
+    ),
     CANCELED("canceled", "Cancelada");
 
     companion object {
         fun fromRaw(rawValue: String?): AdventureBookingStatus {
             val key = rawValue?.normalizedAdventureKey().orEmpty()
             return entries.firstOrNull {
-                it.rawValue.normalizedAdventureKey() == key ||
-                        it.name.normalizedAdventureKey() == key
+                it.rawValue.normalizedAdventureKey() == key || it.name.normalizedAdventureKey() == key
             } ?: PENDING
         }
     }
 }
 
 enum class ReservationEventType(val rawValue: String, val title: String) {
-    REGULAR_VISIT("regularVisit", "Visita regular"),
-    BIRTHDAY("birthday", "Cumpleaños"),
-    ANNIVERSARY("anniversary", "Aniversario"),
-    CORPORATE("corporate", "Evento corporativo"),
-    FAMILY_GATHERING("familyGathering", "Reunión familiar"),
-    CUSTOM("custom", "Otro");
+    REGULAR_VISIT("regularVisit", "Visita regular"), BIRTHDAY(
+        "birthday", "Cumpleaños"
+    ),
+    ANNIVERSARY("anniversary", "Aniversario"), CORPORATE(
+        "corporate", "Evento corporativo"
+    ),
+    FAMILY_GATHERING("familyGathering", "Reunión familiar"), CUSTOM("custom", "Otro");
 
     companion object {
         fun fromRaw(rawValue: String?): ReservationEventType {
@@ -1117,8 +1117,9 @@ enum class ReservationEventType(val rawValue: String, val title: String) {
 }
 
 enum class ReservationServingMoment(val rawValue: String, val title: String) {
-    ON_ARRIVAL("onArrival", "Al llegar"),
-    AFTER_ACTIVITIES("afterActivities", "Después de actividades"),
+    ON_ARRIVAL("onArrival", "Al llegar"), AFTER_ACTIVITIES(
+        "afterActivities", "Después de actividades"
+    ),
     SPECIFIC_TIME("specificTime", "Hora específica");
 
     companion object {
@@ -1145,9 +1146,7 @@ data class AdventureReservationItemDraft(
     val summaryText: String
         get() = when (activity) {
             AdventureActivityType.OFF_ROAD -> "${durationMinutes / 60}h • $vehicleCount vehículo(s) • $offRoadRiderCount persona(s)"
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> "$durationMinutes min • $peopleCount persona(s)"
+            AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> "$durationMinutes min • $peopleCount persona(s)"
 
             AdventureActivityType.CAMPING -> "$nights noche(s) • $peopleCount persona(s)"
             AdventureActivityType.EXTREME_SLIDE -> "1 sesión • $peopleCount persona(s) • transporte incluido"
@@ -1224,10 +1223,10 @@ data class AdventureAvailabilitySlot(
 )
 
 data class AdventureBookingRequest(
-    val clientId: String?,
+    /** Firebase Auth UID. Canonical owner field for all reads/writes. */
+    val userId: String,
     val clientName: String,
     val whatsappNumber: String,
-    val nationalId: String,
     val date: Date,
     val selectedStartAt: Date,
     val guestCount: Int,
@@ -1247,10 +1246,9 @@ data class AdventureBookingRequest(
 
 data class AdventureBooking(
     val id: String,
-    val clientId: String?,
+    val userId: String,
     val clientName: String,
     val whatsappNumber: String,
-    val nationalId: String,
     val startDayKey: String,
     val startAt: Date,
     val endAt: Date,
@@ -1319,14 +1317,13 @@ object AdventureDateHelper {
     fun timeText(date: Date): String = timeFormatter.format(date)
     fun shortDateText(date: Date): String = shortDateFormatter.format(date)
 
-    fun dateOn(day: Date, hour: Int, minute: Int): Date =
-        Calendar.getInstance().apply {
-            time = day
-            set(Calendar.HOUR_OF_DAY, hour)
-            set(Calendar.MINUTE, minute)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }.time
+    fun dateOn(day: Date, hour: Int, minute: Int): Date = Calendar.getInstance().apply {
+        time = day
+        set(Calendar.HOUR_OF_DAY, hour)
+        set(Calendar.MINUTE, minute)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }.time
 
     fun addMinutes(value: Int, date: Date): Date = Calendar.getInstance().apply {
         time = date
@@ -1358,9 +1355,7 @@ object AdventureDateHelper {
     fun isNightPremiumTime(startAt: Date, endAt: Date): Boolean {
         val startHour = Calendar.getInstance().apply { time = startAt }.get(Calendar.HOUR_OF_DAY)
         val endHour = Calendar.getInstance().apply { time = endAt }.get(Calendar.HOUR_OF_DAY)
-        return startHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR ||
-                endHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR ||
-                startHour < AdventureSchedule.DAYTIME_START_HOUR
+        return startHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR || endHour >= AdventureSchedule.NIGHT_PREMIUM_START_HOUR || startHour < AdventureSchedule.DAYTIME_START_HOUR
     }
 
     fun combineDayAndTime(day: Date, time: Date): Date {
@@ -1380,38 +1375,32 @@ object AdventurePricingEngine {
         (config.basePrice - config.discountAmount).coerceAtLeast(0.0).adventureRoundMoney()
 
     fun lineBaseSubtotal(
-        item: AdventureReservationItemDraft,
-        config: AdventureActivityCatalogItem
-    ): Double =
-        when (item.activity) {
-            AdventureActivityType.OFF_ROAD -> config.basePrice * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> config.basePrice * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+        item: AdventureReservationItemDraft, config: AdventureActivityCatalogItem
+    ): Double = when (item.activity) {
+        AdventureActivityType.OFF_ROAD -> config.basePrice * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+        AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> config.basePrice * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
 
-            AdventureActivityType.CAMPING -> config.basePrice * item.peopleCount * item.nights.coerceAtLeast(
-                1
-            )
+        AdventureActivityType.CAMPING -> config.basePrice * item.peopleCount * item.nights.coerceAtLeast(
+            1
+        )
 
-            AdventureActivityType.EXTREME_SLIDE -> config.basePrice * item.peopleCount
-        }.adventureRoundMoney()
+        AdventureActivityType.EXTREME_SLIDE -> config.basePrice * item.peopleCount
+    }.adventureRoundMoney()
 
     fun subtotal(
-        item: AdventureReservationItemDraft,
-        config: AdventureActivityCatalogItem
-    ): Double =
-        when (item.activity) {
-            AdventureActivityType.OFF_ROAD -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
-            AdventureActivityType.PAINTBALL,
-            AdventureActivityType.GO_KARTS,
-            AdventureActivityType.SHOOTING_RANGE -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
+        item: AdventureReservationItemDraft, config: AdventureActivityCatalogItem
+    ): Double = when (item.activity) {
+        AdventureActivityType.OFF_ROAD -> finalUnitPrice(config) * (item.durationMinutes.toDouble() / 60.0) * item.vehicleCount
+        AdventureActivityType.PAINTBALL, AdventureActivityType.GO_KARTS, AdventureActivityType.SHOOTING_RANGE -> finalUnitPrice(
+            config
+        ) * (item.durationMinutes.toDouble() / 30.0) * item.peopleCount
 
-            AdventureActivityType.CAMPING -> finalUnitPrice(config) * item.peopleCount * item.nights.coerceAtLeast(
-                1
-            )
+        AdventureActivityType.CAMPING -> finalUnitPrice(config) * item.peopleCount * item.nights.coerceAtLeast(
+            1
+        )
 
-            AdventureActivityType.EXTREME_SLIDE -> finalUnitPrice(config) * item.peopleCount
-        }.adventureRoundMoney()
+        AdventureActivityType.EXTREME_SLIDE -> finalUnitPrice(config) * item.peopleCount
+    }.adventureRoundMoney()
 
     fun subtotal(item: AdventureReservationItemDraft, catalog: AdventureCatalogSnapshot): Double {
         val config = catalog.activity(item.activity) ?: return 0.0
@@ -1419,8 +1408,7 @@ object AdventurePricingEngine {
     }
 
     fun lineDiscountAmount(
-        item: AdventureReservationItemDraft,
-        catalog: AdventureCatalogSnapshot
+        item: AdventureReservationItemDraft, catalog: AdventureCatalogSnapshot
     ): Double {
         val config = catalog.activity(item.activity) ?: return 0.0
         return (lineBaseSubtotal(item, config) - subtotal(item, config)).coerceAtLeast(0.0)
@@ -1428,16 +1416,12 @@ object AdventurePricingEngine {
     }
 
     fun estimatedSubtotal(
-        items: List<AdventureReservationItemDraft>,
-        catalog: AdventureCatalogSnapshot
-    ): Double =
-        items.sumOf { subtotal(it, catalog) }.adventureRoundMoney()
+        items: List<AdventureReservationItemDraft>, catalog: AdventureCatalogSnapshot
+    ): Double = items.sumOf { subtotal(it, catalog) }.adventureRoundMoney()
 
     fun estimatedDiscountAmount(
-        items: List<AdventureReservationItemDraft>,
-        catalog: AdventureCatalogSnapshot
-    ): Double =
-        items.sumOf { lineDiscountAmount(it, catalog) }.adventureRoundMoney()
+        items: List<AdventureReservationItemDraft>, catalog: AdventureCatalogSnapshot
+    ): Double = items.sumOf { lineDiscountAmount(it, catalog) }.adventureRoundMoney()
 
     fun foodSubtotal(foodReservation: ReservationFoodDraft?): Double =
         (foodReservation?.subtotal ?: 0.0).adventureRoundMoney()
@@ -1446,9 +1430,9 @@ object AdventurePricingEngine {
         items: List<AdventureReservationItemDraft>,
         packageDiscountAmount: Double,
         catalog: AdventureCatalogSnapshot,
-    ): Double = (estimatedSubtotal(items, catalog) - packageDiscountAmount.coerceAtLeast(0.0))
-        .coerceAtLeast(0.0)
-        .adventureRoundMoney()
+    ): Double = (estimatedSubtotal(
+        items, catalog
+    ) - packageDiscountAmount.coerceAtLeast(0.0)).coerceAtLeast(0.0).adventureRoundMoney()
 }
 
 object AdventurePlanner {
@@ -1471,8 +1455,7 @@ object AdventurePlanner {
 
         if (items.isEmpty()) {
             val end = AdventureDateHelper.addMinutes(
-                AdventureSchedule.FOOD_ONLY_DEFAULT_DURATION_MINUTES,
-                startAt
+                AdventureSchedule.FOOD_ONLY_DEFAULT_DURATION_MINUTES, startAt
             )
             if (end.after(dayEnd)) return null
             return AdventureBuildPlan(
@@ -1542,14 +1525,11 @@ object AdventurePlanner {
                     cursor = end
                 }
 
-                AdventureActivityType.PAINTBALL ->
-                    if (!addSimpleBlock(AdventureResourceType.PAINTBALL_PEOPLE)) return null
+                AdventureActivityType.PAINTBALL -> if (!addSimpleBlock(AdventureResourceType.PAINTBALL_PEOPLE)) return null
 
-                AdventureActivityType.GO_KARTS ->
-                    if (!addSimpleBlock(AdventureResourceType.GO_KART_PEOPLE)) return null
+                AdventureActivityType.GO_KARTS -> if (!addSimpleBlock(AdventureResourceType.GO_KART_PEOPLE)) return null
 
-                AdventureActivityType.SHOOTING_RANGE ->
-                    if (!addSimpleBlock(AdventureResourceType.SHOOTING_PEOPLE)) return null
+                AdventureActivityType.SHOOTING_RANGE -> if (!addSimpleBlock(AdventureResourceType.SHOOTING_PEOPLE)) return null
 
                 AdventureActivityType.EXTREME_SLIDE -> {
                     val transportVehicles = max(
@@ -1625,8 +1605,12 @@ object AdventurePlanner {
         }
 
         val last = blocks.lastOrNull() ?: return null
-        val hasNightPremium = items.any { it.activity == AdventureActivityType.CAMPING } ||
-                blocks.any { AdventureDateHelper.isNightPremiumTime(it.startAt, it.endAt) }
+        val hasNightPremium =
+            items.any { it.activity == AdventureActivityType.CAMPING } || blocks.any {
+                AdventureDateHelper.isNightPremiumTime(
+                    it.startAt, it.endAt
+                )
+            }
 
         val packageDiscount = packageDiscountAmount.coerceAtLeast(0.0)
         val totalDiscountAmount = (activityDiscountAmount + packageDiscount).adventureRoundMoney()
@@ -1658,8 +1642,7 @@ object AdventurePlanner {
         return (0 until days).map {
             AdventureDateHelper.dayKey(
                 AdventureDateHelper.addDays(
-                    it,
-                    day
+                    it, day
                 )
             )
         }
@@ -1754,15 +1737,15 @@ class CreateAdventureBookingUseCase @Inject constructor(
 class ObserveAdventureBookingsUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    fun execute(nationalId: String): Flow<List<AdventureBooking>> =
-        repository.observeBookings(nationalId = nationalId)
+    fun execute(userId: String): Flow<List<AdventureBooking>> =
+        repository.observeBookings(userId = userId)
 }
 
 class CancelAdventureBookingUseCase @Inject constructor(
     private val repository: AdventureBookingsRepositoriable,
 ) {
-    suspend fun execute(id: String, nationalId: String) {
-        repository.cancelBooking(id = id, nationalId = nationalId)
+    suspend fun execute(id: String) {
+        repository.cancelBooking(id = id)
     }
 }
 
@@ -2016,7 +1999,7 @@ private fun AdventureScreenContent(
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
         catalogViewModel.onAppear()
         builderViewModel.onAppear(sessionState.profile)
-        menuViewModel.onAppear(sessionState.profile.nationalId)
+        menuViewModel.onAppear(sessionState.profile.userId)
     }
 
     LaunchedEffect(
@@ -2127,7 +2110,7 @@ private fun AdventureScreenContent(
                 menuSections = menuState.sections,
                 onBack = { mode = AdventureMode.Catalog },
                 onAddFood = { showFoodPicker = true },
-                clientId = sessionState.profile.id,
+                userId = sessionState.profile.userId,
             )
         }
     }
@@ -2437,13 +2420,69 @@ private fun AdventureBuilderContent(
     menuSections: List<MenuSection>,
     onBack: () -> Unit,
     onAddFood: () -> Unit,
-    clientId: String?,
+    userId: String?,
     modifier: Modifier = Modifier,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val palette = LocalBrandPalette.current
+    val context = LocalContext.current
 
     var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
+    var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        viewModel.openWhatsAppAfterSubmit.collect {
+            context.openAltosWhatsAppForAdventureConfirmation()
+        }
+    }
+
+    fun handleSubmitTapped() {
+        when {
+            state.clientName.trim().isEmpty() -> {
+                viewModel.presentError("Ingresa tu nombre para enviar la reserva.")
+            }
+
+            state.whatsappNumber.filter(Char::isDigit).isEmpty() -> {
+                showMissingWhatsAppDialog = true
+            }
+
+            else -> {
+                viewModel.submit(userId)
+            }
+        }
+    }
+
+    if (showMissingWhatsAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showMissingWhatsAppDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMissingWhatsAppDialog = false
+                        viewModel.submit(userId, openWhatsAppAfterSubmit = true)
+                    },
+                ) {
+                    Text("Enviar y escribir por WhatsApp", color = palette.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMissingWhatsAppDialog = false }) {
+                    Text("Agregar WhatsApp aquí", color = palette.textSecondary)
+                }
+            },
+            title = {
+                Text("Confirmar por WhatsApp", color = palette.textPrimary)
+            },
+            text = {
+                Text(
+                    text = "Puedes enviar la reserva sin número. Al finalizar abriremos WhatsApp para que nos escribas.",
+                    color = palette.textSecondary,
+                )
+            },
+            containerColor = palette.elevatedCard,
+        )
+    }
+
     var editingFood by remember { mutableStateOf<ReservationFoodItemDraft?>(null) }
 
     editingItem?.let { item ->
@@ -2481,7 +2520,7 @@ private fun AdventureBuilderContent(
             ) {
                 BrandPrimaryButton(
                     theme = AdventureTheme,
-                    onClick = { viewModel.submit(clientId) },
+                    onClick = { handleSubmitTapped() },
                     enabled = !state.isSubmitting && state.selectedSlot != null,
                 ) {
                     if (state.isSubmitting) {
@@ -3159,12 +3198,30 @@ private fun AdventureContactSection(
     AdventureCard {
         AdventureSectionTitle(
             title = "Contacto",
-            subtitle = "Datos sincronizados desde tu perfil.",
+            subtitle = "Solo el nombre es obligatorio. WhatsApp es opcional.",
         )
 
-        ContactLine(Icons.Rounded.Person, "Nombre", state.clientName)
-        ContactLine(Icons.Rounded.Phone, "WhatsApp", state.whatsappNumber)
-        ContactLine(Icons.Rounded.Event, "Cédula", state.nationalId)
+        AdventureOutlinedTextField(
+            value = state.clientName,
+            onValueChange = viewModel::setClientName,
+            label = "Nombre para la reserva",
+        )
+
+        AdventureOutlinedTextField(
+            value = state.whatsappNumber,
+            onValueChange = viewModel::setWhatsapp,
+            label = "WhatsApp opcional",
+        )
+
+        Text(
+            text = if (state.clientName.trim().isEmpty()) {
+                "Necesitamos un nombre para identificar tu reserva."
+            } else {
+                "Puedes dejar el número vacío y escribirnos por WhatsApp después de enviar la reserva."
+            },
+            color = LocalBrandPalette.current.textSecondary,
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         AdventureOutlinedTextField(
             value = state.notes,
@@ -3889,6 +3946,17 @@ private fun adventureTextFieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTrailingIconColor = LocalBrandPalette.current.primary,
     unfocusedTrailingIconColor = LocalBrandPalette.current.textSecondary,
 )
+
+private fun Context.openAltosWhatsAppForAdventureConfirmation() {
+    val message =
+        "Hola Altos del Murco, acabo de enviar una reserva desde la app y quiero confirmar disponibilidad lo antes posible."
+    val encoded = URLEncoder.encode(message, "UTF-8")
+    val uri = "https://wa.me/593967188093?text=$encoded".toUri()
+    val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { startActivity(intent) }
+}
 
 ```
 
@@ -4799,7 +4867,6 @@ class AdventureCatalogViewModel @Inject constructor(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel
 
 
-
 data class AdventureComboBuilderUiState(
     val selectedDate: Date = Date(),
     val items: List<AdventureReservationItemDraft> = emptyList(),
@@ -4813,7 +4880,7 @@ data class AdventureComboBuilderUiState(
     val foodNotes: String = "",
     val clientName: String = "",
     val whatsappNumber: String = "",
-    val nationalId: String = "",
+    val userId: String = "",
     val notes: String = "",
     val packageDiscountAmount: Double = 0.0,
     val selectedPackageId: String? = null,
@@ -4859,6 +4926,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
     val uiState: StateFlow<AdventureComboBuilderUiState> = _uiState.asStateFlow()
 
     private val rewardPreviewRequests = MutableStateFlow<RewardPreviewInput?>(null)
+    private val _openWhatsAppAfterSubmit = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openWhatsAppAfterSubmit: SharedFlow<Unit> = _openWhatsAppAfterSubmit.asSharedFlow()
+
     private var catalogJob: Job? = null
     private var availabilityJob: Job? = null
     private var rewardPreviewJob: Job? = null
@@ -4878,11 +4948,11 @@ class AdventureComboBuilderViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        _uiState.update {
-            it.copy(
-                clientName = profile.fullName,
-                whatsappNumber = profile.phoneNumber,
-                nationalId = profile.nationalId.filter(Char::isDigit),
+        _uiState.update { current ->
+            current.copy(
+                userId = profile.userId,
+                clientName = current.clientName.ifBlank { profile.fullName },
+                whatsappNumber = current.whatsappNumber.ifBlank { profile.phoneNumber },
             )
         }
         requestRewardPreview()
@@ -4912,8 +4982,8 @@ class AdventureComboBuilderViewModel @Inject constructor(
     fun setClientName(value: String) = updateState { copy(clientName = value) }
     fun setWhatsapp(value: String) = updateState { copy(whatsappNumber = value) }
 
-    fun setNationalId(value: String) {
-        updateState { copy(nationalId = value.filter(Char::isDigit)) }
+    fun setUserId(value: String) {
+        updateState { copy(userId = value.trim()) }
         requestRewardPreview()
     }
 
@@ -5053,9 +5123,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
         } else {
             current.add(
                 ReservationFoodItemDraft(
-                    menuItem = menuItem,
-                    quantity = quantity,
-                    notes = cleanNotes
+                    menuItem = menuItem, quantity = quantity, notes = cleanNotes
                 )
             )
         }
@@ -5089,7 +5157,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
         _uiState.update { it.copy(selectedSlot = slot) }
     }
 
-    fun submit(clientId: String?) {
+    fun submit(userId: String?, openWhatsAppAfterSubmit: Boolean = false) {
         val state = _uiState.value
         val selectedSlot = state.selectedSlot
         val validationMessage = validateBeforeSubmit(state)
@@ -5103,20 +5171,23 @@ class AdventureComboBuilderViewModel @Inject constructor(
         }
 
         val pricingBreakdown = pricingBreakdownFor(state)
+        val resolvedUserId = userId?.trim().orEmpty().ifBlank { state.userId.trim() }
+
+        if (resolvedUserId.isBlank()) {
+            presentError("Debes iniciar sesión nuevamente para continuar.")
+            return
+        }
 
         viewModelScope.launch {
             _uiState.update {
                 it.copy(
-                    isSubmitting = true,
-                    errorMessage = null,
-                    successMessage = null
+                    isSubmitting = true, errorMessage = null, successMessage = null
                 )
             }
             val request = AdventureBookingRequest(
-                clientId = clientId,
+                userId = resolvedUserId,
                 clientName = state.clientName.trim(),
                 whatsappNumber = state.whatsappNumber.trim(),
-                nationalId = state.nationalId.filter(Char::isDigit),
                 date = state.selectedDate,
                 selectedStartAt = selectedSlot.startAt,
                 guestCount = state.guestCount.coerceAtLeast(1),
@@ -5142,6 +5213,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
                         selectedSlot = null,
                     )
                 }
+                if (openWhatsAppAfterSubmit) {
+                    _openWhatsAppAfterSubmit.tryEmit(Unit)
+                }
                 refreshAvailability()
             }.onFailure { error ->
                 _uiState.update {
@@ -5165,8 +5239,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
 
     val estimatedAdventureSubtotal: Double
         get() = AdventurePricingEngine.estimatedSubtotal(
-            _uiState.value.items,
-            _uiState.value.catalog
+            _uiState.value.items, _uiState.value.catalog
         )
 
     val estimatedFoodSubtotal: Double
@@ -5222,20 +5295,19 @@ class AdventureComboBuilderViewModel @Inject constructor(
         (item.subtotal - rewardAmount(item)).coerceAtLeast(0.0).adventureRoundMoney()
 
     fun rewardAmount(item: ReservationFoodItemDraft): Double =
-        _uiState.value.rewardPreview.appliedRewards
-            .filter { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
-            .sumOf { it.amount }
-            .adventureRoundMoney()
+        _uiState.value.rewardPreview.appliedRewards.filter { reward ->
+            reward.affectedMenuItemIds.contains(item.menuItemId)
+        }.sumOf { it.amount }.adventureRoundMoney()
 
     fun appliedRewardPresentation(item: AdventureReservationItemDraft): RewardPresentation? =
-        _uiState.value.rewardPreview.appliedRewards
-            .firstOrNull { reward -> reward.affectedActivityIds.contains(item.activity.rawValue) }
-            ?.let(RewardPresentation::fromAppliedReward)
+        _uiState.value.rewardPreview.appliedRewards.firstOrNull { reward ->
+            reward.affectedActivityIds.contains(item.activity.rawValue)
+        }?.let(RewardPresentation::fromAppliedReward)
 
     fun appliedRewardPresentation(item: ReservationFoodItemDraft): RewardPresentation? =
-        _uiState.value.rewardPreview.appliedRewards
-            .firstOrNull { reward -> reward.affectedMenuItemIds.contains(item.menuItemId) }
-            ?.let(RewardPresentation::fromAppliedReward)
+        _uiState.value.rewardPreview.appliedRewards.firstOrNull { reward ->
+            reward.affectedMenuItemIds.contains(item.menuItemId)
+        }?.let(RewardPresentation::fromAppliedReward)
 
     fun catalogRewardPresentation(activity: AdventureActivityCatalogItem): RewardPresentation? =
         RewardPresentationFactory.activityPresentation(
@@ -5303,9 +5375,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
             availabilityJob?.cancel()
             _uiState.update {
                 it.copy(
-                    availableSlots = emptyList(),
-                    selectedSlot = null,
-                    isLoadingAvailability = false
+                    availableSlots = emptyList(), selectedSlot = null, isLoadingAvailability = false
                 )
             }
             return
@@ -5351,52 +5421,46 @@ class AdventureComboBuilderViewModel @Inject constructor(
         if (catalogJob?.isActive == true) return
         catalogJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingCatalog = true, errorMessage = null) }
-            observeAdventureCatalogUseCase.execute()
-                .catch { error ->
-                    if (error is CancellationException) throw error
-                    _uiState.update {
-                        it.copy(
-                            isLoadingCatalog = false,
-                            errorMessage = error.message ?: "No se pudo cargar aventura.",
-                        )
-                    }
+            observeAdventureCatalogUseCase.execute().catch { error ->
+                if (error is CancellationException) throw error
+                _uiState.update {
+                    it.copy(
+                        isLoadingCatalog = false,
+                        errorMessage = error.message ?: "No se pudo cargar aventura.",
+                    )
                 }
-                .collectLatest { catalog ->
-                    _uiState.update { state ->
-                        val validItems =
-                            state.items.filter { catalog.activity(it.activity)?.isActive == true }
-                        state.copy(
-                            catalog = catalog,
-                            items = validItems,
-                            packageDiscountAmount = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).comboDiscountAmount,
-                            selectedPackageId = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).matchedPackageId,
-                            selectedPackageTitle = pricingBreakdownFor(
-                                state.copy(catalog = catalog, items = validItems)
-                            ).matchedPackageTitle,
-                            isLoadingCatalog = false,
-                            errorMessage = null,
-                        )
-                    }
-                    requestRewardPreview()
-                    refreshAvailability()
+            }.collectLatest { catalog ->
+                _uiState.update { state ->
+                    val validItems =
+                        state.items.filter { catalog.activity(it.activity)?.isActive == true }
+                    state.copy(
+                        catalog = catalog,
+                        items = validItems,
+                        packageDiscountAmount = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).comboDiscountAmount,
+                        selectedPackageId = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).matchedPackageId,
+                        selectedPackageTitle = pricingBreakdownFor(
+                            state.copy(catalog = catalog, items = validItems)
+                        ).matchedPackageTitle,
+                        isLoadingCatalog = false,
+                        errorMessage = null,
+                    )
                 }
+                requestRewardPreview()
+                refreshAvailability()
+            }
         }
     }
 
     private fun startRewardPreviewLoop() {
         rewardPreviewJob?.cancel()
         rewardPreviewJob = viewModelScope.launch {
-            rewardPreviewRequests
-                .filter { it != null }
-                .map { requireNotNull(it) }
-                .distinctUntilChanged()
-                .debounce(180)
-                .collectLatest { input ->
-                    if (input.nationalId.isBlank()) {
+            rewardPreviewRequests.filter { it != null }.map { requireNotNull(it) }
+                .distinctUntilChanged().debounce(180).collectLatest { input ->
+                    if (input.userId.isBlank()) {
                         _uiState.update {
                             it.copy(
                                 rewardPreview = RewardComputationResult.empty(
@@ -5410,7 +5474,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoadingRewards = true) }
                     runCatching {
                         loyaltyRewardsRepository.previewAdventureRewards(
-                            nationalId = input.nationalId,
+                            userId = input.userId,
                             activityItems = input.activityItems,
                             foodItems = input.foodItems,
                             catalog = input.catalog,
@@ -5428,7 +5492,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
                             it.copy(
                                 rewardPreview = RewardComputationResult.empty(
                                     RewardWalletSnapshot.empty(
-                                        input.nationalId
+                                        input.userId
                                     )
                                 ),
                                 isLoadingRewards = false,
@@ -5442,7 +5506,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
     private fun requestRewardPreview() {
         val state = _uiState.value
         rewardPreviewRequests.value = RewardPreviewInput(
-            nationalId = state.nationalId.filter(Char::isDigit),
+            userId = state.userId.trim(),
             activityItems = state.items,
             foodItems = state.foodItems,
             catalog = state.catalog,
@@ -5482,10 +5546,9 @@ class AdventureComboBuilderViewModel @Inject constructor(
     }
 
     private fun rewardAmountForActivity(activity: AdventureActivityType): Double =
-        _uiState.value.rewardPreview.appliedRewards
-            .filter { reward -> reward.affectedActivityIds.contains(activity.rawValue) }
-            .sumOf { it.amount }
-            .adventureRoundMoney()
+        _uiState.value.rewardPreview.appliedRewards.filter { reward ->
+            reward.affectedActivityIds.contains(activity.rawValue)
+        }.sumOf { it.amount }.adventureRoundMoney()
 
     private fun pricingBreakdownFor(state: AdventureComboBuilderUiState): ExperienceComboPricingBreakdown =
         ExperienceComboPricingPolicy.calculate(
@@ -5509,11 +5572,7 @@ class AdventureComboBuilderViewModel @Inject constructor(
 
     private fun validateBeforeSubmit(state: AdventureComboBuilderUiState): String? {
         if (state.items.isEmpty() && state.foodItems.isEmpty()) return "Agrega al menos una actividad o comida."
-        if (state.clientName.trim().isEmpty()) return "Tu perfil no tiene nombre registrado."
-        if (state.whatsappNumber.trim().isEmpty()) return "Tu perfil no tiene WhatsApp registrado."
-        if (state.nationalId.filter(Char::isDigit)
-                .isEmpty()
-        ) return "Tu perfil no tiene cédula registrada."
+        if (state.clientName.trim().isEmpty()) return "Ingresa tu nombre para enviar la reserva."
         if (state.eventType == ReservationEventType.CUSTOM && state.customEventTitle.trim()
                 .isEmpty()
         ) {
@@ -5527,7 +5586,6 @@ class AdventureComboBuilderViewModel @Inject constructor(
     }
 }
 
-
 ```
 
 ---
@@ -5539,7 +5597,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure
 
 
 data class RewardPreviewInput(
-    val nationalId: String,
+    val userId: String,
     val activityItems: List<AdventureReservationItemDraft>,
     val foodItems: List<ReservationFoodItemDraft>,
     val catalog: AdventureCatalogSnapshot,
@@ -5622,14 +5680,13 @@ class ClientProfileRepository @Inject constructor(
                 email = getString("email").orEmpty().trim(),
                 appleUserIdentifier = getString("appleUserIdentifier").orEmpty().trim(),
                 fullName = getString("fullName").orEmpty().trim(),
-                nationalId = getString("nationalId").orEmpty().filter(Char::isDigit),
                 phoneNumber = getString("phoneNumber").orEmpty().filter(Char::isDigit),
                 birthday = getDateValue("birthday") ?: Date(0),
                 address = getString("address").orEmpty().trim(),
                 emergencyContactName = getString("emergencyContactName").orEmpty().trim(),
                 emergencyContactPhone = getString("emergencyContactPhone").orEmpty()
                     .filter(Char::isDigit),
-                isProfileComplete = getBoolean("profileComplete") == true,
+                isProfileComplete = getBoolean("isProfileComplete") == true || getBoolean("profileComplete") == true,
                 createdAt = getDateValue("createdAt") ?: Date(),
                 updatedAt = getDateValue("updatedAt") ?: Date(),
                 profileCompletedAt = getDateValue("profileCompletedAt"),
@@ -5678,7 +5735,6 @@ class DeveloperBypassSessionRepository @Inject constructor() : SessionRepositori
                         email = "developer@preview.local",
                         appleUserIdentifier = "",
                         fullName = "Developer Preview",
-                        nationalId = "0000000000",
                         phoneNumber = "0000000000",
                         birthday = Date(),
                         address = "Preview",
@@ -6652,17 +6708,6 @@ fun CompleteProfileScreen(
                     )
                 }
 
-                LabeledField(icon = Icons.Rounded.Badge, title = "Cédula") {
-                    OutlinedTextField(
-                        value = uiState.nationalId,
-                        onValueChange = viewModel::onNationalIdChanged,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        label = { Text("Cédula") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    )
-                }
-
                 LabeledField(icon = Icons.Rounded.Phone, title = "WhatsApp") {
                     OutlinedTextField(
                         value = uiState.phoneNumber,
@@ -7284,7 +7329,6 @@ data class CompleteProfileUiState(
     val existingProfile: ClientProfile? = null,
     val fullName: String = "",
     val email: String = "",
-    val nationalId: String = "",
     val phoneNumber: String = "",
     val birthday: Date = Calendar.getInstance()
         .apply {
@@ -7300,14 +7344,9 @@ data class CompleteProfileUiState(
 ) {
     val canSubmit: Boolean
         get() = fullName.trim().isNotEmpty() &&
-            email.trim().isNotEmpty() &&
-            email.trim().contains("@") &&
-            nationalId.onlyDigits().length >= 8 &&
-            phoneNumber.onlyDigits().length >= 8 &&
-            address.trim().isNotEmpty() &&
-            emergencyContactName.trim().isNotEmpty() &&
-            emergencyContactPhone.onlyDigits().length >= 8 &&
-            birthday <= Date()
+                email.trim().isNotEmpty() &&
+                email.trim().contains("@") &&
+                birthday <= Date()
 }
 
 @HiltViewModel
@@ -7346,7 +7385,6 @@ class CompleteProfileViewModel @Inject constructor(
             existingProfile = existingProfile,
             fullName = existingProfile?.fullName ?: user.displayName,
             email = existingProfile?.email ?: user.email,
-            nationalId = existingProfile?.nationalId.orEmpty(),
             phoneNumber = existingProfile?.phoneNumber.orEmpty(),
             birthday = existingProfile?.birthday ?: defaultBirthday,
             address = existingProfile?.address.orEmpty(),
@@ -7359,12 +7397,13 @@ class CompleteProfileViewModel @Inject constructor(
 
     fun onFullNameChanged(value: String) = update { copy(fullName = value) }
     fun onEmailChanged(value: String) = update { copy(email = value) }
-    fun onNationalIdChanged(value: String) = update { copy(nationalId = value) }
     fun onPhoneNumberChanged(value: String) = update { copy(phoneNumber = value) }
     fun onBirthdayChanged(value: Date) = update { copy(birthday = value) }
     fun onAddressChanged(value: String) = update { copy(address = value) }
     fun onEmergencyContactNameChanged(value: String) = update { copy(emergencyContactName = value) }
-    fun onEmergencyContactPhoneChanged(value: String) = update { copy(emergencyContactPhone = value) }
+    fun onEmergencyContactPhoneChanged(value: String) =
+        update { copy(emergencyContactPhone = value) }
+
     fun clearError() = update { copy(errorMessage = null) }
 
     fun saveProfile() {
@@ -7386,12 +7425,11 @@ class CompleteProfileViewModel @Inject constructor(
                 email = snapshot.email.trim(),
                 appleUserIdentifier = user.appleUserIdentifier,
                 fullName = snapshot.fullName.trim(),
-                nationalId = snapshot.nationalId.onlyDigits(),
-                phoneNumber = snapshot.phoneNumber.onlyDigits(),
+                phoneNumber = snapshot.phoneNumber.trim(),
                 birthday = snapshot.birthday,
                 address = snapshot.address.trim(),
                 emergencyContactName = snapshot.emergencyContactName.trim(),
-                emergencyContactPhone = snapshot.emergencyContactPhone.onlyDigits(),
+                emergencyContactPhone = snapshot.emergencyContactPhone.trim(),
                 isProfileComplete = true,
                 createdAt = existingProfile?.createdAt ?: now,
                 updatedAt = now,
@@ -7431,7 +7469,6 @@ class CompleteProfileViewModel @Inject constructor(
     }
 }
 
-private fun String.onlyDigits(): String = filter(Char::isDigit)
 
 ```
 
@@ -7452,18 +7489,20 @@ class AdventureBookingsRepository @Inject constructor(
 ) : AdventureBookingsRepositoriable {
 
     override fun observeBookings(
-        nationalId: String,
+        userId: String,
     ): Flow<List<AdventureBooking>> = callbackFlow {
         val uid = auth.currentUser?.uid?.trim().orEmpty()
+        val trustedUserId = uid.ifBlank { userId.trim() }
 
-        if (uid.isEmpty()) {
+        if (trustedUserId.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
         val registration = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("clientId", uid).orderBy("startAt", Query.Direction.ASCENDING)
+            .whereEqualTo("userId", trustedUserId)
+            .orderBy("startAt", Query.Direction.ASCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
@@ -7500,8 +7539,6 @@ class AdventureBookingsRepository @Inject constructor(
     override suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking {
         val uid = requireCurrentUid()
         val catalog = catalogRepository.fetchCatalog()
-        val cleanNationalId = request.nationalId.filter(Char::isDigit)
-        require(cleanNationalId.isNotEmpty()) { "No se encontró una cédula asociada a esta cuenta." }
 
         val basePlan = AdventurePlanner.buildPlan(
             day = request.date,
@@ -7513,7 +7550,7 @@ class AdventureBookingsRepository @Inject constructor(
         ) ?: error("Invalid reservation configuration.")
 
         val rewardPreview = loyaltyRewardsRepository.previewAdventureRewards(
-            nationalId = cleanNationalId,
+            userId = uid,
             activityItems = request.items,
             foodItems = request.foodReservation?.items.orEmpty(),
             catalog = catalog,
@@ -7535,8 +7572,8 @@ class AdventureBookingsRepository @Inject constructor(
         )
 
         val normalizedRequest = request.copy(
-            clientId = uid,
-            nationalId = cleanNationalId,
+            userId = uid,
+            whatsappNumber = normalizedOptionalEcuadorWhatsApp(request.whatsappNumber),
             packageDiscountAmount = request.packageDiscountAmount.coerceAtLeast(0.0),
             loyaltyDiscountAmount = rewardPreview.totalDiscount.coerceAtLeast(0.0),
             appliedRewards = rewardPreview.appliedRewards,
@@ -7555,7 +7592,7 @@ class AdventureBookingsRepository @Inject constructor(
         bookingRef.set(dto).awaitResult()
 
         loyaltyRewardsRepository.reserveRewards(
-            nationalId = normalizedRequest.nationalId,
+            userId = normalizedRequest.userId,
             referenceType = LoyaltyRewardReferenceType.BOOKING,
             referenceId = bookingRef.id,
             appliedRewards = normalizedRequest.appliedRewards,
@@ -7564,7 +7601,7 @@ class AdventureBookingsRepository @Inject constructor(
         return dto.toDomain(bookingRef.id)
     }
 
-    override suspend fun cancelBooking(id: String, nationalId: String) {
+    override suspend fun cancelBooking(id: String) {
         val uid = requireCurrentUid()
         val cleanId = id.trim()
         require(cleanId.isNotEmpty()) { "Booking id is required." }
@@ -7583,7 +7620,7 @@ class AdventureBookingsRepository @Inject constructor(
 
         val booking = dto.toDomain(cleanId)
 
-        if (booking.clientId != uid) {
+        if (booking.userId != uid) {
             error("You are not allowed to cancel this booking.")
         }
 
@@ -7596,14 +7633,26 @@ class AdventureBookingsRepository @Inject constructor(
                 "status" to AdventureBookingStatus.CANCELED.rawValue,
                 "updatedAt" to Timestamp.now(),
                 "canceledAt" to Timestamp.now(),
-                "canceledByClientId" to uid,
+                "canceledByUserId" to uid,
             )
         ).awaitResult()
 
         loyaltyRewardsRepository.releaseRewards(
-            nationalId = dto.nationalId,
+            userId = uid,
             referenceId = cleanId,
         )
+    }
+
+    private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
+        val digits = rawValue.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+
+        return when {
+            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
+            digits.length == 12 && digits.startsWith("5939") -> digits
+            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+            else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
+        }
     }
 
     private fun requireCurrentUid(): String {
@@ -7667,7 +7716,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.d
 
 
 interface AdventureBookingsRepositoriable {
-    fun observeBookings(nationalId: String): Flow<List<AdventureBooking>>
+    fun observeBookings(userId: String): Flow<List<AdventureBooking>>
 
     suspend fun fetchAvailability(
         date: Date,
@@ -7678,7 +7727,7 @@ interface AdventureBookingsRepositoriable {
 
     suspend fun createBooking(request: AdventureBookingRequest): AdventureBooking
 
-    suspend fun cancelBooking(id: String, nationalId: String)
+    suspend fun cancelBooking(id: String)
 }
 
 ```
@@ -7840,7 +7889,7 @@ private sealed interface UnifiedReservation {
                 order.id,
                 order.clientName,
                 order.tableNumber,
-                order.nationalId.orEmpty(),
+                order.userId.orEmpty(),
                 order.serviceMode.title,
                 order.items.joinToString(" ") { "${it.name} ${it.notes.orEmpty()}" },
             ).joinToString(" ").lowercase(Locale.US)
@@ -7868,7 +7917,7 @@ private sealed interface UnifiedReservation {
                 booking.id,
                 booking.clientName,
                 booking.whatsappNumber,
-                booking.nationalId,
+                booking.userId,
                 booking.eventDisplayTitle,
                 booking.visitTypeTitle,
                 booking.items.joinToString(" ") { it.title },
@@ -8538,7 +8587,7 @@ private fun ControlsSection(
                 )
             },
             label = {
-                Text("Buscar cliente, cédula, plato o actividad")
+                Text("Buscar cliente, cuenta, plato o actividad")
             },
         )
 
@@ -9221,6 +9270,9 @@ private fun RestaurantOrderDetailContent(
         subtitle = "Resumen de servicio del pedido.",
     ) {
         DetailRow("Cliente", order.clientName)
+        if (order.isScheduledForLater) {
+            DetailRow("WhatsApp", order.displayWhatsApp)
+        }
         DetailRow("Mesa", order.tableNumber)
         DetailRow("Servicio", order.serviceMode.title)
         DetailRow("Programado", order.scheduledDateText)
@@ -9464,7 +9516,7 @@ private fun AdventureBookingDetailContent(
     ) {
         DetailRow("Nombre", booking.clientName)
         DetailRow("WhatsApp", booking.whatsappNumber)
-        DetailRow("Cédula", booking.nationalId)
+        DetailRow("Cuenta", booking.userId)
         DetailRow("Invitados", "${booking.guestCount}")
     }
 
@@ -10598,7 +10650,7 @@ data class AdventureBookingsDateGroup(
 }
 
 data class AdventureBookingsUiState(
-    val nationalId: String = "",
+    val userId: String = "",
     val allBookings: List<AdventureBooking> = emptyList(),
     val selectedTimelineFilter: AdventureReservationTimelineFilter = AdventureReservationTimelineFilter.ALL,
     val selectedStatusFilter: AdventureReservationStatusFilter = AdventureReservationStatusFilter.ALL,
@@ -10746,17 +10798,17 @@ class AdventureBookingsViewModel @Inject constructor(
     private var bookingsJob: Job? = null
 
     fun onAppear(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter(Char::isDigit)
+        val cleanUserId = profile.userId
         val current = _uiState.value
 
         _uiState.update {
             it.copy(
-                nationalId = cleanNationalId,
+                userId = cleanUserId,
                 now = Date(),
             )
         }
 
-        if (current.nationalId == cleanNationalId && bookingsJob?.isActive == true) {
+        if (current.userId == cleanUserId && bookingsJob?.isActive == true) {
             return
         }
 
@@ -10797,11 +10849,11 @@ class AdventureBookingsViewModel @Inject constructor(
         AdventureBookingCancellationPolicy.reasonClientCannotCancel(booking, _uiState.value.now)
 
     fun cancelBooking(booking: AdventureBooking) {
-        val nationalId = _uiState.value.nationalId
+        val userId = _uiState.value.userId
 
-        if (nationalId.isBlank()) {
+        if (userId.isBlank()) {
             _uiState.update {
-                it.copy(errorMessage = "No se encontró una cédula asociada a esta cuenta.")
+                it.copy(errorMessage = "No se encontró una sesión activa para esta cuenta.")
             }
             return
         }
@@ -10823,10 +10875,7 @@ class AdventureBookingsViewModel @Inject constructor(
             }
 
             runCatching {
-                cancelAdventureBookingUseCase.execute(
-                    id = booking.id,
-                    nationalId = nationalId,
-                )
+                cancelAdventureBookingUseCase.execute(id = booking.id)
             }.onSuccess {
                 _uiState.update {
                     it.copy(
@@ -10860,12 +10909,10 @@ class AdventureBookingsViewModel @Inject constructor(
     }
 
     private fun observeBookings() {
-        val nationalId = _uiState.value.nationalId
-
+        val userId = _uiState.value.userId
         bookingsJob?.cancel()
 
-        if (nationalId.isBlank()) {
-            bookingsJob = null
+        if (userId.isBlank()) {
             _uiState.update {
                 it.copy(
                     allBookings = emptyList(),
@@ -10877,24 +10924,15 @@ class AdventureBookingsViewModel @Inject constructor(
         }
 
         bookingsJob = viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isLoading = true,
-                    errorMessage = null,
-                    now = Date(),
-                )
-            }
+            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
-            observeAdventureBookingsUseCase.execute(nationalId)
+            observeAdventureBookingsUseCase.execute(userId)
                 .catch { error ->
                     if (error is CancellationException) throw error
-
                     _uiState.update {
                         it.copy(
-                            allBookings = emptyList(),
                             isLoading = false,
                             errorMessage = error.message ?: "No se pudieron cargar tus reservas.",
-                            now = Date(),
                         )
                     }
                 }
@@ -11464,10 +11502,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.pres
 
 
 private enum class HomeRoute {
-    MAIN,
-    FEATURED_DISHES,
-    EXPERIENCE_PACKAGES,
-    REWARDS_CENTER,
+    MAIN, FEATURED_DISHES, EXPERIENCE_PACKAGES, REWARDS_CENTER,
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -11496,7 +11531,7 @@ fun HomeScreen(
 
     LaunchedEffect(profile?.id, profile?.updatedAt) {
         viewModel.start()
-        menuViewModel.onAppear(profile?.nationalId)
+        menuViewModel.onAppear(profile?.userId)
         adventureCatalogViewModel.onAppear()
         profile?.let(cartViewModel::syncProfile)
     }
@@ -11570,8 +11605,8 @@ fun HomeScreen(
         }
 
         selectedPackageId != null -> {
-            val selectedPackage = catalogState.catalog.activePackagesSorted
-                .firstOrNull { it.id == selectedPackageId }
+            val selectedPackage =
+                catalogState.catalog.activePackagesSorted.firstOrNull { it.id == selectedPackageId }
 
             if (selectedPackage == null) {
                 LaunchedEffect(selectedPackageId, catalogState.catalog.activePackagesSorted.size) {
@@ -11613,7 +11648,7 @@ fun HomeScreen(
                 onBack = { route = HomeRoute.MAIN },
                 onRefresh = {
                     viewModel.refresh()
-                    menuViewModel.onAppear(profile?.nationalId)
+                    menuViewModel.onAppear(profile?.userId)
                     adventureCatalogViewModel.refresh()
                 },
             ) { padding ->
@@ -11766,8 +11801,7 @@ private fun HomeMainContent(
                         FeaturedMenuHomeCard(
                             item = item,
                             reward = RewardPresentationFactory.menuPresentation(
-                                item,
-                                walletSnapshot
+                                item, walletSnapshot
                             ),
                             onClick = { onOpenDishDetail(item) },
                         )
@@ -12181,8 +12215,7 @@ private fun HomeFeaturedDishWideCard(
         ) {
             PremiumIconBubble(Icons.Rounded.LocalDining)
             Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(5.dp)
+                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Text(
                     item.name,
@@ -12414,8 +12447,7 @@ private fun HomeExperiencePackageDetailScreen(
                         Text("Reservar este combo • ${finalTotal.premiumMoney()}")
                     }
                     OutlinedButton(
-                        onClick = onOpenExperiences,
-                        modifier = Modifier.fillMaxWidth()
+                        onClick = onOpenExperiences, modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Crear otro combo")
                     }
@@ -12429,8 +12461,7 @@ private fun HomeExperiencePackageDetailScreen(
             item {
                 PremiumCard {
                     PremiumSectionHeader(
-                        title = "Actividades incluidas",
-                        icon = Icons.Rounded.Explore
+                        title = "Actividades incluidas", icon = Icons.Rounded.Explore
                     )
                     packageModel.items.forEach { draft ->
                         val config = catalog.activity(draft.activity)
@@ -12449,8 +12480,7 @@ private fun HomeExperiencePackageDetailScreen(
                 item {
                     PremiumCard {
                         PremiumSectionHeader(
-                            title = "Comida incluida",
-                            icon = Icons.Rounded.LocalDining
+                            title = "Comida incluida", icon = Icons.Rounded.LocalDining
                         )
                         packageModel.foodItems.forEach { food ->
                             val item = menuItemsById[food.menuItemId]
@@ -12755,13 +12785,13 @@ class LoyaltyRewardsRepository @Inject constructor(
     private val firestore: FirebaseFirestore,
 ) : LoyaltyRewardsRepositoriable {
 
-    override suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty()) return RewardWalletSnapshot.empty("")
+    override suspend fun loadWalletSnapshot(userId: String): RewardWalletSnapshot {
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty()) return RewardWalletSnapshot.empty("")
 
         val templates = fetchTemplates()
-        val totals = computeTotals(cleanNationalId)
-        val walletEvents = fetchWalletEvents(cleanNationalId)
+        val totals = computeTotals(cleanUserId)
+        val walletEvents = fetchWalletEvents(cleanUserId)
         val currentLevel = LoyaltyLevel.fromTotalSpent(totals.totalSpent)
 
         val eligibleTemplates = templates
@@ -12778,7 +12808,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
 
         return RewardWalletSnapshot(
-            nationalId = cleanNationalId,
+            userId = cleanUserId,
             currentLevel = currentLevel,
             totalSpent = totals.totalSpent.roundMoney(),
             points = totals.totalSpent.toInt(),
@@ -12790,10 +12820,10 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-    override fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> =
+    override fun observeWalletSnapshot(userId: String): Flow<RewardWalletSnapshot> =
         callbackFlow {
-            val cleanNationalId = nationalId.cleanNationalId()
-            if (cleanNationalId.isEmpty()) {
+            val cleanUserId = userId.cleanUserId()
+            if (cleanUserId.isEmpty()) {
                 trySend(RewardWalletSnapshot.empty(""))
                 close()
                 return@callbackFlow
@@ -12806,7 +12836,7 @@ class LoyaltyRewardsRepository @Inject constructor(
                 refreshRequests
                     .onStart { emit(Unit) }
                     .debounce(160)
-                    .mapLatest { loadWalletSnapshot(cleanNationalId) }
+                    .mapLatest { loadWalletSnapshot(cleanUserId) }
                     .catch { error ->
                         if (error is CancellationException) throw error
                         close(error)
@@ -12822,7 +12852,7 @@ class LoyaltyRewardsRepository @Inject constructor(
 
             registrations += firestore
                 .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-                .document(cleanNationalId)
+                .document(cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
@@ -12835,14 +12865,14 @@ class LoyaltyRewardsRepository @Inject constructor(
 
             registrations += firestore
                 .collection(FirestoreCollections.RESTAURANT_ORDERS)
-                .whereEqualTo("nationalId", cleanNationalId)
+                .whereEqualTo("userId", cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
 
             registrations += firestore
                 .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-                .whereEqualTo("nationalId", cleanNationalId)
+                .whereEqualTo("userId", cleanUserId)
                 .addSnapshotListener { _, error ->
                     if (error != null) close(error) else requestRefresh()
                 }
@@ -12857,10 +12887,10 @@ class LoyaltyRewardsRepository @Inject constructor(
         }
 
     override suspend fun previewRestaurantRewards(
-        nationalId: String,
+        userId: String,
         items: List<OrderItem>,
     ): RewardComputationResult {
-        val wallet = loadWalletSnapshot(nationalId)
+        val wallet = loadWalletSnapshot(userId)
         val lines = items.map {
             RewardMenuLine(
                 menuItemId = it.menuItemId,
@@ -12878,12 +12908,12 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     override suspend fun previewAdventureRewards(
-        nationalId: String,
+        userId: String,
         activityItems: List<AdventureReservationItemDraft>,
         foodItems: List<ReservationFoodItemDraft>,
         catalog: AdventureCatalogSnapshot,
     ): RewardComputationResult {
-        val wallet = loadWalletSnapshot(nationalId)
+        val wallet = loadWalletSnapshot(userId)
 
         val activityLines = activityItems.mapNotNull { item ->
             val activity = catalog.activity(item.activity) ?: return@mapNotNull null
@@ -12912,17 +12942,17 @@ class LoyaltyRewardsRepository @Inject constructor(
     }
 
     override suspend fun reserveRewards(
-        nationalId: String,
+        userId: String,
         referenceType: LoyaltyRewardReferenceType,
         referenceId: String,
         appliedRewards: List<AppliedReward>,
     ) {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty() || referenceId.isBlank() || appliedRewards.isEmpty()) return
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty() || referenceId.isBlank() || appliedRewards.isEmpty()) return
 
         val walletRef = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(cleanNationalId)
+            .document(cleanUserId)
 
         firestore.runTransaction { transaction ->
             val snapshot = transaction.get(walletRef)
@@ -12961,7 +12991,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             transaction.set(
                 walletRef,
                 mapOf(
-                    "nationalId" to cleanNationalId,
+                    "userId" to cleanUserId,
                     "updatedAt" to Timestamp(now),
                     "events" to events.map { it.toFirestoreMap() },
                 ),
@@ -12971,25 +13001,25 @@ class LoyaltyRewardsRepository @Inject constructor(
         }.awaitResult()
     }
 
-    override suspend fun consumeRewards(nationalId: String, referenceId: String) {
-        mutateReferenceStatus(nationalId, referenceId, LoyaltyWalletEventStatus.CONSUMED)
+    override suspend fun consumeRewards(userId: String, referenceId: String) {
+        mutateReferenceStatus(userId, referenceId, LoyaltyWalletEventStatus.CONSUMED)
     }
 
-    override suspend fun releaseRewards(nationalId: String, referenceId: String) {
-        mutateReferenceStatus(nationalId, referenceId, LoyaltyWalletEventStatus.RELEASED)
+    override suspend fun releaseRewards(userId: String, referenceId: String) {
+        mutateReferenceStatus(userId, referenceId, LoyaltyWalletEventStatus.RELEASED)
     }
 
     private suspend fun mutateReferenceStatus(
-        nationalId: String,
+        userId: String,
         referenceId: String,
         targetStatus: LoyaltyWalletEventStatus,
     ) {
-        val cleanNationalId = nationalId.cleanNationalId()
-        if (cleanNationalId.isEmpty() || referenceId.isBlank()) return
+        val cleanUserId = userId.cleanUserId()
+        if (cleanUserId.isEmpty() || referenceId.isBlank()) return
 
         val walletRef = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(cleanNationalId)
+            .document(cleanUserId)
 
         firestore.runTransaction { transaction ->
             val snapshot = transaction.get(walletRef)
@@ -13004,7 +13034,7 @@ class LoyaltyRewardsRepository @Inject constructor(
             transaction.set(
                 walletRef,
                 mapOf(
-                    "nationalId" to cleanNationalId,
+                    "userId" to cleanUserId,
                     "updatedAt" to Timestamp(Date()),
                     "events" to events.map { it.toFirestoreMap() },
                 ),
@@ -13025,26 +13055,26 @@ class LoyaltyRewardsRepository @Inject constructor(
             .sortedWith(compareBy<LoyaltyRewardTemplate> { it.priority }.thenBy { it.title })
     }
 
-    private suspend fun fetchWalletEvents(nationalId: String): List<LoyaltyWalletEvent> {
+    private suspend fun fetchWalletEvents(userId: String): List<LoyaltyWalletEvent> {
         val snapshot = firestore
             .collection(FirestoreCollections.CLIENT_LOYALTY_WALLETS)
-            .document(nationalId)
+            .document(userId)
             .get()
             .awaitResult()
 
         return snapshot.walletEvents()
     }
 
-    private suspend fun computeTotals(nationalId: String): LoyaltyTotals {
+    private suspend fun computeTotals(userId: String): LoyaltyTotals {
         val ordersSnapshot = firestore
             .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", nationalId)
+            .whereEqualTo("userId", userId)
             .get()
             .awaitResult()
 
         val bookingsSnapshot = firestore
             .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", nationalId)
+            .whereEqualTo("userId", userId)
             .get()
             .awaitResult()
 
@@ -13249,7 +13279,7 @@ class LoyaltyRewardsRepository @Inject constructor(
         .trim()
         .lowercase()
 
-    private fun String.cleanNationalId(): String = filter { it.isDigit() }
+    private fun String.cleanUserId(): String = trim()
 
     private fun DocumentSnapshot.stringValueOrNull(field: String): String? =
         getString(field)?.trim()
@@ -13437,33 +13467,25 @@ class ProfileStatsRepository @Inject constructor(
     private val loyaltyRewardsRepository: LoyaltyRewardsRepositoriable,
 ) : ProfileStatsRepositoriable {
 
-    override suspend fun loadStats(nationalId: String): ProfileStats {
-        val cleanNationalId = nationalId.onlyDigits()
-        if (cleanNationalId.isEmpty()) return ProfileStats.EMPTY
+    override suspend fun loadStats(userId: String): ProfileStats {
+        val cleanUserId = userId.trim()
+        if (cleanUserId.isEmpty()) return ProfileStats.EMPTY
 
-        val orderSnapshot = firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .get()
-            .awaitResult()
+        val orderSnapshot = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("userId", cleanUserId).get().awaitResult()
 
-        val bookingSnapshot = firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .get()
-            .awaitResult()
+        val bookingSnapshot = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("userId", cleanUserId).get().awaitResult()
 
-        val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanNationalId)
+        val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanUserId)
 
-        val completedOrders = orderSnapshot.documents
-            .mapNotNull { document -> document.toObject(OrderDto::class.java)?.toDomain() }
-            .filter { order -> order.status == OrderStatus.COMPLETED }
+        val completedOrders = orderSnapshot.documents.mapNotNull { document ->
+            document.toObject(OrderDto::class.java)?.toDomain()
+        }.filter { order -> order.status == OrderStatus.COMPLETED }
 
-        val completedBookings = bookingSnapshot.documents
-            .mapNotNull { document ->
-                document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-            }
-            .filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
+        val completedBookings = bookingSnapshot.documents.mapNotNull { document ->
+            document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
+        }.filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
 
         val restaurantSpent = completedOrders.sumOf { it.totalAmount }.roundMoney()
         val adventureSpent = completedBookings.sumOf { it.totalAmount }.roundMoney()
@@ -13487,9 +13509,9 @@ class ProfileStatsRepository @Inject constructor(
     }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
-    override fun observeStats(nationalId: String): Flow<ProfileStats> = callbackFlow {
-        val cleanNationalId = nationalId.onlyDigits()
-        if (cleanNationalId.isEmpty()) {
+    override fun observeStats(userId: String): Flow<ProfileStats> = callbackFlow {
+        val cleanUserId = userId.trim()
+        if (cleanUserId.isEmpty()) {
             trySend(ProfileStats.EMPTY).isSuccess
             close()
             return@callbackFlow
@@ -13503,41 +13525,31 @@ class ProfileStatsRepository @Inject constructor(
         }
 
         val loaderJob: Job = launch {
-            refreshRequests
-                .onStart { emit(Unit) }
-                .debounce(160)
-                .mapLatest { loadStats(cleanNationalId) }
-                .catch { error ->
+            refreshRequests.onStart { emit(Unit) }.debounce(160)
+                .mapLatest { loadStats(cleanUserId) }.catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }
-                .collect { stats ->
+                }.collect { stats ->
                     trySend(stats).isSuccess
                 }
         }
 
-        registrations += firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
+        registrations += firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
-        registrations += firestore
-            .collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("nationalId", cleanNationalId)
-            .addSnapshotListener { _, error ->
+        registrations += firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
+            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
-        val walletJob = loyaltyRewardsRepository
-            .observeWalletSnapshot(cleanNationalId)
-            .onEach { requestRefresh() }
-            .catch { error ->
-                if (error is CancellationException) throw error
-                close(error)
-            }
-            .launchIn(this)
+        val walletJob =
+            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId).onEach { requestRefresh() }
+                .catch { error ->
+                    if (error is CancellationException) throw error
+                    close(error)
+                }.launchIn(this)
 
         awaitClose {
             registrations.forEach { it.remove() }
@@ -13547,7 +13559,6 @@ class ProfileStatsRepository @Inject constructor(
     }
 }
 
-private fun String.onlyDigits(): String = filter(Char::isDigit)
 
 private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 
@@ -13605,7 +13616,6 @@ data class ClientProfile(
     val email: String,
     val appleUserIdentifier: String,
     val fullName: String,
-    val nationalId: String,
     val phoneNumber: String,
     val birthday: Date,
     val address: String,
@@ -13618,14 +13628,10 @@ data class ClientProfile(
     val profileImageURL: String?,
     val profileImagePath: String?,
 ) {
+    val userId: String get() = id.trim()
+
     val isComplete: Boolean
-        get() = isProfileComplete &&
-                fullName.isNotBlank() &&
-                nationalId.isNotBlank() &&
-                phoneNumber.isNotBlank() &&
-                address.isNotBlank() &&
-                emergencyContactName.isNotBlank() &&
-                emergencyContactPhone.isNotBlank()
+        get() = isProfileComplete && fullName.isNotBlank()
 
     val hasProfileImage: Boolean
         get() = !profileImageURL.isNullOrBlank()
@@ -13643,16 +13649,17 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 
 data class ClientProfileDocument(
     val id: String = "",
+    val userId: String = "",
     val email: String = "",
     val appleUserIdentifier: String = "",
     val fullName: String = "",
-    val nationalId: String = "",
     val phoneNumber: String = "",
     val birthday: Date = Date(),
     val address: String = "",
     val emergencyContactName: String = "",
     val emergencyContactPhone: String = "",
     val isProfileComplete: Boolean = false,
+    val profileComplete: Boolean = false,
     val createdAt: Date = Date(),
     val updatedAt: Date = Date(),
     val profileCompletedAt: Date? = null,
@@ -13661,16 +13668,17 @@ data class ClientProfileDocument(
 ) {
     constructor(profile: ClientProfile) : this(
         id = profile.id,
+        userId = profile.userId,
         email = profile.email,
         appleUserIdentifier = profile.appleUserIdentifier,
         fullName = profile.fullName,
-        nationalId = profile.nationalId,
         phoneNumber = profile.phoneNumber,
         birthday = profile.birthday,
         address = profile.address,
         emergencyContactName = profile.emergencyContactName,
         emergencyContactPhone = profile.emergencyContactPhone,
         isProfileComplete = profile.isProfileComplete,
+        profileComplete = profile.isProfileComplete,
         createdAt = profile.createdAt,
         updatedAt = profile.updatedAt,
         profileCompletedAt = profile.profileCompletedAt,
@@ -13681,20 +13689,21 @@ data class ClientProfileDocument(
     fun toDomain(
         documentIdFallback: String? = null,
     ): ClientProfile {
-        val resolvedId = id.trim().ifEmpty { documentIdFallback?.trim().orEmpty() }
+        val resolvedId = id.trim()
+            .ifEmpty { userId.trim() }
+            .ifEmpty { documentIdFallback?.trim().orEmpty() }
 
         return ClientProfile(
             id = resolvedId,
             email = email.trim(),
             appleUserIdentifier = appleUserIdentifier.trim(),
             fullName = fullName.trim(),
-            nationalId = nationalId.trim(),
             phoneNumber = phoneNumber.trim(),
             birthday = birthday,
             address = address.trim(),
             emergencyContactName = emergencyContactName.trim(),
             emergencyContactPhone = emergencyContactPhone.trim(),
-            isProfileComplete = isProfileComplete,
+            isProfileComplete = isProfileComplete || profileComplete,
             createdAt = createdAt,
             updatedAt = updatedAt,
             profileCompletedAt = profileCompletedAt,
@@ -14161,9 +14170,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 
 
 enum class LoyaltyRewardScope(val title: String) {
-    RESTAURANT("Restaurante"),
-    ADVENTURE("Aventura"),
-    BOTH("Ambos");
+    RESTAURANT("Restaurante"), ADVENTURE("Aventura"), BOTH("Ambos");
 
     fun matchesRestaurant(): Boolean = this == RESTAURANT || this == BOTH
 
@@ -14171,16 +14178,11 @@ enum class LoyaltyRewardScope(val title: String) {
 }
 
 enum class LoyaltyRewardTriggerMode {
-    AUTOMATIC,
-    MANUAL,
+    AUTOMATIC, MANUAL,
 }
 
 enum class LoyaltyRewardRuleType {
-    MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
-    SPECIFIC_MENU_ITEM_PERCENTAGE,
-    ACTIVITY_PERCENTAGE,
-    FREE_MENU_ITEM,
-    BUY_X_GET_Y_FREE,
+    MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE, SPECIFIC_MENU_ITEM_PERCENTAGE, ACTIVITY_PERCENTAGE, FREE_MENU_ITEM, BUY_X_GET_Y_FREE,
 }
 
 data class LoyaltyRewardRule(
@@ -14264,24 +14266,23 @@ data class LoyaltyRewardTemplate(
 ) {
     val displaySummary: String
         get() = when (rule.type) {
-            LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en el plato elegible más caro"
+            LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en el plato elegible más caro"
 
-            LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en item específico"
+            LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en item específico"
 
-            LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE ->
-                "${(rule.percentage ?: 0.0).toInt()}% en actividad específica"
+            LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "${(rule.percentage ?: 0.0).toInt()}% en actividad específica"
 
-            LoyaltyRewardRuleType.FREE_MENU_ITEM ->
-                "${(rule.quantity ?: 1).coerceAtLeast(1)} item(s) gratis"
+            LoyaltyRewardRuleType.FREE_MENU_ITEM -> "${(rule.quantity ?: 1).coerceAtLeast(1)} item(s) gratis"
 
-            LoyaltyRewardRuleType.BUY_X_GET_Y_FREE ->
-                "Compra ${(rule.buyQuantity ?: 1).coerceAtLeast(1)} y recibe ${
-                    (rule.freeQuantity ?: 1).coerceAtLeast(
-                        1
-                    )
-                } gratis"
+            LoyaltyRewardRuleType.BUY_X_GET_Y_FREE -> "Compra ${
+                (rule.buyQuantity ?: 1).coerceAtLeast(
+                    1
+                )
+            } y recibe ${
+                (rule.freeQuantity ?: 1).coerceAtLeast(
+                    1
+                )
+            } gratis"
         }
 
     fun isEligible(level: LoyaltyLevel): Boolean = level.minimumSpent >= minimumLevel.minimumSpent
@@ -14310,15 +14311,11 @@ data class LoyaltyRewardTemplate(
 }
 
 enum class LoyaltyRewardReferenceType {
-    ORDER,
-    BOOKING,
+    ORDER, BOOKING,
 }
 
 enum class LoyaltyWalletEventStatus {
-    RESERVED,
-    CONSUMED,
-    RELEASED,
-    EXPIRED,
+    RESERVED, CONSUMED, RELEASED, EXPIRED,
 }
 
 data class LoyaltyWalletEvent(
@@ -14344,7 +14341,7 @@ data class AppliedReward(
 )
 
 data class RewardWalletSnapshot(
-    val nationalId: String,
+    val userId: String,
     val currentLevel: LoyaltyLevel,
     val totalSpent: Double,
     val points: Int,
@@ -14354,8 +14351,8 @@ data class RewardWalletSnapshot(
     val releasedEvents: List<LoyaltyWalletEvent>,
 ) {
     companion object {
-        fun empty(nationalId: String): RewardWalletSnapshot = RewardWalletSnapshot(
-            nationalId = nationalId,
+        fun empty(userId: String): RewardWalletSnapshot = RewardWalletSnapshot(
+            userId = userId,
             currentLevel = LoyaltyLevel.BRONZE,
             totalSpent = 0.0,
             points = 0,
@@ -14435,18 +14432,14 @@ data class LoyaltyRewardTemplateDto(
             ?: LoyaltyRewardScope.BOTH,
         minimumLevel = LoyaltyLevel.entries.firstOrNull {
             it.name.equals(
-                minimumLevel,
-                ignoreCase = true
+                minimumLevel, ignoreCase = true
             )
-        }
-            ?: LoyaltyLevel.BRONZE,
+        } ?: LoyaltyLevel.BRONZE,
         triggerMode = LoyaltyRewardTriggerMode.entries.firstOrNull {
             it.name.equals(
-                triggerMode,
-                ignoreCase = true
+                triggerMode, ignoreCase = true
             )
-        }
-            ?: LoyaltyRewardTriggerMode.AUTOMATIC,
+        } ?: LoyaltyRewardTriggerMode.AUTOMATIC,
         isActive = isActive,
         canStack = canStack,
         priority = priority,
@@ -14499,7 +14492,7 @@ data class LoyaltyWalletEventDto(
 }
 
 data class LoyaltyWalletDocument(
-    val nationalId: String,
+    val userId: String,
     val updatedAt: Date,
     val events: List<LoyaltyWalletEvent>,
 )
@@ -14515,38 +14508,38 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 
 
 interface LoyaltyRewardsRepositoriable {
-    suspend fun loadWalletSnapshot(nationalId: String): RewardWalletSnapshot
+    suspend fun loadWalletSnapshot(userId: String): RewardWalletSnapshot
 
-    fun observeWalletSnapshot(nationalId: String): Flow<RewardWalletSnapshot> = flow {
-        emit(loadWalletSnapshot(nationalId))
+    fun observeWalletSnapshot(userId: String): Flow<RewardWalletSnapshot> = flow {
+        emit(loadWalletSnapshot(userId))
     }
 
     suspend fun previewRestaurantRewards(
-        nationalId: String,
+        userId: String,
         items: List<OrderItem>,
     ): RewardComputationResult
 
     suspend fun previewAdventureRewards(
-        nationalId: String,
+        userId: String,
         activityItems: List<AdventureReservationItemDraft>,
         foodItems: List<ReservationFoodItemDraft>,
         catalog: AdventureCatalogSnapshot,
     ): RewardComputationResult
 
     suspend fun reserveRewards(
-        nationalId: String,
+        userId: String,
         referenceType: LoyaltyRewardReferenceType,
         referenceId: String,
         appliedRewards: List<AppliedReward>,
     )
 
     suspend fun consumeRewards(
-        nationalId: String,
+        userId: String,
         referenceId: String,
     )
 
     suspend fun releaseRewards(
-        nationalId: String,
+        userId: String,
         referenceId: String,
     )
 }
@@ -14602,7 +14595,7 @@ data class ProfileStats(
             adventureSpent = 0.0,
             totalSpent = 0.0,
             level = LoyaltyLevel.BRONZE,
-            wallet = RewardWalletSnapshot.empty(nationalId = ""),
+            wallet = RewardWalletSnapshot.empty(userId = ""),
         )
     }
 }
@@ -14618,8 +14611,8 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 
 
 interface ProfileStatsRepositoriable {
-    suspend fun loadStats(nationalId: String): ProfileStats
-    fun observeStats(nationalId: String): Flow<ProfileStats>
+    suspend fun loadStats(userId: String): ProfileStats
+    fun observeStats(userId: String): Flow<ProfileStats>
 }
 
 ```
@@ -14635,13 +14628,13 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.d
 class LoadProfileStatsUseCase @Inject constructor(
     private val repository: ProfileStatsRepositoriable,
 ) {
-    suspend fun execute(nationalId: String): ProfileStats = repository.loadStats(nationalId)
+    suspend fun execute(userId: String): ProfileStats = repository.loadStats(userId)
 }
 
 class ObserveProfileStatsUseCase @Inject constructor(
     private val repository: ProfileStatsRepositoriable,
 ) {
-    fun execute(nationalId: String): Flow<ProfileStats> = repository.observeStats(nationalId)
+    fun execute(userId: String): Flow<ProfileStats> = repository.observeStats(userId)
 }
 
 class LoadProfileImageUseCase @Inject constructor(
@@ -14900,13 +14893,33 @@ fun PremiumProfileDashboard(
         LoyaltyProgressCard(stats = stats)
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PremiumMetricTile("Pedidos", stats.completedOrders.toString(), Icons.Rounded.ReceiptLong, Modifier.weight(1f))
-            PremiumMetricTile("Reservas", stats.completedBookings.toString(), Icons.Rounded.CalendarMonth, Modifier.weight(1f))
+            PremiumMetricTile(
+                "Pedidos",
+                stats.completedOrders.toString(),
+                Icons.Rounded.ReceiptLong,
+                Modifier.weight(1f)
+            )
+            PremiumMetricTile(
+                "Reservas",
+                stats.completedBookings.toString(),
+                Icons.Rounded.CalendarMonth,
+                Modifier.weight(1f)
+            )
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PremiumMetricTile("Restaurante", stats.restaurantSpent.premiumMoney(), Icons.Rounded.LocalDining, Modifier.weight(1f))
-            PremiumMetricTile("Experiencias", stats.adventureSpent.premiumMoney(), Icons.Rounded.Star, Modifier.weight(1f))
+            PremiumMetricTile(
+                "Restaurante",
+                stats.restaurantSpent.premiumMoney(),
+                Icons.Rounded.LocalDining,
+                Modifier.weight(1f)
+            )
+            PremiumMetricTile(
+                "Experiencias",
+                stats.adventureSpent.premiumMoney(),
+                Icons.Rounded.Star,
+                Modifier.weight(1f)
+            )
         }
 
         PremiumSectionHeader(
@@ -14919,19 +14932,30 @@ fun PremiumProfileDashboard(
         if (rewards.isEmpty()) {
             PremiumCard {
                 Text("No tienes premios activos en este momento.", fontWeight = FontWeight.Bold)
-                Text("Sigue acumulando visitas y consumo para desbloquear nuevos beneficios.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Sigue acumulando visitas y consumo para desbloquear nuevos beneficios.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         } else {
             rewards.forEach { template ->
                 PremiumCard {
-                    Text(template.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(
+                        template.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(
                         text = template.subtitle.ifBlank { template.displaySummary },
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text("Disponible para ${template.scope.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Disponible para ${template.scope.title}",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -14965,7 +14989,10 @@ private fun ProfileIdentityCard(
     onEditProfile: () -> Unit,
 ) {
     PremiumCard(emphasized = true) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
                     .size(74.dp)
@@ -14980,10 +15007,20 @@ private fun ProfileIdentityCard(
                     modifier = Modifier.size(40.dp),
                 )
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(profile.fullName.ifBlank { "Cliente Altos" }, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                Text("Cédula ${profile.nationalId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Nivel ${stats.level.title}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Column(
+                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    profile.fullName.ifBlank { "Cliente Altos" },
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text("Cuenta ${profile.userId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Nivel ${stats.level.title}",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
             }
             Button(onClick = onEditProfile) {
                 Icon(Icons.Rounded.Edit, contentDescription = null)
@@ -14992,8 +15029,14 @@ private fun ProfileIdentityCard(
             }
         }
         Divider()
-        Text(profile.phoneNumber.ifBlank { "Sin teléfono registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(profile.email.ifBlank { "Sin email registrado" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            profile.phoneNumber.ifBlank { "Sin teléfono registrado" },
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            profile.email.ifBlank { "Sin email registrado" },
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -15003,22 +15046,45 @@ private fun LoyaltyProgressCard(stats: ProfileStats) {
     val progress = LoyaltyLevel.progress(stats.totalSpent).toFloat().coerceIn(0f, 1f)
 
     PremiumCard {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             PremiumIconBubble(Icons.Rounded.EmojiEvents, selected = true)
             Column(modifier = Modifier.weight(1f)) {
-                Text("Murco Loyalty", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
-                Text("Nivel ${stats.level.title} • ${stats.points} puntos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Murco Loyalty",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold
+                )
+                Text(
+                    "Nivel ${stats.level.title} • ${stats.points} puntos",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Text(stats.totalSpent.premiumMoney(), fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Text(
+                stats.totalSpent.premiumMoney(),
+                fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.primary
+            )
         }
         LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
         Text(
-            text = nextLevel?.let { "Siguiente meta: ${it.title} (${it.spendRangeText})" } ?: "Ya estás en el nivel máximo.",
+            text = nextLevel?.let { "Siguiente meta: ${it.title} (${it.spendRangeText})" }
+                ?: "Ya estás en el nivel máximo.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         stats.level.benefits.forEach { benefit ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
-                Icon(Icons.Rounded.Star, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(
+                    Icons.Rounded.Star,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp)
+                )
                 Text(benefit, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -15186,7 +15252,6 @@ fun ProfileScreen(
                     route = ProfileRoute.ROOT
                 },
                 onFullNameChanged = viewModel::onEditFullNameChanged,
-                onNationalIdChanged = viewModel::onEditNationalIdChanged,
                 onPhoneChanged = viewModel::onEditPhoneChanged,
                 onBirthdayChanged = viewModel::onEditBirthdayChanged,
                 onAddressChanged = viewModel::onEditAddressChanged,
@@ -15271,7 +15336,7 @@ private fun ProfileHomeScreen(
             )
             ProfileMenuRow(
                 title = "Editar perfil",
-                subtitle = "Nombre, cédula, teléfono, dirección y contacto de emergencia",
+                subtitle = "Nombre, cuenta, teléfono, dirección y contacto de emergencia",
                 icon = Icons.Rounded.Edit,
                 onClick = onOpenEdit,
             )
@@ -15618,7 +15683,6 @@ private fun EditProfileScreen(
     state: ProfileUiState,
     onBack: () -> Unit,
     onFullNameChanged: (String) -> Unit,
-    onNationalIdChanged: (String) -> Unit,
     onPhoneChanged: (String) -> Unit,
     onBirthdayChanged: (java.util.Date) -> Unit,
     onAddressChanged: (String) -> Unit,
@@ -15692,14 +15756,6 @@ private fun EditProfileScreen(
                     singleLine = true,
                     label = { Text("Correo") },
                     leadingIcon = { Icon(Icons.Rounded.Email, contentDescription = null) },
-                )
-                OutlinedTextField(
-                    value = edit.nationalId,
-                    onValueChange = onNationalIdChanged,
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    label = { Text("Cédula") },
-                    leadingIcon = { Icon(Icons.Rounded.AccountCircle, contentDescription = null) },
                 )
                 OutlinedTextField(
                     value = edit.phoneNumber,
@@ -16467,8 +16523,8 @@ data class ProfileUiState(
     val phoneText: String
         get() = profile?.phoneNumber?.takeIf { it.isNotBlank() } ?: "No registrado"
 
-    val nationalIdText: String
-        get() = profile?.nationalId?.takeIf { it.isNotBlank() } ?: "No registrado"
+    val userIdText: String
+        get() = profile?.userId?.takeIf { it.isNotBlank() } ?: "No registrado"
 
     val birthdayText: String
         get() = profile?.birthday?.formatDateLong() ?: "No registrado"
@@ -16487,20 +16543,71 @@ data class ProfileUiState(
         get() = profile?.createdAt?.formatDateShort() ?: "Ahora"
 
     val initials: String
-        get() = displayName
-            .split(" ")
-            .filter { it.isNotBlank() }
-            .take(2)
-            .joinToString("") { it.first().uppercaseChar().toString() }
-            .ifBlank { "AM" }
+        get() = displayName.split(" ").filter { it.isNotBlank() }.take(2)
+            .joinToString("") { it.first().uppercaseChar().toString() }.ifBlank { "AM" }
 
     val hasProfileImage: Boolean
         get() = avatarBytes != null || profile?.hasProfileImage == true
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (javaClass != other?.javaClass) return false
+
+        other as ProfileUiState
+
+        if (isLoadingAvatar != other.isLoadingAvatar) return false
+        if (isLoadingStats != other.isLoadingStats) return false
+        if (isUploadingProfileImage != other.isUploadingProfileImage) return false
+        if (isSavingProfile != other.isSavingProfile) return false
+        if (isSigningOut != other.isSigningOut) return false
+        if (isDeletingAccount != other.isDeletingAccount) return false
+        if (profile != other.profile) return false
+        if (stats != other.stats) return false
+        if (!avatarBytes.contentEquals(other.avatarBytes)) return false
+        if (editState != other.editState) return false
+        if (message != other.message) return false
+        if (hasProfileImage != other.hasProfileImage) return false
+        if (displayName != other.displayName) return false
+        if (emailText != other.emailText) return false
+        if (phoneText != other.phoneText) return false
+        if (userIdText != other.userIdText) return false
+        if (birthdayText != other.birthdayText) return false
+        if (addressText != other.addressText) return false
+        if (emergencyContactText != other.emergencyContactText) return false
+        if (memberSinceText != other.memberSinceText) return false
+        if (initials != other.initials) return false
+
+        return true
+    }
+
+    override fun hashCode(): Int {
+        var result = isLoadingAvatar.hashCode()
+        result = 31 * result + isLoadingStats.hashCode()
+        result = 31 * result + isUploadingProfileImage.hashCode()
+        result = 31 * result + isSavingProfile.hashCode()
+        result = 31 * result + isSigningOut.hashCode()
+        result = 31 * result + isDeletingAccount.hashCode()
+        result = 31 * result + (profile?.hashCode() ?: 0)
+        result = 31 * result + stats.hashCode()
+        result = 31 * result + (avatarBytes?.contentHashCode() ?: 0)
+        result = 31 * result + (editState?.hashCode() ?: 0)
+        result = 31 * result + (message?.hashCode() ?: 0)
+        result = 31 * result + hasProfileImage.hashCode()
+        result = 31 * result + displayName.hashCode()
+        result = 31 * result + emailText.hashCode()
+        result = 31 * result + phoneText.hashCode()
+        result = 31 * result + userIdText.hashCode()
+        result = 31 * result + birthdayText.hashCode()
+        result = 31 * result + addressText.hashCode()
+        result = 31 * result + emergencyContactText.hashCode()
+        result = 31 * result + memberSinceText.hashCode()
+        result = 31 * result + initials.hashCode()
+        return result
+    }
 }
 
 data class EditProfileUiState(
     val fullName: String = "",
-    val nationalId: String = "",
     val phoneNumber: String = "",
     val birthday: Date = defaultBirthday(),
     val address: String = "",
@@ -16508,17 +16615,11 @@ data class EditProfileUiState(
     val emergencyContactPhone: String = "",
 ) {
     val canSave: Boolean
-        get() = fullName.trim().isNotEmpty() &&
-                nationalId.onlyDigits().length >= 8 &&
-                phoneNumber.onlyDigits().length >= 8 &&
-                address.trim().isNotEmpty() &&
-                emergencyContactName.trim().isNotEmpty() &&
-                emergencyContactPhone.onlyDigits().length >= 8
+        get() = fullName.trim().isNotEmpty()
 
     companion object {
         fun fromProfile(profile: ClientProfile): EditProfileUiState = EditProfileUiState(
             fullName = profile.fullName,
-            nationalId = profile.nationalId,
             phoneNumber = profile.phoneNumber,
             birthday = profile.birthday,
             address = profile.address,
@@ -16535,12 +16636,11 @@ data class AccountActionUiState(
 
 fun ClientProfile.updatedFromEdit(edit: EditProfileUiState): ClientProfile = copy(
     fullName = edit.fullName.trim(),
-    nationalId = edit.nationalId.onlyDigits(),
-    phoneNumber = edit.phoneNumber.onlyDigits(),
+    phoneNumber = edit.phoneNumber.trim(),
     birthday = edit.birthday,
     address = edit.address.trim(),
     emergencyContactName = edit.emergencyContactName.trim(),
-    emergencyContactPhone = edit.emergencyContactPhone.onlyDigits(),
+    emergencyContactPhone = edit.emergencyContactPhone.trim(),
     isProfileComplete = true,
     updatedAt = Date(),
     profileCompletedAt = profileCompletedAt ?: Date(),
@@ -16553,8 +16653,8 @@ fun ThemeMode.displayTitle(): String = when (this) {
 }
 
 fun Date.formatDateShort(): String = SimpleDateFormat("d MMM yyyy", Locale("es", "EC")).format(this)
-fun Date.formatDateLong(): String = SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es", "EC")).format(this)
-fun String.onlyDigits(): String = filter(Char::isDigit)
+fun Date.formatDateLong(): String =
+    SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es", "EC")).format(this)
 
 private fun defaultBirthday(): Date = Calendar.getInstance().apply {
     add(Calendar.YEAR, -18)
@@ -16632,12 +16732,14 @@ class ProfileViewModel @Inject constructor(
     }
 
     fun onEditFullNameChanged(value: String) = updateEdit { copy(fullName = value) }
-    fun onEditNationalIdChanged(value: String) = updateEdit { copy(nationalId = value) }
     fun onEditPhoneChanged(value: String) = updateEdit { copy(phoneNumber = value) }
     fun onEditBirthdayChanged(value: Date) = updateEdit { copy(birthday = value) }
     fun onEditAddressChanged(value: String) = updateEdit { copy(address = value) }
-    fun onEditEmergencyNameChanged(value: String) = updateEdit { copy(emergencyContactName = value) }
-    fun onEditEmergencyPhoneChanged(value: String) = updateEdit { copy(emergencyContactPhone = value) }
+    fun onEditEmergencyNameChanged(value: String) =
+        updateEdit { copy(emergencyContactName = value) }
+
+    fun onEditEmergencyPhoneChanged(value: String) =
+        updateEdit { copy(emergencyContactPhone = value) }
 
     fun saveEditedProfile() {
         val profile = _uiState.value.profile ?: return
@@ -16672,7 +16774,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isSavingProfile = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo actualizar el perfil."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo actualizar el perfil."
+                        ),
                     )
                 }
             }
@@ -16709,7 +16813,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isUploadingProfileImage = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo subir la foto."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo subir la foto."
+                        ),
                     )
                 }
             }
@@ -16746,7 +16852,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isUploadingProfileImage = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la foto."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo eliminar la foto."
+                        ),
                     )
                 }
             }
@@ -16762,7 +16870,11 @@ class ProfileViewModel @Inject constructor(
                 sessionRepositoriable.refresh()
             }.onFailure { error ->
                 _uiState.update {
-                    it.copy(message = ProfileMessage.Error(error.message ?: "No se pudo cerrar sesión."))
+                    it.copy(
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo cerrar sesión."
+                        )
+                    )
                 }
             }
 
@@ -16793,7 +16905,9 @@ class ProfileViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isDeletingAccount = false,
-                        message = ProfileMessage.Error(error.message ?: "No se pudo eliminar la cuenta."),
+                        message = ProfileMessage.Error(
+                            error.message ?: "No se pudo eliminar la cuenta."
+                        ),
                     )
                 }
             }
@@ -16820,10 +16934,15 @@ class ProfileViewModel @Inject constructor(
     }
 
     private fun observeStats(profile: ClientProfile, forceRestart: Boolean = false) {
-        val nationalId = profile.nationalId.onlyDigits()
-        if (nationalId.isEmpty()) {
+        val userId = profile.userId.trim()
+        if (userId.isEmpty()) {
             statsJob?.cancel()
-            _uiState.update { it.copy(stats = ProfileStats.Companion.EMPTY, isLoadingStats = false) }
+            _uiState.update {
+                it.copy(
+                    stats = ProfileStats.Companion.EMPTY,
+                    isLoadingStats = false
+                )
+            }
             return
         }
 
@@ -16833,12 +16952,14 @@ class ProfileViewModel @Inject constructor(
         statsJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingStats = true) }
 
-            observeProfileStatsUseCase.execute(nationalId)
+            observeProfileStatsUseCase.execute(userId)
                 .catch { error ->
                     _uiState.update {
                         it.copy(
                             isLoadingStats = false,
-                            message = ProfileMessage.Error(error.message ?: "No se pudieron cargar tus estadísticas."),
+                            message = ProfileMessage.Error(
+                                error.message ?: "No se pudieron cargar tus estadísticas."
+                            ),
                         )
                     }
                 }
@@ -16911,16 +17032,18 @@ interface CartDao {
     @Query(
         """
     UPDATE cart_drafts
-    SET nationalId = :nationalId,
+    SET userId = :userId,
         clientName = :clientName,
+        whatsappNumber = :whatsappNumber,
         updatedAtMillis = :updatedAtMillis
     WHERE id = :draftId
     """
     )
     suspend fun updateClientInfo(
         draftId: String = CartDraftEntity.DEFAULT_ID,
-        nationalId: String?,
+        userId: String,
         clientName: String,
+        whatsappNumber: String,
         updatedAtMillis: Long,
     ): Int
 }
@@ -16938,8 +17061,9 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 @Entity(tableName = "cart_drafts")
 data class CartDraftEntity(
     @PrimaryKey val id: String = DEFAULT_ID,
-    val nationalId: String?,
+    val userId: String,
     val clientName: String,
+    val whatsappNumber: String,
     val tableNumber: String,
     val scheduledAtMillis: Long,
     val revision: Int?,
@@ -16964,8 +17088,9 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 internal fun OrderDraft.toEntity(): CartDraftEntity = CartDraftEntity(
     id = id,
-    nationalId = nationalId,
+    userId = userId,
     clientName = clientName,
+    whatsappNumber = whatsappNumber,
     tableNumber = tableNumber,
     scheduledAtMillis = scheduledAt.time,
     revision = revision,
@@ -16997,7 +17122,8 @@ internal fun CartItem.toEntity(draftId: String): CartItemEntity = CartItemEntity
 
 internal fun CartDraftWithItems.toDomain(): OrderDraft = OrderDraft(
     id = draft.id,
-    nationalId = draft.nationalId,
+    userId = draft.userId,
+    whatsappNumber = draft.whatsappNumber,
     clientName = draft.clientName,
     tableNumber = draft.tableNumber,
     scheduledAt = Date(draft.scheduledAtMillis),
@@ -17052,20 +17178,23 @@ class CartDraftRepository @Inject constructor(
     }
 
     suspend fun updateClientInfo(
-        nationalId: String?,
+        userId: String,
         clientName: String,
+        whatsappNumber: String,
     ) {
         val updatedRows = cartDao.updateClientInfo(
-            nationalId = nationalId,
+            userId = userId,
             clientName = clientName,
+            whatsappNumber = whatsappNumber,
             updatedAtMillis = Date().time,
         )
 
         if (updatedRows == 0) {
             cartDao.replaceDraft(
                 draft = OrderDraft(
-                    nationalId = nationalId,
+                    userId = userId,
                     clientName = clientName,
+                    whatsappNumber = whatsappNumber,
                     updatedAt = Date(),
                 ).toEntity(),
                 items = emptyList(),
@@ -17363,9 +17492,9 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 data class OrderDto(
     val id: String = "",
-    val clientId: String? = null,
-    val nationalId: String? = null,
+    val userId: String = "",
     val clientName: String = "",
+    val whatsappNumber: String? = null,
     val tableNumber: String = "",
     val createdAt: Timestamp = Timestamp.now(),
     val updatedAt: Timestamp? = null,
@@ -17383,9 +17512,12 @@ data class OrderDto(
 ) {
     constructor(domain: Order) : this(
         id = domain.id,
-        clientId = domain.clientId,
-        nationalId = domain.nationalId,
+        userId = domain.userId,
         clientName = domain.clientName,
+        whatsappNumber = domain.whatsappNumber
+            .takeIf { domain.isScheduledForLater }
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() },
         tableNumber = domain.tableNumber,
         createdAt = Timestamp(domain.createdAt),
         updatedAt = Timestamp(domain.updatedAt),
@@ -17405,18 +17537,20 @@ data class OrderDto(
     fun toDomain(): Order {
         val safeCreatedAt = createdAt.toDate()
         val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
+        val safeMode = serviceMode?.let(OrderServiceMode::fromRaw)
+            ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt)
         return Order(
             id = id,
-            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
-            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
+            userId = userId.trim(),
             clientName = clientName,
+            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) whatsappNumber.orEmpty()
+                .trim() else "",
             tableNumber = tableNumber,
             createdAt = safeCreatedAt,
             updatedAt = updatedAt?.toDate() ?: safeCreatedAt,
             scheduledAt = safeScheduledAt,
             scheduledDayKey = scheduledDayKey ?: OrderScheduleFormatter.dayKey(safeScheduledAt),
-            serviceMode = serviceMode?.let(OrderServiceMode::fromRaw)
-                ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt),
+            serviceMode = safeMode,
             items = items.map { it.toDomain() },
             subtotal = subtotal,
             loyaltyDiscountAmount = (loyaltyDiscountAmount ?: 0.0).coerceAtLeast(0.0),
@@ -17501,10 +17635,9 @@ class OrdersRepository @Inject constructor(
             submitFutureFoodReservation(trustedOrder)
         }
 
-        val nationalId = trustedOrder.nationalId?.filter(Char::isDigit).orEmpty()
-        if (nationalId.isNotEmpty() && trustedOrder.appliedRewards.isNotEmpty()) {
+        if (trustedOrder.appliedRewards.isNotEmpty()) {
             loyaltyRewardsRepository.reserveRewards(
-                nationalId = nationalId,
+                userId = trustedOrder.userId,
                 referenceType = LoyaltyRewardReferenceType.ORDER,
                 referenceId = trustedOrder.id,
                 appliedRewards = trustedOrder.appliedRewards,
@@ -17514,12 +17647,9 @@ class OrdersRepository @Inject constructor(
 
     private suspend fun buildTrustedOrder(order: Order): Order {
         val uid = requireCurrentUid()
-        val cleanNationalId = order.nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() }
-            ?: error("No se encontró una cédula asociada a esta cuenta.")
 
         val trustedItems = order.items.map { requestedItem ->
-            val menuRef = firestore
-                .collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+            val menuRef = firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
                 .document(requestedItem.menuItemId)
 
             val menuDto = menuRef.get().awaitResult().toObject(MenuItemDto::class.java)
@@ -17539,39 +17669,37 @@ class OrdersRepository @Inject constructor(
         }
 
         val preview = loyaltyRewardsRepository.previewRestaurantRewards(
-            nationalId = cleanNationalId,
+            userId = uid,
             items = trustedItems,
         )
 
-        return order
-            .copy(
-                clientId = uid,
-                nationalId = cleanNationalId,
-                clientName = order.clientName.trim(),
-                tableNumber = order.tableNumber.trim().ifBlank {
-                    if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
-                },
-                updatedAt = Date(),
-            )
-            .withTrustedPricing(
-                trustedItems = trustedItems,
-                appliedRewards = preview.appliedRewards,
-                discount = preview.totalDiscount,
-            )
+        return order.copy(
+            userId = uid,
+            clientName = order.clientName.trim(),
+            whatsappNumber = if (order.isScheduledForLater) {
+                normalizedOptionalEcuadorWhatsApp(order.whatsappNumber)
+            } else {
+                ""
+            },
+            tableNumber = order.tableNumber.trim().ifBlank {
+                if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
+            },
+            updatedAt = Date(),
+        ).withTrustedPricing(
+            trustedItems = trustedItems,
+            appliedRewards = preview.appliedRewards,
+            discount = preview.totalDiscount,
+        )
     }
 
     private suspend fun submitFutureFoodReservation(order: Order) {
-        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .document(order.id)
-            .set(OrderDto(order))
-            .awaitResult()
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            .set(OrderDto(order)).awaitResult()
     }
 
     private suspend fun submitAndConsumeCurrentStock(order: Order) {
-        val quantitiesByMenuItemId = order.items
-            .groupBy { it.menuItemId }
-            .mapValues { (_, items) -> items.sumOf { it.quantity } }
-            .filterValues { it > 0 }
+        val quantitiesByMenuItemId = order.items.groupBy { it.menuItemId }
+            .mapValues { (_, items) -> items.sumOf { it.quantity } }.filterValues { it > 0 }
 
         val menuItemsToProcess: List<Pair<DocumentReference, Int>> =
             quantitiesByMenuItemId.map { (menuItemId, totalQuantity) ->
@@ -17610,47 +17738,55 @@ class OrdersRepository @Inject constructor(
         }.awaitResult()
     }
 
-    override fun observeOrders(nationalId: String): Flow<List<Order>> = callbackFlow {
+    override fun observeOrders(userId: String): Flow<List<Order>> = callbackFlow {
         val uid = auth.currentUser?.uid?.trim().orEmpty()
+        val trustedUserId = uid.ifBlank { userId.trim() }
 
-        if (uid.isEmpty()) {
+        if (trustedUserId.isEmpty()) {
             trySend(emptyList()).isSuccess
             close()
             return@callbackFlow
         }
 
-        val registration: ListenerRegistration = firestore
-            .collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("clientId", uid)
-            .orderBy("scheduledAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snapshot, error ->
-                when {
-                    error != null -> close(error)
-                    snapshot == null -> trySend(emptyList()).isSuccess
-                    else -> {
-                        val orders = snapshot.documents.mapNotNull { doc ->
-                            runCatching { doc.toObject(OrderDto::class.java)?.toDomain() }
-                                .onFailure {
+        val registration: ListenerRegistration =
+            firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+                .whereEqualTo("userId", trustedUserId)
+                .orderBy("scheduledAt", Query.Direction.DESCENDING)
+                .addSnapshotListener { snapshot, error ->
+                    when {
+                        error != null -> close(error)
+                        snapshot == null -> trySend(emptyList()).isSuccess
+                        else -> {
+                            val orders = snapshot.documents.mapNotNull { doc ->
+                                runCatching {
+                                    doc.toObject(OrderDto::class.java)?.toDomain()
+                                }.onFailure {
                                     Log.e(
-                                        "AltosOrders",
-                                        "Could not decode order ${doc.id}",
-                                        it
+                                        "AltosOrders", "Could not decode order ${doc.id}", it
                                     )
-                                }
-                                .getOrNull()
-                        }.sortedWith(
-                            compareByDescending<Order> { it.scheduledAt.time }
-                                .thenByDescending { it.createdAt.time },
-                        )
-                        trySend(orders).isSuccess
+                                }.getOrNull()
+                            }.sortedWith(
+                                compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time },
+                            )
+                            trySend(orders).isSuccess
+                        }
                     }
                 }
-            }
 
         awaitClose { registration.remove() }
     }
 
-    private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
+    private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
+        val digits = rawValue.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+
+        return when {
+            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
+            digits.length == 12 && digits.startsWith("5939") -> digits
+            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+            else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
+        }
+    }
 
     private fun requireCurrentUid(): String {
         return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }
@@ -17799,10 +17935,8 @@ data class MenuSection(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
 
-class ObserveMenuUseCase(
-    private val repository: MenuRepositoriable,
-) {
-    fun execute(): Flow<List<MenuSection>> = repository.observeMenu()
+class ObserveMenuUseCase @Inject constructor(private val repository: MenuRepositoriable) {
+    fun execute() = repository.observeMenu()
 }
 
 ```
@@ -17821,17 +17955,20 @@ enum class OrderServiceMode(val rawValue: String, val title: String) {
 
     companion object {
         fun fromRaw(rawValue: String?): OrderServiceMode {
-            return entries.firstOrNull { it.rawValue.equals(rawValue, ignoreCase = true) || it.name.equals(rawValue, ignoreCase = true) }
-                ?: NOW
+            return entries.firstOrNull {
+                it.rawValue.equals(rawValue, ignoreCase = true) ||
+                        it.name.equals(rawValue, ignoreCase = true)
+            } ?: NOW
         }
     }
 }
 
 data class Order(
     val id: String,
-    val clientId: String? = null,
-    val nationalId: String?,
+    /** Firebase Auth UID. Canonical owner field for Firestore rules and user queries. */
+    val userId: String,
     val clientName: String,
+    val whatsappNumber: String = "",
     val tableNumber: String,
     val createdAt: Date,
     val updatedAt: Date,
@@ -17862,7 +17999,10 @@ data class Order(
 
     val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
 
-    fun withClientId(uid: String): Order = copy(clientId = uid.trim().takeIf { it.isNotEmpty() })
+    val displayWhatsApp: String
+        get() = whatsappNumber.trim().ifEmpty { "Lo escribirá por WhatsApp" }
+
+    fun withUserId(uid: String): Order = copy(userId = uid.trim())
 
     fun withTrustedPricing(
         trustedItems: List<OrderItem>,
@@ -17943,8 +18083,10 @@ private const val DEFAULT_DRAFT_ID = "active_cart"
 
 data class OrderDraft(
     val id: String = DEFAULT_DRAFT_ID,
-    val nationalId: String? = null,
+    /** Firebase Auth UID. Canonical owner field. */
+    val userId: String = "",
     val clientName: String = "",
+    val whatsappNumber: String = "",
     val tableNumber: String = "",
     val scheduledAt: Date = Date(),
     val createdAt: Date = Date(),
@@ -17963,16 +18105,19 @@ data class OrderDraft(
     val normalizedScheduledAt: Date = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
     val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(Date(), normalizedScheduledAt)
     val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED
-    val canSubmit: Boolean = !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
+    val canSubmit: Boolean =
+        !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
 
     fun normalizedForSubmit(now: Date = Date()): OrderDraft = copy(
+        userId = userId.trim(),
+        whatsappNumber = if (isScheduledForLater) whatsappNumber.trim() else "",
         scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now),
         updatedAt = now,
     )
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
-        clientId: String? = null,
+        userId: String = this.userId,
         status: OrderStatus = OrderStatus.PENDING,
     ): Order {
         val now = Date()
@@ -17989,12 +18134,13 @@ data class OrderDraft(
         }
 
         val cleanTable = tableNumber.trim()
+        val cleanWhatsApp = whatsappNumber.trim()
 
         return Order(
             id = orderId,
-            clientId = clientId?.trim()?.takeIf { it.isNotEmpty() },
-            nationalId = nationalId?.filter(Char::isDigit)?.takeIf { it.isNotEmpty() },
+            userId = userId.trim(),
             clientName = clientName.trim(),
+            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) cleanWhatsApp else "",
             tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
             createdAt = now,
             updatedAt = now,
@@ -18088,7 +18234,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 interface OrdersRepositoriable {
     suspend fun submit(order: Order)
-    fun observeOrders(nationalId: String): Flow<List<Order>>
+    fun observeOrders(userId: String): Flow<List<Order>>
 }
 
 ```
@@ -18100,15 +18246,12 @@ interface OrdersRepositoriable {
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
-class ObserveOrdersUseCase(
-    private val repository: OrdersRepositoriable,
-) {
-    fun execute(nationalId: String) = repository.observeOrders(nationalId)
+
+class ObserveOrdersUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
+    fun execute(userId: String) = repository.observeOrders(userId)
 }
 
-class SubmitOrderUseCase(
-    private val repository: OrdersRepositoriable,
-) {
+class SubmitOrderUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
     suspend fun execute(order: Order) = repository.submit(order)
 }
 
@@ -18152,7 +18295,7 @@ private sealed interface RestaurantDestination {
 @Composable
 fun RestaurantScreen(
     sessionState: SessionState.Authenticated,
-    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier,
+    modifier: Modifier = Modifier,
     menuViewModel: MenuViewModel = hiltViewModel(),
     cartViewModel: CartViewModel = hiltViewModel(),
     checkoutViewModel: CheckoutViewModel = hiltViewModel(),
@@ -18165,9 +18308,10 @@ fun RestaurantScreen(
 
     var destination: RestaurantDestination by remember { mutableStateOf(RestaurantDestination.Menu) }
     var pendingAddItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
 
     LaunchedEffect(sessionState.profile.id, sessionState.profile.updatedAt) {
-        menuViewModel.onAppear(sessionState.profile.nationalId)
+        menuViewModel.onAppear(sessionState.profile.userId)
         cartViewModel.syncProfile(sessionState.profile)
         checkoutViewModel.syncProfile(sessionState.profile)
         ordersViewModel.syncProfile(sessionState.profile)
@@ -18176,6 +18320,12 @@ fun RestaurantScreen(
     LaunchedEffect(Unit) {
         checkoutViewModel.createdOrder.collect { order ->
             destination = RestaurantDestination.Success(order)
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        checkoutViewModel.openWhatsAppAfterSubmit.collect {
+            context.openAltosWhatsAppForOrderConfirmation()
         }
     }
 
@@ -18255,6 +18405,7 @@ fun RestaurantScreen(
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
                 onTableNumberChanged = checkoutViewModel::updateTableNumber,
+                onWhatsappChanged = checkoutViewModel::updateWhatsappNumber,
                 onScheduledAtChanged = checkoutViewModel::updateScheduledAt,
                 onScheduleNow = checkoutViewModel::scheduleForNow,
                 onSubmit = checkoutViewModel::submit,
@@ -18283,6 +18434,17 @@ fun RestaurantScreen(
                 modifier = modifier,
             )
         }
+    }
+}
+
+
+private fun Context.openAltosWhatsAppForOrderConfirmation() {
+    val message =
+        "Hola Altos del Murco, acabo de enviar una reserva de comida desde la app y quiero confirmar disponibilidad lo antes posible."
+    val encodedMessage = URLEncoder.encode(message, "UTF-8")
+    val url = "https://wa.me/593967188093?text=$encodedMessage"
+    runCatching {
+        startActivity(Intent(Intent.ACTION_VIEW, url.toUri()))
     }
 }
 
@@ -19015,15 +19177,57 @@ fun CheckoutScreen(
     profile: ClientProfile,
     onBack: () -> Unit,
     onTableNumberChanged: (String) -> Unit,
+    onWhatsappChanged: (String) -> Unit,
     onScheduledAtChanged: (Date) -> Unit,
     onScheduleNow: () -> Unit,
-    onSubmit: () -> Unit,
+    onSubmit: (openWhatsAppAfterSubmit: Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val theme = AppSectionTheme.Restaurant
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
+
+    var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
+
+    val isScheduledWhatsAppMissing = state.isScheduledForLater &&
+            state.draft.whatsappNumber.filter(Char::isDigit).isEmpty()
+
+    fun handleSubmitTapped() {
+        if (isScheduledWhatsAppMissing) {
+            showMissingWhatsAppDialog = true
+        } else {
+            onSubmit(false)
+        }
+    }
+
+    if (showMissingWhatsAppDialog) {
+        AlertDialog(
+            onDismissRequest = { showMissingWhatsAppDialog = false },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showMissingWhatsAppDialog = false
+                        onSubmit(true)
+                    },
+                ) {
+                    Text("Enviar y escribir por WhatsApp", color = palette.primary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showMissingWhatsAppDialog = false }) {
+                    Text("Agregar WhatsApp aquí")
+                }
+            },
+            title = { Text("Confirmar por WhatsApp") },
+            text = {
+                Text("Puedes enviar la reserva sin número. Al finalizar abriremos WhatsApp para que nos escribas.")
+            },
+            containerColor = palette.elevatedCard,
+            titleContentColor = palette.textPrimary,
+            textContentColor = palette.textSecondary,
+        )
+    }
 
     BrandScreen(
         theme = theme,
@@ -19057,7 +19261,7 @@ fun CheckoutScreen(
                     canSubmit = state.canSubmit,
                     isSubmitting = state.isSubmitting,
                     isScheduledForLater = state.isScheduledForLater,
-                    onSubmit = onSubmit,
+                    onSubmit = { handleSubmitTapped() },
                 )
             },
         ) { innerPadding ->
@@ -19088,6 +19292,16 @@ fun CheckoutScreen(
                 }
 
                 item { CheckoutClientCard(theme, profile) }
+
+                if (state.isScheduledForLater) {
+                    item {
+                        CheckoutContactCard(
+                            theme = theme,
+                            whatsappNumber = state.draft.whatsappNumber,
+                            onWhatsappChanged = onWhatsappChanged,
+                        )
+                    }
+                }
 
                 item {
                     TableCard(
@@ -19142,10 +19356,81 @@ private fun CheckoutClientCard(theme: AppSectionTheme, profile: ClientProfile) {
         BrandSectionHeader(
             theme = theme,
             title = "Cliente",
-            subtitle = "Estos datos vienen de tu perfil."
+            subtitle = "Solo el nombre es obligatorio. Los datos de contacto son opcionales."
         )
         InfoRow(theme, "Nombre", profile.fullName)
-        InfoRow(theme, "Cédula", profile.nationalId)
+    }
+}
+
+@Composable
+private fun CheckoutContactCard(
+    theme: AppSectionTheme,
+    whatsappNumber: String,
+    onWhatsappChanged: (String) -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        BrandSectionHeader(
+            theme = theme,
+            title = "Contacto para confirmar",
+            subtitle = "Solo se usa para reservas programadas. Puedes dejarlo vacío y escribirnos por WhatsApp después de enviar.",
+        )
+
+        OutlinedTextField(
+            value = whatsappNumber,
+            onValueChange = onWhatsappChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("WhatsApp opcional") },
+            leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
+            singleLine = true,
+            shape = RoundedCornerShape(AppTheme.Radius.large),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedTextColor = palette.textPrimary,
+                unfocusedTextColor = palette.textPrimary,
+                focusedContainerColor = palette.elevatedCard,
+                unfocusedContainerColor = palette.elevatedCard,
+                focusedBorderColor = palette.primary,
+                unfocusedBorderColor = palette.stroke,
+                focusedLabelColor = palette.primary,
+                unfocusedLabelColor = palette.textSecondary,
+                cursorColor = palette.primary,
+            ),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(palette.chipGradient)
+                .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Info,
+                contentDescription = null,
+                tint = palette.primary,
+            )
+
+            Text(
+                text = if (whatsappNumber.filter(Char::isDigit).isEmpty()) {
+                    "Si no ingresas número, enviaremos la reserva y abriremos WhatsApp para que nos escribas."
+                } else {
+                    "Usaremos este número únicamente para confirmar la reserva programada."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+        }
     }
 }
 
@@ -21109,9 +21394,8 @@ private fun RewardCouponCard(
 
         val appliesToText = when {
             eligibleItems.isNotEmpty() -> {
-                "Aplica a: " +
-                        eligibleItems.take(3).joinToString { it.name } +
-                        if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
+                "Aplica a: " + eligibleItems.take(3)
+                    .joinToString { it.name } + if (eligibleItems.size > 3) " +${eligibleItems.size - 3}" else ""
             }
 
             template.rule.type == LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE -> {
@@ -22211,6 +22495,14 @@ private fun OrderCard(order: Order) {
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
+
+                if (order.isScheduledForLater) {
+                    Text(
+                        text = "WhatsApp: ${order.displayWhatsApp}",
+                        color = palette.textSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
 
             StatusPill(order.status)
@@ -22324,15 +22616,12 @@ private fun StatusPill(status: OrderStatus) {
 
 private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
     return when (state.grouping) {
-        OrdersGroupingOption.DATE -> state.visibleOrders
-            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
-            .map { it.key to it.value.sortedWith(
-                compareBy<Order> { order -> order.scheduledAt.time }
-                    .thenBy { order -> order.createdAt.time }
-            ) }
+        OrdersGroupingOption.DATE -> state.visibleOrders.groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map {
+                it.key to it.value.sortedWith(compareBy<Order> { order -> order.scheduledAt.time }.thenBy { order -> order.createdAt.time })
+            }
 
-        OrdersGroupingOption.STATUS -> state.visibleOrders
-            .groupBy { it.recalculatedAgendaStatus().title }
+        OrdersGroupingOption.STATUS -> state.visibleOrders.groupBy { it.recalculatedAgendaStatus().title }
             .map { it.key to it.value }
     }
 }
@@ -22449,14 +22738,14 @@ class CartViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CartUiState())
     val uiState: StateFlow<CartUiState> = _uiState.asStateFlow()
 
-    private var currentNationalId: String = ""
+    private var currentUserId: String = ""
     private var rewardPreviewJob: Job? = null
 
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
-                val draftNationalId = draft.nationalId?.filter(Char::isDigit).orEmpty()
-                if (draftNationalId.isNotEmpty()) currentNationalId = draftNationalId
+                val draftUserId = draft.userId.trim()
+                if (draftUserId.isNotEmpty()) currentUserId = draftUserId
 
                 _uiState.update {
                     it.copy(
@@ -22471,14 +22760,15 @@ class CartViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter { it.isDigit() }
-        currentNationalId = cleanNationalId
+        val cleanUserId = profile.userId
+        currentUserId = cleanUserId
 
         val current = _uiState.value.draft
 
         val updated = current.copy(
-            nationalId = cleanNationalId,
+            userId = cleanUserId,
             clientName = profile.fullName,
+            whatsappNumber = current.whatsappNumber.ifBlank { profile.phoneNumber },
             updatedAt = Date(),
         )
 
@@ -22510,8 +22800,7 @@ class CartViewModel @Inject constructor(
         val current = _uiState.value.draft
 
         val existingIndex = current.items.indexOfFirst {
-            it.menuItem.id == menuItem.id &&
-                    it.notes.orEmpty() == trimmedNotes.orEmpty()
+            it.menuItem.id == menuItem.id && it.notes.orEmpty() == trimmedNotes.orEmpty()
         }
 
         val maxAllowed = menuItem.remainingQuantity.coerceAtLeast(1)
@@ -22559,8 +22848,11 @@ class CartViewModel @Inject constructor(
             items.map { item ->
                 if (item.id == cartItemId) {
                     item.copy(
-                        quantity = (item.safeQuantity + 1)
-                            .coerceAtMost(item.menuItem.remainingQuantity.coerceAtLeast(1)),
+                        quantity = (item.safeQuantity + 1).coerceAtMost(
+                                item.menuItem.remainingQuantity.coerceAtLeast(
+                                    1
+                                )
+                            ),
                     )
                 } else {
                     item
@@ -22615,7 +22907,7 @@ class CartViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(currentNationalId),
+                            RewardWalletSnapshot.empty(currentUserId),
                         ),
                         isLoadingRewards = false,
                     )
@@ -22668,17 +22960,14 @@ class CartViewModel @Inject constructor(
     private fun refreshRewardPreview(draft: OrderDraft) {
         rewardPreviewJob?.cancel()
 
-        val cleanNationalId = draft.nationalId
-            ?.filter(Char::isDigit)
-            ?.takeIf { it.isNotEmpty() }
-            ?: currentNationalId
+        val cleanUserId = draft.userId.trim().ifEmpty { currentUserId }
 
-        if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
+        if (cleanUserId.isEmpty() || draft.items.isEmpty()) {
             _uiState.update {
                 it.copy(
                     isLoadingRewards = false,
                     rewardPreview = RewardComputationResult.empty(
-                        RewardWalletSnapshot.empty(cleanNationalId),
+                        RewardWalletSnapshot.empty(cleanUserId),
                     ),
                 )
             }
@@ -22695,7 +22984,7 @@ class CartViewModel @Inject constructor(
 
             try {
                 val preview = buildRewardPreview(
-                    nationalId = cleanNationalId,
+                    userId = cleanUserId,
                     draft = draft,
                 )
 
@@ -22712,7 +23001,7 @@ class CartViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(cleanNationalId),
+                            RewardWalletSnapshot.empty(cleanUserId),
                         ),
                         isLoadingRewards = false,
                         errorMessage = error.message ?: "No se pudieron calcular beneficios.",
@@ -22723,7 +23012,7 @@ class CartViewModel @Inject constructor(
     }
 
     private suspend fun buildRewardPreview(
-        nationalId: String,
+        userId: String,
         draft: OrderDraft,
     ): RewardComputationResult {
         val previewItems = draft.items.map {
@@ -22737,14 +23026,13 @@ class CartViewModel @Inject constructor(
         }
 
         return loyaltyRewardsRepository.previewRestaurantRewards(
-            nationalId = nationalId,
+            userId = userId,
             items = previewItems,
         )
     }
 }
 
 fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
-
 
 ```
 
@@ -22798,17 +23086,21 @@ class CheckoutViewModel @Inject constructor(
     private val _createdOrder = MutableSharedFlow<Order>()
     val createdOrder: SharedFlow<Order> = _createdOrder.asSharedFlow()
 
-    private var currentNationalId: String = ""
+    private val _openWhatsAppAfterSubmit = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val openWhatsAppAfterSubmit: SharedFlow<Unit> = _openWhatsAppAfterSubmit.asSharedFlow()
+
+    private var currentUserId: String = ""
     private var rewardPreviewJob: Job? = null
 
     init {
         viewModelScope.launch {
             observeCartDraftUseCase.execute().collectLatest { draft ->
-                val refreshedDraft = if (!draft.isScheduledForLater && draft.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
-                    draft.copy(scheduledAt = Date())
-                } else {
-                    draft
-                }
+                val refreshedDraft =
+                    if (!draft.isScheduledForLater && draft.scheduledAt.before(Date(System.currentTimeMillis() - 120_000L))) {
+                        draft.copy(scheduledAt = Date())
+                    } else {
+                        draft
+                    }
 
                 _uiState.update {
                     it.copy(
@@ -22823,11 +23115,12 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun syncProfile(profile: ClientProfile) {
-        currentNationalId = profile.nationalId.filter { it.isDigit() }
+        currentUserId = profile.userId
         val current = _uiState.value.draft
         val updated = current.copy(
-            nationalId = currentNationalId,
-            clientName = profile.fullName,
+            userId = currentUserId,
+            clientName = current.clientName.ifBlank { profile.fullName },
+            whatsappNumber = current.whatsappNumber.ifBlank { profile.phoneNumber },
         )
         saveDraft(updated)
         refreshRewardPreview(updated)
@@ -22835,6 +23128,10 @@ class CheckoutViewModel @Inject constructor(
 
     fun updateTableNumber(value: String) {
         saveDraft(_uiState.value.draft.copy(tableNumber = value.take(30)))
+    }
+
+    fun updateWhatsappNumber(value: String) {
+        saveDraft(_uiState.value.draft.copy(whatsappNumber = value.take(20)))
     }
 
     fun updateScheduledAt(value: Date) {
@@ -22846,21 +23143,35 @@ class CheckoutViewModel @Inject constructor(
     }
 
     fun scheduleForNow() {
-        saveDraft(_uiState.value.draft.copy(scheduledAt = Date()))
+        saveDraft(_uiState.value.draft.copy(scheduledAt = Date(), whatsappNumber = ""))
     }
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    fun submit() {
-        val draft = _uiState.value.draft.normalizedForSubmit()
+    fun submit(openWhatsAppAfterSubmit: Boolean = false) {
+        val rawDraft = _uiState.value.draft
+        val cleanUserId = rawDraft.userId.trim().ifEmpty { currentUserId }
+        val normalizedWhatsApp = runCatching {
+            if (rawDraft.isScheduledForLater) normalizedOptionalEcuadorWhatsApp(rawDraft.whatsappNumber) else ""
+        }.getOrElse { error ->
+            _uiState.update {
+                it.copy(errorMessage = error.message ?: "El WhatsApp ingresado no parece válido.")
+            }
+            return
+        }
+
+        val draft = rawDraft.copy(
+                userId = cleanUserId,
+                whatsappNumber = normalizedWhatsApp,
+            ).normalizedForSubmit()
 
         if (!draft.canSubmit) {
             _uiState.update {
                 it.copy(
                     errorMessage = if (draft.isScheduledForLater) {
-                        "Agrega productos y confirma tu perfil. La mesa puede quedar por asignar para reservas."
+                        "Agrega productos y escribe tu nombre. La mesa puede quedar por asignar para reservas."
                     } else {
                         "Completa la mesa y asegúrate de tener productos en el carrito."
                     }
@@ -22869,14 +23180,20 @@ class CheckoutViewModel @Inject constructor(
             return
         }
 
+        if (cleanUserId.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Debes iniciar sesión nuevamente para continuar.") }
+            return
+        }
+
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
 
             try {
                 val preview = buildRewardPreview(draft)
-                val finalOrder = draft
-                    .toOrder(orderId = UUID.randomUUID().toString())
-                    .withLoyalty(
+                val finalOrder = draft.toOrder(
+                        orderId = UUID.randomUUID().toString(),
+                        userId = cleanUserId,
+                    ).withLoyalty(
                         appliedRewards = preview.appliedRewards,
                         discount = preview.totalDiscount,
                     )
@@ -22885,11 +23202,15 @@ class CheckoutViewModel @Inject constructor(
                 clearCartDraftUseCase.execute()
                 _createdOrder.emit(finalOrder)
 
+                if (openWhatsAppAfterSubmit) {
+                    _openWhatsAppAfterSubmit.tryEmit(Unit)
+                }
+
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(currentNationalId),
+                            RewardWalletSnapshot.empty(currentUserId),
                         ),
                     )
                 }
@@ -22935,10 +23256,11 @@ class CheckoutViewModel @Inject constructor(
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Throwable) {
+                val fallbackUserId = draft.userId.trim().ifEmpty { currentUserId }
                 _uiState.update {
                     it.copy(
                         rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(draft.nationalId.orEmpty()),
+                            RewardWalletSnapshot.empty(fallbackUserId),
                         ),
                         isLoadingRewards = false,
                         errorMessage = error.message ?: "No se pudieron calcular beneficios.",
@@ -22949,13 +23271,10 @@ class CheckoutViewModel @Inject constructor(
     }
 
     private suspend fun buildRewardPreview(draft: OrderDraft): RewardComputationResult {
-        val cleanNationalId = draft.nationalId
-            ?.filter(Char::isDigit)
-            ?.takeIf { it.isNotEmpty() }
-            ?: currentNationalId
+        val cleanUserId = draft.userId.trim().ifEmpty { currentUserId }
 
-        if (cleanNationalId.isEmpty() || draft.items.isEmpty()) {
-            return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanNationalId))
+        if (cleanUserId.isEmpty() || draft.items.isEmpty()) {
+            return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanUserId))
         }
 
         val previewItems = draft.items.map {
@@ -22969,9 +23288,21 @@ class CheckoutViewModel @Inject constructor(
         }
 
         return loyaltyRewardsRepository.previewRestaurantRewards(
-            nationalId = cleanNationalId,
+            userId = cleanUserId,
             items = previewItems,
         )
+    }
+
+    private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
+        val digits = rawValue.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+
+        return when {
+            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
+            digits.length == 12 && digits.startsWith("5939") -> digits
+            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+            else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
+        }
     }
 }
 
@@ -23029,6 +23360,7 @@ data class MenuUiState(
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
 
+
 @HiltViewModel
 class MenuViewModel @Inject constructor(
     private val observeMenuUseCase: ObserveMenuUseCase,
@@ -23040,20 +23372,20 @@ class MenuViewModel @Inject constructor(
 
     private var menuJob: Job? = null
     private var rewardsJob: Job? = null
-    private var currentRewardsNationalId: String? = null
+    private var currentRewardsUserId: String? = null
 
-    fun onAppear(nationalId: String?) {
+    fun onAppear(userId: String?) {
         startMenuObservationIfNeeded()
-        setNationalId(nationalId)
+        setUserId(userId)
     }
 
-    fun setNationalId(nationalId: String?) {
-        val cleanNationalId = nationalId?.filter(Char::isDigit).orEmpty()
+    fun setUserId(userId: String?) {
+        val cleanUserId = userId?.trim().orEmpty()
 
-        if (cleanNationalId.isEmpty()) {
+        if (cleanUserId.isEmpty()) {
             rewardsJob?.cancel()
             rewardsJob = null
-            currentRewardsNationalId = null
+            currentRewardsUserId = null
             _uiState.update {
                 it.copy(
                     isLoadingRewards = false,
@@ -23063,20 +23395,20 @@ class MenuViewModel @Inject constructor(
             return
         }
 
-        if (currentRewardsNationalId == cleanNationalId && rewardsJob?.isActive == true) return
+        if (currentRewardsUserId == cleanUserId && rewardsJob?.isActive == true) return
 
-        currentRewardsNationalId = cleanNationalId
+        currentRewardsUserId = cleanUserId
         rewardsJob?.cancel()
         rewardsJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoadingRewards = true, errorMessage = null) }
             loyaltyRewardsRepository
-                .observeWalletSnapshot(cleanNationalId)
+                .observeWalletSnapshot(cleanUserId)
                 .catch { error ->
                     if (error is CancellationException) throw error
                     _uiState.update {
                         it.copy(
                             isLoadingRewards = false,
-                            walletSnapshot = RewardWalletSnapshot.empty(cleanNationalId),
+                            walletSnapshot = RewardWalletSnapshot.empty(cleanUserId),
                             errorMessage = error.message ?: "No se pudieron cargar tus beneficios.",
                         )
                     }
@@ -23243,7 +23575,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 
 data class OrdersUiState(
-    val nationalId: String = "",
+    val userId: String = "",
     val orders: List<Order> = emptyList(),
     val isLoading: Boolean = false,
     val grouping: OrdersGroupingOption = OrdersGroupingOption.DATE,
@@ -23300,18 +23632,18 @@ class OrdersViewModel @Inject constructor(
     private var observeJob: Job? = null
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanNationalId = profile.nationalId.filter { it.isDigit() }
-        if (cleanNationalId == _uiState.value.nationalId && observeJob != null) return
+        val cleanUserId = profile.userId
+        if (cleanUserId == _uiState.value.userId && observeJob != null) return
 
         _uiState.update {
             it.copy(
-                nationalId = cleanNationalId,
-                isLoading = cleanNationalId.isNotEmpty(),
+                userId = cleanUserId,
+                isLoading = cleanUserId.isNotEmpty(),
                 errorMessage = null,
             )
         }
 
-        observeOrders(cleanNationalId)
+        observeOrders(cleanUserId)
     }
 
     fun setGrouping(value: OrdersGroupingOption) {
@@ -23330,10 +23662,10 @@ class OrdersViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
-    private fun observeOrders(nationalId: String) {
+    private fun observeOrders(userId: String) {
         observeJob?.cancel()
 
-        if (nationalId.isBlank()) {
+        if (userId.isBlank()) {
             _uiState.update {
                 it.copy(
                     orders = emptyList(),
@@ -23345,16 +23677,14 @@ class OrdersViewModel @Inject constructor(
         }
 
         observeJob = viewModelScope.launch {
-            observeOrdersUseCase.execute(nationalId)
-                .catch { error ->
+            observeOrdersUseCase.execute(userId).catch { error ->
                     _uiState.update {
                         it.copy(
                             isLoading = false,
                             errorMessage = error.message ?: "No se pudieron cargar pedidos.",
                         )
                     }
-                }
-                .collectLatest { orders ->
+                }.collectLatest { orders ->
                     _uiState.update {
                         it.copy(
                             orders = orders,
