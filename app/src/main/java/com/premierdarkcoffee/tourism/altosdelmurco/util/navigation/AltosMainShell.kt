@@ -26,7 +26,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navOptions
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view.AdventureScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.view.AdventureComboBuilderScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view.BookingsScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.view.HomeScreen
@@ -116,7 +116,7 @@ fun AltosMainShell(
                 RestaurantScreen(sessionState = sessionState)
             }
             composable(TopLevelDestination.EXPERIENCES.route) {
-                AdventureScreen(
+                AdventureComboBuilderScreen(
                     sessionState = sessionState,
                     homePrefillPackageId = pendingExperiencePackageId,
                     onHomePrefillPackageConsumed = { pendingExperiencePackageId = null },

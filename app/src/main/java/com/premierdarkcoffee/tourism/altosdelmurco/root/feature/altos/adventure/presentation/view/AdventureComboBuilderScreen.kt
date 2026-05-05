@@ -117,7 +117,7 @@ private sealed interface AdventureMode {
 private val AdventureTheme = AppSectionTheme.Adventure
 
 @Composable
-fun AdventureScreen(
+fun AdventureComboBuilderScreen(
     sessionState: SessionState.Authenticated,
     modifier: Modifier = Modifier,
     catalogViewModel: AdventureCatalogViewModel = hiltViewModel(),
