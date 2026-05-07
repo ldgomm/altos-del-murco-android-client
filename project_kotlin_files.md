@@ -2010,9 +2010,9 @@ private fun AdventureScreenContent(
         val packageId = homePrefillPackageId?.trim().orEmpty()
         if (packageId.isEmpty()) return@LaunchedEffect
 
-        val packageModel = catalogState.catalog.activePackagesSorted
-            .firstOrNull { it.id == packageId }
-            ?: return@LaunchedEffect
+        val packageModel =
+            catalogState.catalog.activePackagesSorted.firstOrNull { it.id == packageId }
+                ?: return@LaunchedEffect
 
         val hasAllFoodData = packageModel.foodItems.isEmpty() || menuState.sections.isNotEmpty()
         if (!hasAllFoodData) return@LaunchedEffect
@@ -2043,9 +2043,8 @@ private fun AdventureScreenContent(
         )
     }
 
-    val message = builderState.errorMessage
-        ?: builderState.successMessage
-        ?: catalogState.errorMessage
+    val message =
+        builderState.errorMessage ?: builderState.successMessage ?: catalogState.errorMessage
 
     if (message != null) {
         AlertDialog(
@@ -2110,7 +2109,7 @@ private fun AdventureScreenContent(
                 menuSections = menuState.sections,
                 onBack = { mode = AdventureMode.Catalog },
                 onAddFood = { showFoodPicker = true },
-                userId = sessionState.profile.userId,
+                profile = sessionState.profile,
             )
         }
     }
@@ -2239,17 +2238,15 @@ private fun FeaturedPackageCard(
 ) {
     val palette = LocalBrandPalette.current
 
-    val menuItemsById = menuSections
-        .flatMap { it.items }
-        .associateBy { it.id }
+    val menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id }
 
     val activitySubtotal = AdventurePricingEngine.estimatedSubtotal(packageModel.items, catalog)
     val foodSubtotal = packageModel.foodItems.sumOf { food ->
         (menuItemsById[food.menuItemId]?.finalPrice ?: 0.0) * food.quantity
     }
 
-    val total = (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount)
-        .coerceAtLeast(0.0)
+    val total =
+        (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount).coerceAtLeast(0.0)
 
     val foodSummary = packageModel.foodItems.joinToString(" • ") { food ->
         "${food.quantity}x ${menuItemsById[food.menuItemId]?.name ?: food.menuItemId}"
@@ -2278,8 +2275,7 @@ private fun FeaturedPackageCard(
                         modifier = Modifier.weight(1f),
                     )
 
-                    packageModel.badge
-                        ?.takeIf { it.isNotBlank() }
+                    packageModel.badge?.takeIf { it.isNotBlank() }
                         ?.let { AdventureBadge(text = it) }
                 }
 
@@ -2420,12 +2416,15 @@ private fun AdventureBuilderContent(
     menuSections: List<MenuSection>,
     onBack: () -> Unit,
     onAddFood: () -> Unit,
-    userId: String?,
+    profile: ClientProfile,
     modifier: Modifier = Modifier,
+    quickProfileViewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val palette = LocalBrandPalette.current
     val context = LocalContext.current
+
+    var showQuickContactSheet by rememberSaveable { mutableStateOf(false) }
 
     var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
     var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
@@ -2447,7 +2446,7 @@ private fun AdventureBuilderContent(
             }
 
             else -> {
-                viewModel.submit(userId)
+                viewModel.submit(profile.userId)
             }
         }
     }
@@ -2459,7 +2458,7 @@ private fun AdventureBuilderContent(
                 TextButton(
                     onClick = {
                         showMissingWhatsAppDialog = false
-                        viewModel.submit(userId, openWhatsAppAfterSubmit = true)
+                        viewModel.submit(profile.userId, openWhatsAppAfterSubmit = true)
                     },
                 ) {
                     Text("Enviar y escribir por WhatsApp", color = palette.primary)
@@ -2505,6 +2504,21 @@ private fun AdventureBuilderContent(
                 viewModel.updateFoodItem(it)
                 editingFood = null
             },
+        )
+    }
+
+    if (showQuickContactSheet) {
+        QuickContactProfileSheet(
+            theme = AdventureTheme,
+            profile = profile,
+            viewModel = quickProfileViewModel,
+            title = "Completa tus datos de reserva",
+            message = "Con nombre y WhatsApp podremos confirmar horarios, disponibilidad o cambios de tu experiencia.",
+            onSaved = { updatedProfile ->
+                viewModel.setClientName(updatedProfile.fullName)
+                viewModel.setWhatsapp(updatedProfile.phoneNumber)
+            },
+            onDismiss = { showQuickContactSheet = false },
         )
     }
 
@@ -2599,7 +2613,11 @@ private fun AdventureBuilderContent(
                 onAddFood = onAddFood,
                 onEditFood = { editingFood = it },
             )
-            AdventureContactSection(viewModel = viewModel)
+            AdventureContactSection(
+                viewModel = viewModel,
+                profile = profile,
+                onEditProfileClick = { showQuickContactSheet = true },
+            )
             AdventureSummarySection(viewModel = viewModel)
 
             Spacer(Modifier.height(84.dp))
@@ -3192,43 +3210,238 @@ private fun FoodDraftRow(
 @Composable
 private fun AdventureContactSection(
     viewModel: AdventureComboBuilderViewModel,
+    profile: ClientProfile,
+    onEditProfileClick: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalBrandPalette.current
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    val cleanName = state.clientName.trim()
+    val cleanPhone = state.whatsappNumber.filter(Char::isDigit)
+    val profilePhone = profile.phoneNumber.filter(Char::isDigit)
+
+    val nameMissing = cleanName.isEmpty()
+    val phoneMissing = cleanPhone.isEmpty() || profilePhone.isEmpty()
+    val canCollapse = !nameMissing && !phoneMissing
+
+    LaunchedEffect(canCollapse) {
+        if (!canCollapse) expanded = true
+    }
 
     AdventureCard {
-        AdventureSectionTitle(
-            title = "Contacto",
-            subtitle = "Solo el nombre es obligatorio. WhatsApp es opcional.",
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .clickable {
+                    expanded = if (canCollapse) !expanded else true
+                },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AdventureIconBubble(
+                icon = if (canCollapse) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Contacto",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = if (canCollapse) {
+                        "Datos completos. Toca para revisar o editar."
+                    } else {
+                        "Completa nombre y WhatsApp sin salir de la reserva."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+
+            if (canCollapse) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = palette.textSecondary,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                )
+            }
+        }
+
+        if (canCollapse && !expanded) {
+            CompactAdventureContactSummary(
+                name = cleanName,
+                phone = cleanPhone,
+            )
+        } else {
+            AdventureOutlinedTextField(
+                value = state.clientName,
+                onValueChange = viewModel::setClientName,
+                label = "Nombre para la reserva",
+            )
+
+            AdventureOutlinedTextField(
+                value = state.whatsappNumber,
+                onValueChange = viewModel::setWhatsapp,
+                label = "WhatsApp para confirmar",
+            )
+
+            AdventureContactHelpCard(
+                nameMissing = nameMissing,
+                phoneMissing = phoneMissing,
+                onEditProfileClick = onEditProfileClick,
+            )
+
+            AdventureOutlinedTextField(
+                value = state.notes,
+                onValueChange = viewModel::setNotes,
+                label = "Notas generales",
+                minLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactAdventureContactSummary(
+    name: String,
+    phone: String,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = palette.success,
         )
 
-        AdventureOutlinedTextField(
-            value = state.clientName,
-            onValueChange = viewModel::setClientName,
-            label = "Nombre para la reserva",
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = name,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
 
-        AdventureOutlinedTextField(
-            value = state.whatsappNumber,
-            onValueChange = viewModel::setWhatsapp,
-            label = "WhatsApp opcional",
-        )
+            Text(
+                text = "WhatsApp: $phone",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = "Usaremos estos datos solo para confirmar tu reserva o coordinar cambios.",
+                color = palette.textTertiary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
 
         Text(
-            text = if (state.clientName.trim().isEmpty()) {
-                "Necesitamos un nombre para identificar tu reserva."
-            } else {
-                "Puedes dejar el número vacío y escribirnos por WhatsApp después de enviar la reserva."
-            },
-            color = LocalBrandPalette.current.textSecondary,
-            style = MaterialTheme.typography.bodySmall,
+            text = "Editar",
+            color = palette.primary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
         )
+    }
+}
 
-        AdventureOutlinedTextField(
-            value = state.notes,
-            onValueChange = viewModel::setNotes,
-            label = "Notas generales",
-            minLines = 2,
-        )
+@Composable
+private fun AdventureContactHelpCard(
+    nameMissing: Boolean,
+    phoneMissing: Boolean,
+    onEditProfileClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    val title = when {
+        nameMissing && phoneMissing -> "Faltan nombre y WhatsApp"
+        nameMissing -> "Falta el nombre"
+        phoneMissing -> "Falta WhatsApp"
+        else -> "Contacto listo"
+    }
+
+    val message = when {
+        nameMissing && phoneMissing -> "Puedes completar ambos aquí mismo. Guardaremos esos datos en tu perfil para futuras reservas."
+
+        nameMissing -> "Necesitamos un nombre para identificar tu reserva."
+
+        phoneMissing -> "WhatsApp nos ayuda a confirmar horarios, disponibilidad o cambios de la experiencia."
+
+        else -> "Usaremos estos datos para coordinar tu visita si hace falta."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = if (nameMissing || phoneMissing) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = if (nameMissing || phoneMissing) palette.destructive else palette.success,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+        }
+
+        if (nameMissing || phoneMissing) {
+            BrandSecondaryButton(
+                theme = AdventureTheme,
+                onClick = onEditProfileClick,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PersonAdd,
+                    contentDescription = null,
+                    tint = palette.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Completar datos aquí",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
 }
 
@@ -3286,8 +3499,7 @@ private fun AdventureSummarySection(
             AdventurePriceRow("Aventura", slot.adventureSubtotal)
             AdventurePriceRow("Comida", slot.foodSubtotal)
             AdventurePriceRow(
-                "Subtotal sin combo ni loyalty",
-                viewModel.subtotalBeforeComboAndLoyalty
+                "Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty
             )
 
             if (breakdown.activityDiscountAmount > 0) {
@@ -3347,13 +3559,11 @@ private fun AdventureSummarySection(
             )
         } else {
             AdventurePriceRow(
-                "Aventura estimada",
-                breakdown.activitySubtotalAfterIndividualDiscounts
+                "Aventura estimada", breakdown.activitySubtotalAfterIndividualDiscounts
             )
             AdventurePriceRow("Comida estimada", breakdown.foodSubtotal)
             AdventurePriceRow(
-                "Subtotal sin combo ni loyalty",
-                viewModel.subtotalBeforeComboAndLoyalty
+                "Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty
             )
 
             if (breakdown.activityDiscountAmount > 0) {
@@ -3605,14 +3815,16 @@ private fun AdventureItemEditorDialog(
                             value = draft.offRoadRiderCount,
                             onDecrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount - 1)
-                                        .coerceAtLeast(1),
+                                    offRoadRiderCount = (draft.offRoadRiderCount - 1).coerceAtLeast(
+                                        1
+                                    ),
                                 )
                             },
                             onIncrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount + 1)
-                                        .coerceAtMost(draft.vehicleCount * 2),
+                                    offRoadRiderCount = (draft.offRoadRiderCount + 1).coerceAtMost(
+                                        draft.vehicleCount * 2
+                                    ),
                                 )
                             },
                         )
@@ -3759,9 +3971,7 @@ private fun FoodItemEditorDialog(
     )
 }
 
-/* -------------------------------------------------------------------------- */
-/* Theme adapters for this screen                                              */
-/* -------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- *//* Theme adapters for this screen                                              *//* -------------------------------------------------------------------------- */
 
 @Composable
 private fun AdventureGradientHero(
@@ -6205,6 +6415,27 @@ class DeleteCurrentAccountUseCase(
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain
 
+
+//class ResolveSessionUseCase(
+//    private val authRepository: AuthenticationRepositoriable,
+//    private val clientProfileRepository: ClientProfileRepositoriable,
+//) {
+//    suspend fun execute(): SessionDestination {
+//        val user = authRepository.currentUser() ?: return SessionDestination.SignedOut
+//        return execute(user)
+//    }
+//
+//    suspend fun execute(user: AuthenticatedUser): SessionDestination {
+//        val profile = clientProfileRepository.fetchProfile(user.uid)
+//
+//        return when {
+//            profile == null -> SessionDestination.NeedsProfile(user = user, profile = null)
+//            profile.isComplete -> SessionDestination.Authenticated(profile)
+//            else -> SessionDestination.NeedsProfile(user = user, profile = profile)
+//        }
+//    }
+//}
+
 class ResolveSessionUseCase(
     private val authRepository: AuthenticationRepositoriable,
     private val clientProfileRepository: ClientProfileRepositoriable,
@@ -6215,13 +6446,41 @@ class ResolveSessionUseCase(
     }
 
     suspend fun execute(user: AuthenticatedUser): SessionDestination {
-        val profile = clientProfileRepository.fetchProfile(user.uid)
+        val existingProfile = clientProfileRepository.fetchProfile(user.uid)
 
-        return when {
-            profile == null -> SessionDestination.NeedsProfile(user = user, profile = null)
-            profile.isComplete -> SessionDestination.Authenticated(profile)
-            else -> SessionDestination.NeedsProfile(user = user, profile = profile)
-        }
+        // Temporary business rule:
+        // Profile completion is NOT mandatory. Any valid authenticated Firebase user
+        // can enter the app immediately. If Firestore does not have a client profile yet,
+        // we create an in-memory fallback profile only for the current session.
+        // This does not write incomplete profile data to Firestore.
+        return SessionDestination.Authenticated(
+            profile = existingProfile ?: user.toSessionFallbackProfile(),
+        )
+    }
+
+    private fun AuthenticatedUser.toSessionFallbackProfile(): ClientProfile {
+        val now = Date()
+        val display = displayName.trim()
+            .ifBlank { email.substringBefore("@").trim() }
+            .ifBlank { "Cliente" }
+
+        return ClientProfile(
+            id = uid.trim(),
+            email = email.trim(),
+            appleUserIdentifier = appleUserIdentifier.trim(),
+            fullName = display,
+            phoneNumber = "",
+            birthday = Date(0),
+            address = "",
+            emergencyContactName = "",
+            emergencyContactPhone = "",
+            isProfileComplete = false,
+            createdAt = now,
+            updatedAt = now,
+            profileCompletedAt = null,
+            profileImageURL = null,
+            profileImagePath = null,
+        )
     }
 }
 
@@ -7889,7 +8148,7 @@ private sealed interface UnifiedReservation {
                 order.id,
                 order.clientName,
                 order.tableNumber,
-                order.userId.orEmpty(),
+                order.userId,
                 order.serviceMode.title,
                 order.items.joinToString(" ") { "${it.name} ${it.notes.orEmpty()}" },
             ).joinToString(" ").lowercase(Locale.US)
@@ -18404,8 +18663,10 @@ fun RestaurantScreen(
                 state = checkoutState,
                 profile = sessionState.profile,
                 onBack = { destination = RestaurantDestination.Cart },
+                onClientNameChanged = checkoutViewModel::updateClientName,
                 onTableNumberChanged = checkoutViewModel::updateTableNumber,
                 onWhatsappChanged = checkoutViewModel::updateWhatsappNumber,
+                onProfileContactApplied = checkoutViewModel::applyProfileContact,
                 onScheduledAtChanged = checkoutViewModel::updateScheduledAt,
                 onScheduleNow = checkoutViewModel::scheduleForNow,
                 onSubmit = checkoutViewModel::submit,
@@ -19176,18 +19437,22 @@ fun CheckoutScreen(
     state: CheckoutUiState,
     profile: ClientProfile,
     onBack: () -> Unit,
+    onClientNameChanged: (String) -> Unit,
     onTableNumberChanged: (String) -> Unit,
     onWhatsappChanged: (String) -> Unit,
+    onProfileContactApplied: (ClientProfile) -> Unit,
     onScheduledAtChanged: (Date) -> Unit,
     onScheduleNow: () -> Unit,
     onSubmit: (openWhatsAppAfterSubmit: Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    quickProfileViewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val theme = AppSectionTheme.Restaurant
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
 
+    var showQuickContactSheet by rememberSaveable { mutableStateOf(false) }
     var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
 
     val isScheduledWhatsAppMissing =
@@ -19226,6 +19491,21 @@ fun CheckoutScreen(
             containerColor = palette.elevatedCard,
             titleContentColor = palette.textPrimary,
             textContentColor = palette.textSecondary,
+        )
+    }
+
+    if (showQuickContactSheet) {
+        QuickContactProfileSheet(
+            theme = theme,
+            profile = profile,
+            viewModel = quickProfileViewModel,
+            title = "Completa tus datos de contacto",
+            message = "Así podemos confirmar pedidos programados sin mandarte a la pantalla de perfil.",
+            onSaved = { updatedProfile ->
+                onProfileContactApplied(updatedProfile)
+                onWhatsappChanged(updatedProfile.phoneNumber)
+            },
+            onDismiss = { showQuickContactSheet = false },
         )
     }
 
@@ -19291,16 +19571,17 @@ fun CheckoutScreen(
                     item { ErrorCardInline(theme, message, onDismissError) }
                 }
 
-                item { CheckoutClientCard(theme, profile) }
-
-                if (state.isScheduledForLater) {
-                    item {
-                        CheckoutContactCard(
-                            theme = theme,
-                            whatsappNumber = state.draft.whatsappNumber,
-                            onWhatsappChanged = onWhatsappChanged,
-                        )
-                    }
+                item {
+                    CheckoutContactCard(
+                        theme = theme,
+                        profile = profile,
+                        clientName = state.draft.clientName.ifBlank { profile.fullName },
+                        whatsappNumber = state.draft.whatsappNumber.ifBlank { profile.phoneNumber },
+                        isScheduledForLater = state.isScheduledForLater,
+                        onClientNameChanged = onClientNameChanged,
+                        onWhatsappChanged = onWhatsappChanged,
+                        onEditProfileClick = { showQuickContactSheet = true },
+                    )
                 }
 
                 item {
@@ -19321,7 +19602,7 @@ fun CheckoutScreen(
                         onScheduleNow = onScheduleNow,
                     )
                 }
-                
+
                 item {
                     CheckoutItemsCard(theme, state)
                 }
@@ -19361,11 +19642,30 @@ private fun CheckoutClientCard(theme: AppSectionTheme, profile: ClientProfile) {
 @Composable
 private fun CheckoutContactCard(
     theme: AppSectionTheme,
+    profile: ClientProfile,
+    clientName: String,
     whatsappNumber: String,
+    isScheduledForLater: Boolean,
+    onClientNameChanged: (String) -> Unit,
     onWhatsappChanged: (String) -> Unit,
+    onEditProfileClick: () -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    val cleanName = clientName.trim()
+    val cleanPhone = whatsappNumber.filter(Char::isDigit)
+    val profilePhone = profile.phoneNumber.filter(Char::isDigit)
+
+    val nameMissing = cleanName.isEmpty()
+    val phoneMissing = cleanPhone.isEmpty() || profilePhone.isEmpty()
+    val canCollapse = !nameMissing && !phoneMissing
+
+    LaunchedEffect(canCollapse) {
+        if (!canCollapse) expanded = true
+    }
 
     Column(
         modifier = Modifier
@@ -19373,59 +19673,275 @@ private fun CheckoutContactCard(
             .appCardStyle(theme = theme),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        BrandSectionHeader(
-            theme = theme,
-            title = "Contacto para confirmar",
-            subtitle = "Solo se usa para reservas programadas. Puedes dejarlo vacío y escribirnos por WhatsApp después de enviar.",
-        )
-
-        OutlinedTextField(
-            value = whatsappNumber,
-            onValueChange = onWhatsappChanged,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("WhatsApp opcional") },
-            leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
-            singleLine = true,
-            shape = RoundedCornerShape(AppTheme.Radius.large),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = palette.textPrimary,
-                unfocusedTextColor = palette.textPrimary,
-                focusedContainerColor = palette.elevatedCard,
-                unfocusedContainerColor = palette.elevatedCard,
-                focusedBorderColor = palette.primary,
-                unfocusedBorderColor = palette.stroke,
-                focusedLabelColor = palette.primary,
-                unfocusedLabelColor = palette.textSecondary,
-                cursorColor = palette.primary,
-            ),
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(palette.chipGradient)
-                .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
-                .padding(12.dp),
+                .clickable {
+                    expanded = if (canCollapse) !expanded else true
+                },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = if (canCollapse) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+                size = 44.dp,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Contacto",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = if (canCollapse) {
+                        "Datos completos. Toca para revisar o editar."
+                    } else {
+                        "Completa nombre y WhatsApp sin salir del checkout."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+
+            if (canCollapse) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = palette.textSecondary,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                )
+            }
+        }
+
+        if (canCollapse && !expanded) {
+            CompactContactSummary(
+                theme = theme,
+                name = cleanName,
+                phone = cleanPhone,
+                message = if (isScheduledForLater) {
+                    "Usaremos estos datos para confirmar tu comida programada."
+                } else {
+                    "El pedido inmediato no guardará WhatsApp, pero tu perfil queda actualizado."
+                },
+            )
+        } else {
+            OutlinedTextField(
+                value = clientName,
+                onValueChange = onClientNameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nombre") },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Person, contentDescription = null)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            OutlinedTextField(
+                value = whatsappNumber,
+                onValueChange = onWhatsappChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = {
+                    Text(
+                        if (isScheduledForLater) {
+                            "WhatsApp para confirmar"
+                        } else {
+                            "WhatsApp del perfil"
+                        }
+                    )
+                },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Phone, contentDescription = null)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            ContactHelpCard(
+                theme = theme,
+                nameMissing = nameMissing,
+                phoneMissing = phoneMissing,
+                isScheduledForLater = isScheduledForLater,
+                onEditProfileClick = onEditProfileClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactContactSummary(
+    theme: AppSectionTheme,
+    name: String,
+    phone: String,
+    message: String,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = palette.success,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = name,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Text(
+                text = "WhatsApp: $phone",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = message,
+                color = palette.textTertiary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        Text(
+            text = "Editar",
+            color = palette.primary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun ContactHelpCard(
+    theme: AppSectionTheme,
+    nameMissing: Boolean,
+    phoneMissing: Boolean,
+    isScheduledForLater: Boolean,
+    onEditProfileClick: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    val title = when {
+        nameMissing && phoneMissing -> "Faltan nombre y WhatsApp"
+        nameMissing -> "Falta el nombre"
+        phoneMissing -> "Falta WhatsApp"
+        else -> if (isScheduledForLater) "Reserva lista para confirmar" else "Pedido listo"
+    }
+
+    val message = when {
+        nameMissing && phoneMissing ->
+            "Puedes completar ambos aquí mismo. Guardaremos esos datos en tu perfil para futuras reservas."
+
+        nameMissing ->
+            "Necesitamos un nombre para identificar tu pedido."
+
+        phoneMissing ->
+            "WhatsApp nos ayuda a confirmar disponibilidad, horarios o cambios."
+
+        isScheduledForLater ->
+            "Usaremos estos datos para confirmar tu comida programada."
+
+        else ->
+            "El pedido inmediato no guardará WhatsApp, pero tu perfil quedará actualizado."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Icon(
-                imageVector = Icons.Rounded.Info,
+                imageVector = if (nameMissing || phoneMissing) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
                 contentDescription = null,
-                tint = palette.primary,
+                tint = if (nameMissing || phoneMissing) palette.destructive else palette.success,
             )
 
-            Text(
-                text = if (whatsappNumber.filter(Char::isDigit).isEmpty()) {
-                    "Si no ingresas número, enviaremos la reserva y abriremos WhatsApp para que nos escribas."
-                } else {
-                    "Usaremos este número únicamente para confirmar la reserva programada."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.textSecondary,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+        }
+
+        if (nameMissing || phoneMissing) {
+            BrandSecondaryButton(
+                theme = theme,
+                onClick = onEditProfileClick,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PersonAdd,
+                    contentDescription = null,
+                    tint = palette.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Completar datos aquí",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }
@@ -21169,16 +21685,6 @@ fun MenuListScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(22.dp),
                     ) {
-                        item {
-                            RestaurantHeroCard(
-                                clientName = clientName,
-                                levelTitle = levelTitle,
-                                cartItemsCount = cartItemsCount,
-                                onOpenCart = onOpenCart,
-                                onOpenOrders = onOpenOrders,
-                            )
-                        }
-
                         state.errorMessage?.let { message ->
                             item {
                                 ErrorCard(
@@ -23563,6 +24069,24 @@ class CheckoutViewModel @Inject constructor(
             else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
         }
     }
+
+    fun updateClientName(value: String) {
+        saveDraft(_uiState.value.draft.copy(clientName = value.take(80)))
+    }
+
+    fun applyProfileContact(profile: ClientProfile) {
+        currentUserId = profile.userId
+
+        val current = _uiState.value.draft
+        val updated = current.copy(
+            userId = profile.userId,
+            clientName = profile.fullName,
+            whatsappNumber = profile.phoneNumber,
+        )
+
+        saveDraft(updated)
+        refreshRewardPreview(updated)
+    }
 }
 
 ```
@@ -25880,11 +26404,6 @@ fun PremiumCard(
     ElevatedCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(30.dp),
-
-        //Done
-//        colors = CardDefaults.elevatedCardColors(
-//            containerColor = if (emphasized) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
-//        ),
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (emphasized) 8.dp else 3.dp),
     ) {
         Column(
@@ -25972,7 +26491,11 @@ fun PremiumMetricTile(
     Card(
         modifier = modifier,
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(
+                alpha = 0.55f
+            )
+        ),
     ) {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -26027,19 +26550,41 @@ fun PremiumRewardCard(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.52f)),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(
+                alpha = 0.52f
+            )
+        ),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
-            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(reward.badge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+            Icon(
+                Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        reward.badge,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                     reward.amountText?.let {
-                        Text("-$it", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(
+                            "-$it",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
                 Text(reward.title, fontWeight = FontWeight.Bold)
@@ -26068,7 +26613,11 @@ fun PremiumEmptyState(
     PremiumCard(modifier = modifier) {
         PremiumIconBubble(icon = icon, selected = true)
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         if (action != null) {
             Spacer(Modifier.height(2.dp))
             action()
@@ -26093,6 +26642,297 @@ fun PremiumOutlineAction(
         Text(text, fontWeight = FontWeight.Bold)
     }
 }
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/util/ui/QuickContactProfileSheet.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.util.ui
+
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun QuickContactProfileSheet(
+    theme: AppSectionTheme,
+    profile: ClientProfile,
+    viewModel: CompleteProfileViewModel,
+    title: String,
+    message: String,
+    onSaved: (ClientProfile) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    LaunchedEffect(profile.id, profile.updatedAt) {
+        viewModel.initialize(
+            user = profile.toAuthenticatedUserForQuickEdit(),
+            existingProfile = profile,
+        )
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.profileCompleted.collect { updatedProfile ->
+            onSaved(updatedProfile)
+            onDismiss()
+        }
+    }
+
+    val nameMissing = state.fullName.trim().isEmpty()
+    val phoneDigits = state.phoneNumber.filter(Char::isDigit)
+    val phoneMissing = phoneDigits.isEmpty()
+    val phoneInvalid = phoneDigits.isNotEmpty() && phoneDigits.length < 8
+    val canSave = !nameMissing && !phoneMissing && !phoneInvalid && !state.isSaving
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary,
+        dragHandle = {
+            BottomSheetDefaults.DragHandle(color = palette.textTertiary)
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .appCardStyle(theme = theme, emphasized = true),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                BrandIconBubble(
+                    theme = theme,
+                    icon = Icons.Rounded.Person,
+                    size = 52.dp,
+                )
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = palette.textSecondary,
+                )
+            }
+
+            OutlinedTextField(
+                value = state.fullName,
+                onValueChange = viewModel::onFullNameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nombre completo") },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Person, contentDescription = null)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            OutlinedTextField(
+                value = state.phoneNumber,
+                onValueChange = viewModel::onPhoneNumberChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("WhatsApp") },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Phone, contentDescription = null)
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            ContactRequirementCard(
+                theme = theme,
+                nameMissing = nameMissing,
+                phoneMissing = phoneMissing,
+                phoneInvalid = phoneInvalid,
+                name = state.fullName,
+                phone = state.phoneNumber,
+            )
+
+            state.errorMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.destructive,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appCardStyle(theme = theme),
+                )
+            }
+
+            BrandPrimaryButton(
+                theme = theme,
+                enabled = canSave,
+                onClick = viewModel::saveProfile,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                if (state.isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = palette.onPrimary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        tint = palette.onPrimary,
+                    )
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                Text(
+                    text = if (state.isSaving) "Guardando..." else "Guardar y continuar",
+                    color = palette.onPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    text = "Ahora no",
+                    color = palette.textSecondary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContactRequirementCard(
+    theme: AppSectionTheme,
+    nameMissing: Boolean,
+    phoneMissing: Boolean,
+    phoneInvalid: Boolean,
+    name: String,
+    phone: String,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .appCardStyle(theme = theme),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ContactRequirementRow(
+            completed = !nameMissing,
+            title = if (nameMissing) "Falta el nombre" else "Nombre listo",
+            message = if (nameMissing) {
+                "Lo usamos para identificar tu pedido o reserva."
+            } else {
+                name.trim()
+            }
+        )
+
+        ContactRequirementRow(
+            completed = !phoneMissing && !phoneInvalid, title = when {
+                phoneMissing -> "Falta WhatsApp"
+                phoneInvalid -> "WhatsApp incompleto"
+                else -> "WhatsApp listo"
+            }, message = when {
+                phoneMissing -> "Nos ayuda a confirmar horarios, disponibilidad o cambios."
+                phoneInvalid -> "Revisa que tenga al menos 8 dígitos."
+                else -> phone.filter(Char::isDigit)
+            }
+        )
+    }
+}
+
+@Composable
+private fun ContactRequirementRow(
+    completed: Boolean,
+    title: String,
+    message: String,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = if (completed) {
+                Icons.Rounded.CheckCircle
+            } else {
+                Icons.Rounded.WarningAmber
+            },
+            contentDescription = null,
+            tint = if (completed) {
+                palette.success
+            } else {
+                palette.destructive
+            },
+        )
+
+        Column(
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = palette.textPrimary,
+            )
+
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = palette.textSecondary,
+            )
+        }
+    }
+}
+
+fun ClientProfile.toAuthenticatedUserForQuickEdit(): AuthenticatedUser = AuthenticatedUser(
+    uid = id,
+    email = email,
+    displayName = fullName,
+    appleUserIdentifier = appleUserIdentifier,
+)
 
 ```
 

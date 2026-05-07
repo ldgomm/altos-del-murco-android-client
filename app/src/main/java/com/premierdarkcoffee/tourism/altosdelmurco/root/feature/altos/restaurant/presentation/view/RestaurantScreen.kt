@@ -185,7 +185,6 @@ fun RestaurantScreen(
     }
 }
 
-
 private fun Context.openAltosWhatsAppForOrderConfirmation() {
     val message =
         "Hola Altos del Murco, acabo de enviar una reserva de comida desde la app y quiero confirmar disponibilidad lo antes posible."
