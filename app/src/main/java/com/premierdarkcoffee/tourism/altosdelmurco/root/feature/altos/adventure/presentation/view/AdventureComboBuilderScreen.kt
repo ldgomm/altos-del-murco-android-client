@@ -30,10 +30,13 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.LocalDining
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.Restaurant
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -91,6 +95,8 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel.AdventureCatalogViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.presentation.viewmodel.AdventureComboBuilderViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel.CompleteProfileViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuSection
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
@@ -105,6 +111,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalAppSectionTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
+import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.QuickContactProfileSheet
 import java.net.URLEncoder
 import java.util.Calendar
 import java.util.Date
@@ -179,9 +186,9 @@ private fun AdventureScreenContent(
         val packageId = homePrefillPackageId?.trim().orEmpty()
         if (packageId.isEmpty()) return@LaunchedEffect
 
-        val packageModel = catalogState.catalog.activePackagesSorted
-            .firstOrNull { it.id == packageId }
-            ?: return@LaunchedEffect
+        val packageModel =
+            catalogState.catalog.activePackagesSorted.firstOrNull { it.id == packageId }
+                ?: return@LaunchedEffect
 
         val hasAllFoodData = packageModel.foodItems.isEmpty() || menuState.sections.isNotEmpty()
         if (!hasAllFoodData) return@LaunchedEffect
@@ -212,9 +219,8 @@ private fun AdventureScreenContent(
         )
     }
 
-    val message = builderState.errorMessage
-        ?: builderState.successMessage
-        ?: catalogState.errorMessage
+    val message =
+        builderState.errorMessage ?: builderState.successMessage ?: catalogState.errorMessage
 
     if (message != null) {
         AlertDialog(
@@ -279,7 +285,7 @@ private fun AdventureScreenContent(
                 menuSections = menuState.sections,
                 onBack = { mode = AdventureMode.Catalog },
                 onAddFood = { showFoodPicker = true },
-                userId = sessionState.profile.userId,
+                profile = sessionState.profile,
             )
         }
     }
@@ -408,17 +414,15 @@ private fun FeaturedPackageCard(
 ) {
     val palette = LocalBrandPalette.current
 
-    val menuItemsById = menuSections
-        .flatMap { it.items }
-        .associateBy { it.id }
+    val menuItemsById = menuSections.flatMap { it.items }.associateBy { it.id }
 
     val activitySubtotal = AdventurePricingEngine.estimatedSubtotal(packageModel.items, catalog)
     val foodSubtotal = packageModel.foodItems.sumOf { food ->
         (menuItemsById[food.menuItemId]?.finalPrice ?: 0.0) * food.quantity
     }
 
-    val total = (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount)
-        .coerceAtLeast(0.0)
+    val total =
+        (activitySubtotal + foodSubtotal - packageModel.packageDiscountAmount).coerceAtLeast(0.0)
 
     val foodSummary = packageModel.foodItems.joinToString(" • ") { food ->
         "${food.quantity}x ${menuItemsById[food.menuItemId]?.name ?: food.menuItemId}"
@@ -447,8 +451,7 @@ private fun FeaturedPackageCard(
                         modifier = Modifier.weight(1f),
                     )
 
-                    packageModel.badge
-                        ?.takeIf { it.isNotBlank() }
+                    packageModel.badge?.takeIf { it.isNotBlank() }
                         ?.let { AdventureBadge(text = it) }
                 }
 
@@ -589,12 +592,15 @@ private fun AdventureBuilderContent(
     menuSections: List<MenuSection>,
     onBack: () -> Unit,
     onAddFood: () -> Unit,
-    userId: String?,
+    profile: ClientProfile,
     modifier: Modifier = Modifier,
+    quickProfileViewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val palette = LocalBrandPalette.current
     val context = LocalContext.current
+
+    var showQuickContactSheet by rememberSaveable { mutableStateOf(false) }
 
     var editingItem by remember { mutableStateOf<AdventureReservationItemDraft?>(null) }
     var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
@@ -616,7 +622,7 @@ private fun AdventureBuilderContent(
             }
 
             else -> {
-                viewModel.submit(userId)
+                viewModel.submit(profile.userId)
             }
         }
     }
@@ -628,7 +634,7 @@ private fun AdventureBuilderContent(
                 TextButton(
                     onClick = {
                         showMissingWhatsAppDialog = false
-                        viewModel.submit(userId, openWhatsAppAfterSubmit = true)
+                        viewModel.submit(profile.userId, openWhatsAppAfterSubmit = true)
                     },
                 ) {
                     Text("Enviar y escribir por WhatsApp", color = palette.primary)
@@ -674,6 +680,21 @@ private fun AdventureBuilderContent(
                 viewModel.updateFoodItem(it)
                 editingFood = null
             },
+        )
+    }
+
+    if (showQuickContactSheet) {
+        QuickContactProfileSheet(
+            theme = AdventureTheme,
+            profile = profile,
+            viewModel = quickProfileViewModel,
+            title = "Completa tus datos de reserva",
+            message = "Con nombre y WhatsApp podremos confirmar horarios, disponibilidad o cambios de tu experiencia.",
+            onSaved = { updatedProfile ->
+                viewModel.setClientName(updatedProfile.fullName)
+                viewModel.setWhatsapp(updatedProfile.phoneNumber)
+            },
+            onDismiss = { showQuickContactSheet = false },
         )
     }
 
@@ -768,7 +789,11 @@ private fun AdventureBuilderContent(
                 onAddFood = onAddFood,
                 onEditFood = { editingFood = it },
             )
-            AdventureContactSection(viewModel = viewModel)
+            AdventureContactSection(
+                viewModel = viewModel,
+                profile = profile,
+                onEditProfileClick = { showQuickContactSheet = true },
+            )
             AdventureSummarySection(viewModel = viewModel)
 
             Spacer(Modifier.height(84.dp))
@@ -1361,43 +1386,238 @@ private fun FoodDraftRow(
 @Composable
 private fun AdventureContactSection(
     viewModel: AdventureComboBuilderViewModel,
+    profile: ClientProfile,
+    onEditProfileClick: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val palette = LocalBrandPalette.current
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    val cleanName = state.clientName.trim()
+    val cleanPhone = state.whatsappNumber.filter(Char::isDigit)
+    val profilePhone = profile.phoneNumber.filter(Char::isDigit)
+
+    val nameMissing = cleanName.isEmpty()
+    val phoneMissing = cleanPhone.isEmpty() || profilePhone.isEmpty()
+    val canCollapse = !nameMissing && !phoneMissing
+
+    LaunchedEffect(canCollapse) {
+        if (!canCollapse) expanded = true
+    }
 
     AdventureCard {
-        AdventureSectionTitle(
-            title = "Contacto",
-            subtitle = "Solo el nombre es obligatorio. WhatsApp es opcional.",
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .clickable {
+                    expanded = if (canCollapse) !expanded else true
+                },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AdventureIconBubble(
+                icon = if (canCollapse) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Contacto",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = if (canCollapse) {
+                        "Datos completos. Toca para revisar o editar."
+                    } else {
+                        "Completa nombre y WhatsApp sin salir de la reserva."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+
+            if (canCollapse) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = palette.textSecondary,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                )
+            }
+        }
+
+        if (canCollapse && !expanded) {
+            CompactAdventureContactSummary(
+                name = cleanName,
+                phone = cleanPhone,
+            )
+        } else {
+            AdventureOutlinedTextField(
+                value = state.clientName,
+                onValueChange = viewModel::setClientName,
+                label = "Nombre para la reserva",
+            )
+
+            AdventureOutlinedTextField(
+                value = state.whatsappNumber,
+                onValueChange = viewModel::setWhatsapp,
+                label = "WhatsApp para confirmar",
+            )
+
+            AdventureContactHelpCard(
+                nameMissing = nameMissing,
+                phoneMissing = phoneMissing,
+                onEditProfileClick = onEditProfileClick,
+            )
+
+            AdventureOutlinedTextField(
+                value = state.notes,
+                onValueChange = viewModel::setNotes,
+                label = "Notas generales",
+                minLines = 2,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactAdventureContactSummary(
+    name: String,
+    phone: String,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = palette.success,
         )
 
-        AdventureOutlinedTextField(
-            value = state.clientName,
-            onValueChange = viewModel::setClientName,
-            label = "Nombre para la reserva",
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = name,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
 
-        AdventureOutlinedTextField(
-            value = state.whatsappNumber,
-            onValueChange = viewModel::setWhatsapp,
-            label = "WhatsApp opcional",
-        )
+            Text(
+                text = "WhatsApp: $phone",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = "Usaremos estos datos solo para confirmar tu reserva o coordinar cambios.",
+                color = palette.textTertiary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
 
         Text(
-            text = if (state.clientName.trim().isEmpty()) {
-                "Necesitamos un nombre para identificar tu reserva."
-            } else {
-                "Puedes dejar el número vacío y escribirnos por WhatsApp después de enviar la reserva."
-            },
-            color = LocalBrandPalette.current.textSecondary,
-            style = MaterialTheme.typography.bodySmall,
+            text = "Editar",
+            color = palette.primary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
         )
+    }
+}
 
-        AdventureOutlinedTextField(
-            value = state.notes,
-            onValueChange = viewModel::setNotes,
-            label = "Notas generales",
-            minLines = 2,
-        )
+@Composable
+private fun AdventureContactHelpCard(
+    nameMissing: Boolean,
+    phoneMissing: Boolean,
+    onEditProfileClick: () -> Unit,
+) {
+    val palette = LocalBrandPalette.current
+
+    val title = when {
+        nameMissing && phoneMissing -> "Faltan nombre y WhatsApp"
+        nameMissing -> "Falta el nombre"
+        phoneMissing -> "Falta WhatsApp"
+        else -> "Contacto listo"
+    }
+
+    val message = when {
+        nameMissing && phoneMissing -> "Puedes completar ambos aquí mismo. Guardaremos esos datos en tu perfil para futuras reservas."
+
+        nameMissing -> "Necesitamos un nombre para identificar tu reserva."
+
+        phoneMissing -> "WhatsApp nos ayuda a confirmar horarios, disponibilidad o cambios de la experiencia."
+
+        else -> "Usaremos estos datos para coordinar tu visita si hace falta."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                imageVector = if (nameMissing || phoneMissing) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
+                contentDescription = null,
+                tint = if (nameMissing || phoneMissing) palette.destructive else palette.success,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+        }
+
+        if (nameMissing || phoneMissing) {
+            BrandSecondaryButton(
+                theme = AdventureTheme,
+                onClick = onEditProfileClick,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PersonAdd,
+                    contentDescription = null,
+                    tint = palette.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Completar datos aquí",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
 }
 
@@ -1455,8 +1675,7 @@ private fun AdventureSummarySection(
             AdventurePriceRow("Aventura", slot.adventureSubtotal)
             AdventurePriceRow("Comida", slot.foodSubtotal)
             AdventurePriceRow(
-                "Subtotal sin combo ni loyalty",
-                viewModel.subtotalBeforeComboAndLoyalty
+                "Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty
             )
 
             if (breakdown.activityDiscountAmount > 0) {
@@ -1516,13 +1735,11 @@ private fun AdventureSummarySection(
             )
         } else {
             AdventurePriceRow(
-                "Aventura estimada",
-                breakdown.activitySubtotalAfterIndividualDiscounts
+                "Aventura estimada", breakdown.activitySubtotalAfterIndividualDiscounts
             )
             AdventurePriceRow("Comida estimada", breakdown.foodSubtotal)
             AdventurePriceRow(
-                "Subtotal sin combo ni loyalty",
-                viewModel.subtotalBeforeComboAndLoyalty
+                "Subtotal sin combo ni loyalty", viewModel.subtotalBeforeComboAndLoyalty
             )
 
             if (breakdown.activityDiscountAmount > 0) {
@@ -1774,14 +1991,16 @@ private fun AdventureItemEditorDialog(
                             value = draft.offRoadRiderCount,
                             onDecrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount - 1)
-                                        .coerceAtLeast(1),
+                                    offRoadRiderCount = (draft.offRoadRiderCount - 1).coerceAtLeast(
+                                        1
+                                    ),
                                 )
                             },
                             onIncrease = {
                                 draft = draft.copy(
-                                    offRoadRiderCount = (draft.offRoadRiderCount + 1)
-                                        .coerceAtMost(draft.vehicleCount * 2),
+                                    offRoadRiderCount = (draft.offRoadRiderCount + 1).coerceAtMost(
+                                        draft.vehicleCount * 2
+                                    ),
                                 )
                             },
                         )
@@ -1928,9 +2147,7 @@ private fun FoodItemEditorDialog(
     )
 }
 
-/* -------------------------------------------------------------------------- */
-/* Theme adapters for this screen                                              */
-/* -------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------- *//* Theme adapters for this screen                                              *//* -------------------------------------------------------------------------- */
 
 @Composable
 private fun AdventureGradientHero(

@@ -263,4 +263,22 @@ class CheckoutViewModel @Inject constructor(
             else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
         }
     }
+
+    fun updateClientName(value: String) {
+        saveDraft(_uiState.value.draft.copy(clientName = value.take(80)))
+    }
+
+    fun applyProfileContact(profile: ClientProfile) {
+        currentUserId = profile.userId
+
+        val current = _uiState.value.draft
+        val updated = current.copy(
+            userId = profile.userId,
+            clientName = profile.fullName,
+            whatsappNumber = profile.phoneNumber,
+        )
+
+        saveDraft(updated)
+        refreshRewardPreview(updated)
+    }
 }

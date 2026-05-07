@@ -24,7 +24,9 @@ import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Phone
 import androidx.compose.material.icons.rounded.RadioButtonUnchecked
 import androidx.compose.material.icons.rounded.RestaurantMenu
@@ -53,6 +55,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,12 +64,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.presentation.viewmodel.CompleteProfileViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderScheduleFormatter
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.priceLabel
@@ -76,10 +82,12 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandIconBubble
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandPrimaryButton
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandScreen
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSecondaryButton
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.appCardStyle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.QuickContactProfileSheet
 import java.text.NumberFormat
 import java.util.Calendar
 import java.util.Date
@@ -92,18 +100,22 @@ fun CheckoutScreen(
     state: CheckoutUiState,
     profile: ClientProfile,
     onBack: () -> Unit,
+    onClientNameChanged: (String) -> Unit,
     onTableNumberChanged: (String) -> Unit,
     onWhatsappChanged: (String) -> Unit,
+    onProfileContactApplied: (ClientProfile) -> Unit,
     onScheduledAtChanged: (Date) -> Unit,
     onScheduleNow: () -> Unit,
     onSubmit: (openWhatsAppAfterSubmit: Boolean) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
+    quickProfileViewModel: CompleteProfileViewModel = hiltViewModel(),
 ) {
     val theme = AppSectionTheme.Restaurant
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
 
+    var showQuickContactSheet by rememberSaveable { mutableStateOf(false) }
     var showMissingWhatsAppDialog by rememberSaveable { mutableStateOf(false) }
 
     val isScheduledWhatsAppMissing =
@@ -142,6 +154,21 @@ fun CheckoutScreen(
             containerColor = palette.elevatedCard,
             titleContentColor = palette.textPrimary,
             textContentColor = palette.textSecondary,
+        )
+    }
+
+    if (showQuickContactSheet) {
+        QuickContactProfileSheet(
+            theme = theme,
+            profile = profile,
+            viewModel = quickProfileViewModel,
+            title = "Completa tus datos de contacto",
+            message = "Así podemos confirmar pedidos programados sin mandarte a la pantalla de perfil.",
+            onSaved = { updatedProfile ->
+                onProfileContactApplied(updatedProfile)
+                onWhatsappChanged(updatedProfile.phoneNumber)
+            },
+            onDismiss = { showQuickContactSheet = false },
         )
     }
 
@@ -207,16 +234,17 @@ fun CheckoutScreen(
                     item { ErrorCardInline(theme, message, onDismissError) }
                 }
 
-                item { CheckoutClientCard(theme, profile) }
-
-                if (state.isScheduledForLater) {
-                    item {
-                        CheckoutContactCard(
-                            theme = theme,
-                            whatsappNumber = state.draft.whatsappNumber,
-                            onWhatsappChanged = onWhatsappChanged,
-                        )
-                    }
+                item {
+                    CheckoutContactCard(
+                        theme = theme,
+                        profile = profile,
+                        clientName = state.draft.clientName.ifBlank { profile.fullName },
+                        whatsappNumber = state.draft.whatsappNumber.ifBlank { profile.phoneNumber },
+                        isScheduledForLater = state.isScheduledForLater,
+                        onClientNameChanged = onClientNameChanged,
+                        onWhatsappChanged = onWhatsappChanged,
+                        onEditProfileClick = { showQuickContactSheet = true },
+                    )
                 }
 
                 item {
@@ -237,7 +265,7 @@ fun CheckoutScreen(
                         onScheduleNow = onScheduleNow,
                     )
                 }
-                
+
                 item {
                     CheckoutItemsCard(theme, state)
                 }
@@ -277,11 +305,30 @@ private fun CheckoutClientCard(theme: AppSectionTheme, profile: ClientProfile) {
 @Composable
 private fun CheckoutContactCard(
     theme: AppSectionTheme,
+    profile: ClientProfile,
+    clientName: String,
     whatsappNumber: String,
+    isScheduledForLater: Boolean,
+    onClientNameChanged: (String) -> Unit,
     onWhatsappChanged: (String) -> Unit,
+    onEditProfileClick: () -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(theme, darkTheme)
+
+    var expanded by rememberSaveable { mutableStateOf(false) }
+
+    val cleanName = clientName.trim()
+    val cleanPhone = whatsappNumber.filter(Char::isDigit)
+    val profilePhone = profile.phoneNumber.filter(Char::isDigit)
+
+    val nameMissing = cleanName.isEmpty()
+    val phoneMissing = cleanPhone.isEmpty() || profilePhone.isEmpty()
+    val canCollapse = !nameMissing && !phoneMissing
+
+    LaunchedEffect(canCollapse) {
+        if (!canCollapse) expanded = true
+    }
 
     Column(
         modifier = Modifier
@@ -289,59 +336,275 @@ private fun CheckoutContactCard(
             .appCardStyle(theme = theme),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        BrandSectionHeader(
-            theme = theme,
-            title = "Contacto para confirmar",
-            subtitle = "Solo se usa para reservas programadas. Puedes dejarlo vacío y escribirnos por WhatsApp después de enviar.",
-        )
-
-        OutlinedTextField(
-            value = whatsappNumber,
-            onValueChange = onWhatsappChanged,
-            modifier = Modifier.fillMaxWidth(),
-            label = { Text("WhatsApp opcional") },
-            leadingIcon = { Icon(Icons.Rounded.Phone, contentDescription = null) },
-            singleLine = true,
-            shape = RoundedCornerShape(AppTheme.Radius.large),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = palette.textPrimary,
-                unfocusedTextColor = palette.textPrimary,
-                focusedContainerColor = palette.elevatedCard,
-                unfocusedContainerColor = palette.elevatedCard,
-                focusedBorderColor = palette.primary,
-                unfocusedBorderColor = palette.stroke,
-                focusedLabelColor = palette.primary,
-                unfocusedLabelColor = palette.textSecondary,
-                cursorColor = palette.primary,
-            ),
-        )
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(palette.chipGradient)
-                .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
-                .padding(12.dp),
+                .clickable {
+                    expanded = if (canCollapse) !expanded else true
+                },
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BrandIconBubble(
+                theme = theme,
+                icon = if (canCollapse) Icons.Rounded.CheckCircle else Icons.Rounded.WarningAmber,
+                size = 44.dp,
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Contacto",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = if (canCollapse) {
+                        "Datos completos. Toca para revisar o editar."
+                    } else {
+                        "Completa nombre y WhatsApp sin salir del checkout."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+
+            if (canCollapse) {
+                Icon(
+                    imageVector = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = palette.textSecondary,
+                    modifier = Modifier.rotate(if (expanded) 180f else 0f),
+                )
+            }
+        }
+
+        if (canCollapse && !expanded) {
+            CompactContactSummary(
+                theme = theme,
+                name = cleanName,
+                phone = cleanPhone,
+                message = if (isScheduledForLater) {
+                    "Usaremos estos datos para confirmar tu comida programada."
+                } else {
+                    "El pedido inmediato no guardará WhatsApp, pero tu perfil queda actualizado."
+                },
+            )
+        } else {
+            OutlinedTextField(
+                value = clientName,
+                onValueChange = onClientNameChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Nombre") },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Person, contentDescription = null)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            OutlinedTextField(
+                value = whatsappNumber,
+                onValueChange = onWhatsappChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = {
+                    Text(
+                        if (isScheduledForLater) {
+                            "WhatsApp para confirmar"
+                        } else {
+                            "WhatsApp del perfil"
+                        }
+                    )
+                },
+                leadingIcon = {
+                    Icon(Icons.Rounded.Phone, contentDescription = null)
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(AppTheme.Radius.large),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = palette.textPrimary,
+                    unfocusedTextColor = palette.textPrimary,
+                    focusedContainerColor = palette.elevatedCard,
+                    unfocusedContainerColor = palette.elevatedCard,
+                    focusedBorderColor = palette.primary,
+                    unfocusedBorderColor = palette.stroke,
+                    focusedLabelColor = palette.primary,
+                    unfocusedLabelColor = palette.textSecondary,
+                    cursorColor = palette.primary,
+                ),
+            )
+
+            ContactHelpCard(
+                theme = theme,
+                nameMissing = nameMissing,
+                phoneMissing = phoneMissing,
+                isScheduledForLater = isScheduledForLater,
+                onEditProfileClick = onEditProfileClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactContactSummary(
+    theme: AppSectionTheme,
+    name: String,
+    phone: String,
+    message: String,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.CheckCircle,
+            contentDescription = null,
+            tint = palette.success,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = name,
+                color = palette.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+
+            Text(
+                text = "WhatsApp: $phone",
+                color = palette.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Text(
+                text = message,
+                color = palette.textTertiary,
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+
+        Text(
+            text = "Editar",
+            color = palette.primary,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun ContactHelpCard(
+    theme: AppSectionTheme,
+    nameMissing: Boolean,
+    phoneMissing: Boolean,
+    isScheduledForLater: Boolean,
+    onEditProfileClick: () -> Unit,
+) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(theme, darkTheme)
+
+    val title = when {
+        nameMissing && phoneMissing -> "Faltan nombre y WhatsApp"
+        nameMissing -> "Falta el nombre"
+        phoneMissing -> "Falta WhatsApp"
+        else -> if (isScheduledForLater) "Reserva lista para confirmar" else "Pedido listo"
+    }
+
+    val message = when {
+        nameMissing && phoneMissing ->
+            "Puedes completar ambos aquí mismo. Guardaremos esos datos en tu perfil para futuras reservas."
+
+        nameMissing ->
+            "Necesitamos un nombre para identificar tu pedido."
+
+        phoneMissing ->
+            "WhatsApp nos ayuda a confirmar disponibilidad, horarios o cambios."
+
+        isScheduledForLater ->
+            "Usaremos estos datos para confirmar tu comida programada."
+
+        else ->
+            "El pedido inmediato no guardará WhatsApp, pero tu perfil quedará actualizado."
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(palette.chipGradient)
+            .border(1.dp, palette.stroke, RoundedCornerShape(18.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.Top,
         ) {
             Icon(
-                imageVector = Icons.Rounded.Info,
+                imageVector = if (nameMissing || phoneMissing) Icons.Rounded.WarningAmber else Icons.Rounded.CheckCircle,
                 contentDescription = null,
-                tint = palette.primary,
+                tint = if (nameMissing || phoneMissing) palette.destructive else palette.success,
             )
 
-            Text(
-                text = if (whatsappNumber.filter(Char::isDigit).isEmpty()) {
-                    "Si no ingresas número, enviaremos la reserva y abriremos WhatsApp para que nos escribas."
-                } else {
-                    "Usaremos este número únicamente para confirmar la reserva programada."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = palette.textSecondary,
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = palette.textPrimary,
+                )
+
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = palette.textSecondary,
+                )
+            }
+        }
+
+        if (nameMissing || phoneMissing) {
+            BrandSecondaryButton(
+                theme = theme,
+                onClick = onEditProfileClick,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PersonAdd,
+                    contentDescription = null,
+                    tint = palette.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Completar datos aquí",
+                    color = palette.textPrimary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
         }
     }
 }

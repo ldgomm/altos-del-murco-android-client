@@ -273,7 +273,7 @@ private sealed interface UnifiedReservation {
                 order.id,
                 order.clientName,
                 order.tableNumber,
-                order.userId.orEmpty(),
+                order.userId,
                 order.serviceMode.title,
                 order.items.joinToString(" ") { "${it.name} ${it.notes.orEmpty()}" },
             ).joinToString(" ").lowercase(Locale.US)
