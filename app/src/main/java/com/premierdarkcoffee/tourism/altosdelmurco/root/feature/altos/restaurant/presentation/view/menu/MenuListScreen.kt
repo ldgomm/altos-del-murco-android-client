@@ -188,16 +188,6 @@ fun MenuListScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(22.dp),
                     ) {
-                        item {
-                            RestaurantHeroCard(
-                                clientName = clientName,
-                                levelTitle = levelTitle,
-                                cartItemsCount = cartItemsCount,
-                                onOpenCart = onOpenCart,
-                                onOpenOrders = onOpenOrders,
-                            )
-                        }
-
                         state.errorMessage?.let { message ->
                             item {
                                 ErrorCard(
