@@ -326,15 +326,15 @@ fun MenuListScreen(
                                 )
                             }
                         } else {
-                            if (featuredItems.isNotEmpty()) {
-                                item {
-                                    FeaturedDishShelf(
-                                        featuredItems = featuredItems,
-                                        rewardProvider = rewardProvider,
-                                        onOpen = onOpenItem,
-                                    )
-                                }
-                            }
+//                            if (featuredItems.isNotEmpty()) {
+//                                item {
+//                                    FeaturedDishShelf(
+//                                        featuredItems = featuredItems,
+//                                        rewardProvider = rewardProvider,
+//                                        onOpen = onOpenItem,
+//                                    )
+//                                }
+//                            }
 
                             item {
                                 StepByStepCategoryJourney(
@@ -660,36 +660,36 @@ private fun SearchResultsSection(
     }
 }
 
-@Composable
-private fun FeaturedDishShelf(
-    featuredItems: List<MenuItem>,
-    rewardProvider: (MenuItem) -> RewardPresentation?,
-    onOpen: (MenuItem) -> Unit,
-) {
-    val theme = AppSectionTheme.Restaurant
-
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        BrandSectionHeader(
-            theme = theme,
-            title = "Primer antojo",
-            subtitle = "Platos destacados para decidir en segundos.",
-        )
-
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            items(
-                items = featuredItems.take(8),
-                key = { it.id },
-            ) { item ->
-                PremiumDishTile(
-                    item = item,
-                    reward = rewardProvider(item),
-                    modifier = Modifier.width(220.dp),
-                    onClick = { onOpen(item) },
-                )
-            }
-        }
-    }
-}
+//@Composable
+//private fun FeaturedDishShelf(
+//    featuredItems: List<MenuItem>,
+//    rewardProvider: (MenuItem) -> RewardPresentation?,
+//    onOpen: (MenuItem) -> Unit,
+//) {
+//    val theme = AppSectionTheme.Restaurant
+//
+//    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+//        BrandSectionHeader(
+//            theme = theme,
+//            title = "Primer antojo",
+//            subtitle = "Platos destacados para decidir en segundos.",
+//        )
+//
+//        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+//            items(
+//                items = featuredItems.take(8),
+//                key = { it.id },
+//            ) { item ->
+//                PremiumDishTile(
+//                    item = item,
+//                    reward = rewardProvider(item),
+//                    modifier = Modifier.width(220.dp),
+//                    onClick = { onOpen(item) },
+//                )
+//            }
+//        }
+//    }
+//}
 
 @Composable
 private fun StepByStepCategoryJourney(
@@ -1226,7 +1226,7 @@ private fun RewardCouponCard(
     Column(
         modifier = Modifier
             .width(310.dp)
-            .appCardStyle(theme, emphasized = true),
+            .appCardStyle(theme),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1595,7 +1595,6 @@ private fun badgeText(template: LoyaltyRewardTemplate): String = when (template.
 
     LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> "Aventura"
 }
-
 
 internal fun Double.priceLabel(): String = NumberFormat.getCurrencyInstance(Locale.US).format(this)
 

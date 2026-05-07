@@ -1,9 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain
 
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityCatalogItem
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureFeaturedPackage
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.MenuItem
 import com.premierdarkcoffee.tourism.altosdelmurco.util.extrension.priceText
 
 data class RewardPresentation(
