@@ -22,7 +22,6 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -39,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.RewardPresentation
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalCardContainer
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -144,18 +145,16 @@ fun PremiumIconBubble(
 fun PremiumCard(
     modifier: Modifier = Modifier,
     emphasized: Boolean = false,
+    sectionTheme: AppSectionTheme = AppSectionTheme.Neutral,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    ElevatedCard(
+    SeasonalCardContainer(
+        sectionTheme = sectionTheme,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = if (emphasized) 8.dp else 3.dp),
+        emphasized = emphasized,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            content = content,
-        )
+        content()
     }
 }
 

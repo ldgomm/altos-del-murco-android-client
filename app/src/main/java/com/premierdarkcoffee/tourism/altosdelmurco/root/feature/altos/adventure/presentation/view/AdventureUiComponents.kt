@@ -37,6 +37,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityType
 import com.premierdarkcoffee.tourism.altosdelmurco.util.extrension.priceText
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalCardContainer
 
 @Composable
 fun AdventureGradientHero(
@@ -119,18 +121,12 @@ fun AdventureCard(
     emphasized: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    Card(
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Adventure,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(26.dp),
-        colors = CardDefaults.cardColors(MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (emphasized) 4.dp else 1.dp),
+        emphasized = emphasized,
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            content()
-        }
+        content()
     }
 }
 

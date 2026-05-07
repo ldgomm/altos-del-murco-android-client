@@ -79,6 +79,8 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.MenuItemDetailScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.CartViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalCardContainer
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumAltosCopy
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumCard
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumEmptyState
@@ -597,67 +599,64 @@ private fun FeaturedMenuHomeCard(
     reward: RewardPresentation?,
     onClick: () -> Unit,
 ) {
-    Card(
-        onClick = onClick,
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Restaurant,
         modifier = Modifier.width(250.dp),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
+        onClick = onClick,
+        minHeightDp = 0,
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        PremiumIconBubble(Icons.Rounded.LocalDining)
+
+        Text(
+            item.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Text(
+            item.description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PremiumIconBubble(Icons.Rounded.LocalDining)
+            if (item.hasOffer) {
+                Text(
+                    item.price.premiumMoney(),
+                    textDecoration = TextDecoration.LineThrough,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Text(
-                item.name,
-                style = MaterialTheme.typography.titleMedium,
+                item.finalPrice.premiumMoney(),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.ExtraBold,
+            )
+        }
+
+        reward?.let {
+            Text(
+                text = "${it.badge}: ${it.message}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                item.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (item.hasOffer) {
-                    Text(
-                        item.price.premiumMoney(),
-                        textDecoration = TextDecoration.LineThrough,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Text(
-                    item.finalPrice.premiumMoney(),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
-            reward?.let {
-                Text(
-                    text = "${it.badge}: ${it.message}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                text = if (item.canBeOrdered) "Tocar para elegir cantidad" else "Agotado hoy / disponible para reservas futuras",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (item.canBeOrdered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-            )
         }
+
+        Text(
+            text = if (item.canBeOrdered) "Tocar para elegir cantidad" else "Agotado hoy / disponible para reservas futuras",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (item.canBeOrdered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
     }
 }
 
