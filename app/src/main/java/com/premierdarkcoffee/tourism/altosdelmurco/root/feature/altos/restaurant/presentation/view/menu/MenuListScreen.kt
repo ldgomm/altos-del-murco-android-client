@@ -36,11 +36,11 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -84,7 +84,14 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandScreen
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalHeroSurface
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalImageCardBox
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.appCardStyle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.badgeImageVector
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.rememberCurrentAltosSeasonalTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.restaurantHeroSubtitle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.restaurantHeroTitle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.shortPromise
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -207,7 +214,7 @@ fun MenuListScreen(
             modifier = Modifier.fillMaxSize(),
             containerColor = Color.Transparent,
             topBar = {
-                LargeTopAppBar(
+                CenterAlignedTopAppBar(
                     title = {
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
@@ -326,16 +333,6 @@ fun MenuListScreen(
                                 )
                             }
                         } else {
-//                            if (featuredItems.isNotEmpty()) {
-//                                item {
-//                                    FeaturedDishShelf(
-//                                        featuredItems = featuredItems,
-//                                        rewardProvider = rewardProvider,
-//                                        onOpen = onOpenItem,
-//                                    )
-//                                }
-//                            }
-
                             item {
                                 StepByStepCategoryJourney(
                                     steps = menuSteps,
@@ -401,20 +398,19 @@ private fun RestaurantDiscoveryHero(
     onOpenCart: () -> Unit,
     onOpenOrders: () -> Unit,
 ) {
-    val theme = AppSectionTheme.Restaurant
-    val palette = LocalBrandPalette.current
+    val greeting = clientName
+        .trim()
+        .takeIf { it.isNotEmpty() }?.substringBefore(' ')
+        ?: "Bienvenido"
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(30.dp))
-            .background(palette.heroGradient)
-            .border(
-                width = 1.dp,
-                color = Color.White.copy(alpha = 0.16f),
-                shape = RoundedCornerShape(30.dp),
-            )
-            .padding(20.dp),
+    val seasonalTheme = rememberCurrentAltosSeasonalTheme()
+    val title = seasonalTheme?.restaurantHeroTitle(greeting)
+    val subtitle = seasonalTheme?.restaurantHeroSubtitle(levelTitle)
+        ?: levelTitle.ifBlank { "Fotos, búsqueda y pedido paso a paso" }
+
+    SeasonalHeroSurface(
+        sectionTheme = AppSectionTheme.Restaurant,
+        seasonalTheme = seasonalTheme,
     ) {
         Box(
             modifier = Modifier
@@ -423,7 +419,10 @@ private fun RestaurantDiscoveryHero(
                 .background(Color.White.copy(alpha = 0.10f), CircleShape),
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -432,14 +431,12 @@ private fun RestaurantDiscoveryHero(
                     modifier = Modifier.size(58.dp),
                     color = Color.White.copy(alpha = 0.15f),
                     shape = CircleShape,
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = Color.White.copy(alpha = 0.18f),
-                    ),
+                    border = BorderStroke(width = 1.dp, color = Color.White.copy(alpha = 0.18f)),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Rounded.Restaurant,
+                            imageVector = seasonalTheme?.badgeImageVector()
+                                ?: Icons.Rounded.Restaurant,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(28.dp),
@@ -449,36 +446,36 @@ private fun RestaurantDiscoveryHero(
 
                 Column(
                     modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = if (clientName.isBlank()) "Elige con antojo" else "Hola, $clientName",
+                        text = title ?: "",
                         color = Color.White,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.ExtraBold,
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
 
                     Text(
-                        text = levelTitle.ifBlank { "Fotos, búsqueda y pedido paso a paso" },
+                        text = subtitle,
                         color = Color.White.copy(alpha = 0.90f),
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 2,
+                        maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
 
             Text(
-                text = "Primero mira lo irresistible, luego avanza como en una comida real: entrada, sopa, plato fuerte, extra, postre y bebida.",
+                text = "Mira y pide lo irresistible, disfruta de una experiencia real",
                 color = Color.White.copy(alpha = 0.92f),
                 style = MaterialTheme.typography.bodyMedium,
             )
 
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 HeroMicroBadge(title = "$availableDishesCount platos")
-                HeroMicroBadge(title = "Sin pestaña Todo")
+                HeroMicroBadge(title = seasonalTheme?.shortPromise() ?: "Buscar + fotos")
                 HeroMicroBadge(title = "$cartItemsCount en carrito")
             }
 
@@ -909,66 +906,65 @@ private fun PremiumDishTile(
     onClick: () -> Unit,
 ) {
     val palette = LocalBrandPalette.current
-    val shape = RoundedCornerShape(26.dp)
 
-    Column(
-        modifier = modifier
-            .clip(shape)
-            .clickable(enabled = item.canBeOrdered, onClick = onClick)
-            .background(palette.card)
-            .border(width = 1.dp, color = palette.stroke, shape = shape)
-            .alpha(if (item.canBeOrdered) 1f else 0.58f),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+    SeasonalImageCardBox(
+        sectionTheme = AppSectionTheme.Restaurant,
+        modifier = modifier.alpha(if (item.canBeOrdered) 1f else 0.58f),
+        enabled = item.canBeOrdered,
+        onClick = onClick,
+        cornerRadiusDp = 26,
     ) {
-        DishImageHero(
-            item = item,
-            height = 146.dpValue,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            DishImageHero(
+                item = item,
+                height = 146.dpValue,
+            )
 
-        Column(
-            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (item.isFeatured) {
-                    BrandBadge(
-                        theme = AppSectionTheme.Restaurant,
-                        title = "Popular",
-                        selected = false,
+            Column(
+                modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (item.isFeatured) {
+                        BrandBadge(
+                            theme = AppSectionTheme.Restaurant,
+                            title = "Popular",
+                            selected = false
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
+
+                    Text(
+                        text = item.finalPrice.priceLabel(),
+                        color = palette.primary,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.ExtraBold,
                     )
                 }
 
-                Spacer(Modifier.weight(1f))
-
                 Text(
-                    text = item.finalPrice.priceLabel(),
-                    color = palette.primary,
+                    text = item.name,
+                    color = palette.textPrimary,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.ExtraBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-            }
 
-            Text(
-                text = item.name,
-                color = palette.textPrimary,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+                Text(
+                    text = item.description,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
 
-            Text(
-                text = item.description,
-                color = palette.textSecondary,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
+                DishPriceAndStock(item = item)
 
-            DishPriceAndStock(item = item)
-
-            reward?.let {
-                CompactRewardRibbon(reward = it, onDark = false)
+                reward?.let {
+                    CompactRewardRibbon(reward = it, onDark = false)
+                }
             }
         }
     }

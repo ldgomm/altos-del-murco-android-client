@@ -108,13 +108,6 @@ fun OrdersScreen(
                             )
                         }
                     },
-//                    colors = CenterAlignedTopAppBarDefaults.centerAlignedTopAppBarColors(
-//                        containerColor = Color.Transparent,
-//                        scrolledContainerColor = palette.surface.copy(alpha = 0.92f),
-//                        navigationIconContentColor = palette.textPrimary,
-//                        titleContentColor = palette.textPrimary,
-//                        actionIconContentColor = palette.textPrimary,
-//                    ),
                 )
             },
         ) { innerPadding ->

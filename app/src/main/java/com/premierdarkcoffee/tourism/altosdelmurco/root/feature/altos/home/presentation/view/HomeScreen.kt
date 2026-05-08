@@ -1,6 +1,7 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.presentation.view
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -31,10 +32,8 @@ import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Terrain
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -56,12 +55,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureCatalogSnapshot
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureFeaturedPackage
@@ -81,10 +81,15 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.MenuViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalCardContainer
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalHeroSurface
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.badgeImageVector
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.homeHeroSubtitle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.homeHeroTitle
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.rememberCurrentAltosSeasonalTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.shortPromise
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumAltosCopy
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumCard
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumEmptyState
-import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumGradientHero
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumIconBubble
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumPriceRow
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumRewardCard
@@ -304,7 +309,7 @@ private fun HomeScaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            LargeTopAppBar(
+            CenterAlignedTopAppBar(
                 navigationIcon = {
                     if (showBack) {
                         IconButton(onClick = onBack) {
@@ -466,28 +471,77 @@ private fun HomeHero(
     onOpenRestaurant: () -> Unit,
     onOpenExperiences: () -> Unit,
 ) {
-    val greeting =
-        clientName.trim().takeIf { it.isNotEmpty() }?.let { "Hola, ${it.substringBefore(' ')}" }
-            ?: "Bienvenido"
-    PremiumGradientHero(
-        title = "$greeting. Vive Altos del Murco.",
-        subtitle = "Pide comida, reserva experiencias, arma combos con comida incluida y aprovecha premios Murco Loyalty en un solo lugar.",
-        badge = "Restaurante + Experiencias",
-        primaryAction = {
-            Button(onClick = onOpenRestaurant, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.Restaurant, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(PremiumAltosCopy.restaurantCta)
+    val seasonalTheme = rememberCurrentAltosSeasonalTheme()
+    val greeting = clientName
+        .trim()
+        .takeIf { it.isNotEmpty() }
+        ?.let { "Hola, ${it.substringBefore(' ')}" }
+        ?: "Bienvenido"
+
+    val title = seasonalTheme?.homeHeroTitle(greeting) ?: "$greeting. Vive Altos del Murco."
+    val subtitle = seasonalTheme?.homeHeroSubtitle()
+        ?: "Pide comida, reserva experiencias, arma combos con comida incluida y aprovecha premios Murco Loyalty en un solo lugar."
+    val badge = seasonalTheme?.shortPromise() ?: "Restaurante + Experiencias"
+
+    SeasonalHeroSurface(
+        sectionTheme = AppSectionTheme.Neutral,
+        seasonalTheme = seasonalTheme,
+    ) {
+        Column(
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = badge,
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                Icon(
+                    imageVector = seasonalTheme?.badgeImageVector() ?: Icons.Rounded.Terrain,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp),
+                )
             }
-        },
-        secondaryAction = {
-            OutlinedButton(onClick = onOpenExperiences, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Rounded.Explore, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(PremiumAltosCopy.experiencesCta)
+
+            Text(
+                text = title,
+                color = Color.White,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+
+            Text(
+                text = subtitle,
+                color = Color.White.copy(alpha = 0.92f),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(onClick = onOpenRestaurant, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Restaurant, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(PremiumAltosCopy.restaurantCta)
+                }
+
+                OutlinedButton(onClick = onOpenExperiences, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Rounded.Explore, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(PremiumAltosCopy.experiencesCta)
+                }
             }
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -550,45 +604,42 @@ private fun HomeMetricActionCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    Card(
-        onClick = onClick,
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Neutral,
         modifier = modifier,
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        ),
+        onClick = onClick,
+        minHeightDp = 166,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            PremiumIconBubble(icon = icon, modifier = Modifier.size(38.dp))
+        PremiumIconBubble(icon = icon, modifier = Modifier.size(38.dp))
+
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+        )
+
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = value,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.ExtraBold,
-                maxLines = 1,
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
             )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(16.dp),
             )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(16.dp),
-                )
-            }
         }
     }
 }
@@ -606,7 +657,6 @@ private fun FeaturedMenuHomeCard(
         minHeightDp = 0,
     ) {
         PremiumIconBubble(Icons.Rounded.LocalDining)
-
         Text(
             item.name,
             style = MaterialTheme.typography.titleMedium,
@@ -614,7 +664,6 @@ private fun FeaturedMenuHomeCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-
         Text(
             item.description,
             style = MaterialTheme.typography.bodySmall,
@@ -622,7 +671,6 @@ private fun FeaturedMenuHomeCard(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
-
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -640,7 +688,6 @@ private fun FeaturedMenuHomeCard(
                 fontWeight = FontWeight.ExtraBold,
             )
         }
-
         reward?.let {
             Text(
                 text = "${it.badge}: ${it.message}",
@@ -651,7 +698,6 @@ private fun FeaturedMenuHomeCard(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-
         Text(
             text = if (item.canBeOrdered) "Tocar para elegir cantidad" else "Agotado hoy / disponible para reservas futuras",
             style = MaterialTheme.typography.labelSmall,
@@ -680,78 +726,90 @@ private fun ExperiencePackageHomeCard(
         wallet = walletSnapshot,
     )
 
-    ElevatedCard(
-        onClick = onClick,
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Adventure,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 4.dp),
+        emphasized = true,
+        onClick = onClick,
     ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.Top,
+            PremiumIconBubble(Icons.Rounded.Terrain, selected = true)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                PremiumIconBubble(Icons.Rounded.Terrain, selected = true)
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        packageModel.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                    Text(packageModel.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (!packageModel.badge.isNullOrBlank()) {
-                        Text(
-                            packageModel.badge,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "Aventura ${activitySubtotal.premiumMoney()}",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    packageModel.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.ExtraBold
                 )
-                if (foodSubtotal > 0) {
-                    Text(
-                        "Comida ${foodSubtotal.premiumMoney()}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    packageModel.subtitle,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+        }
 
+        Text(
+            text = packageModel.items.joinToString(" • ") {
+                catalog.activity(it.activity)?.title ?: it.activity.legacyTitle
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        if (packageModel.foodItems.isNotEmpty()) {
+            Text(
+                text = packageModel.foodItems.joinToString(" • ") { food ->
+                    "${food.quantity}x ${menuItemsById[food.menuItemId]?.name ?: food.menuItemId}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Desde ${finalTotal.premiumMoney()}",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.ExtraBold
+            )
             if (comboDiscount > 0) {
                 Text(
-                    "Ahorro combo ${comboDiscount.premiumMoney()}",
+                    "Ahorras ${comboDiscount.premiumMoney()}",
                     color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-
-            reward?.let {
-                Text(
-                    text = "${it.badge}: ${it.message}",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.labelMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold
                 )
             }
+        }
 
-            Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
-                Text("Desde ${finalTotal.premiumMoney()} • Ver detalle")
-            }
+        reward?.let {
+            Text(
+                text = "${it.badge}: ${it.message}",
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -790,20 +848,19 @@ private fun HomeFeaturedDishWideCard(
     item: MenuItem,
     onClick: () -> Unit,
 ) {
-    ElevatedCard(
-        onClick = onClick,
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Restaurant,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        onClick = onClick,
     ) {
         Row(
-            modifier = Modifier.padding(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.Top
         ) {
             PremiumIconBubble(Icons.Rounded.LocalDining)
             Column(
-                modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Text(
                     item.name,
@@ -824,7 +881,7 @@ private fun HomeFeaturedDishWideCard(
                 Text(
                     item.stockLabel,
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (item.canBeOrdered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    color = if (item.canBeOrdered) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )
             }
             Icon(
@@ -835,6 +892,7 @@ private fun HomeFeaturedDishWideCard(
         }
     }
 }
+
 
 @Composable
 private fun HomePackagesScreen(

@@ -69,8 +69,6 @@ import androidx.compose.material.icons.rounded.SupportAgent
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ElevatedCard
@@ -114,7 +112,7 @@ import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
 import androidx.credentials.exceptions.NoCredentialException
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -132,6 +130,8 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.pr
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.presentation.viewmodel.formatDateLong
 import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.clientId
 import com.premierdarkcoffee.tourism.altosdelmurco.util.extrension.priceText
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.AppSectionTheme
+import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.SeasonalCardContainer
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.ThemeMode
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -1226,18 +1226,12 @@ private fun ProfileCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(
+    SeasonalCardContainer(
+        sectionTheme = AppSectionTheme.Neutral,
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-            content = content,
-        )
-    }
+        minHeightDp = 0,
+        content = content,
+    )
 }
 
 @Composable

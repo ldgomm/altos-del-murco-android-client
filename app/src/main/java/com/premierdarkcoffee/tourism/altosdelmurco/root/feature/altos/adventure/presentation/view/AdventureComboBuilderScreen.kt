@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -58,6 +59,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -79,7 +81,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityCatalogItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureActivityType
@@ -111,6 +113,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.BrandSectionHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalAppSectionTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandDarkTheme
 import com.premierdarkcoffee.tourism.altosdelmurco.util.theme.LocalBrandPalette
+import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.PremiumScreenHeader
 import com.premierdarkcoffee.tourism.altosdelmurco.util.ui.QuickContactProfileSheet
 import java.net.URLEncoder
 import java.util.Calendar
@@ -153,6 +156,7 @@ fun AdventureComboBuilderScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdventureScreenContent(
     sessionState: SessionState.Authenticated,
@@ -260,33 +264,56 @@ private fun AdventureScreenContent(
         theme = AdventureTheme,
         modifier = modifier,
     ) {
-        when (mode) {
-            AdventureMode.Catalog -> AdventureCatalogContent(
-                isLoading = catalogState.isLoading,
-                catalog = catalogState.catalog,
-                menuSections = menuState.sections,
-                builderViewModel = builderViewModel,
-                onCustomCombo = {
-                    builderViewModel.prepareCustomDraftIfNeeded()
-                    mode = AdventureMode.Builder
-                },
-                onOpenSingle = { activity ->
-                    builderViewModel.replaceItems(listOf(activity.defaultDraft), 0.0)
-                    mode = AdventureMode.Builder
-                },
-                onOpenPackage = { packageModel ->
-                    builderViewModel.replacePackage(packageModel, menuState.sections)
-                    mode = AdventureMode.Builder
-                },
-            )
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent,
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = {
+                        PremiumScreenHeader(
+                            title = "Aventura en Los Altos",
+                            subtitle = "Recorre el Pasochoa en cuadrones",
+                        )
+                    },
+                    colors = TopAppBarDefaults.largeTopAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                )
+            },
+        ) { scaffoldPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(scaffoldPadding),
+            ) {
+                when (mode) {
+                    AdventureMode.Catalog -> AdventureCatalogContent(
+                        isLoading = catalogState.isLoading,
+                        catalog = catalogState.catalog,
+                        menuSections = menuState.sections,
+                        builderViewModel = builderViewModel,
+                        onCustomCombo = {
+                            builderViewModel.prepareCustomDraftIfNeeded()
+                            mode = AdventureMode.Builder
+                        },
+                        onOpenSingle = { activity ->
+                            builderViewModel.replaceItems(listOf(activity.defaultDraft), 0.0)
+                            mode = AdventureMode.Builder
+                        },
+                        onOpenPackage = { packageModel ->
+                            builderViewModel.replacePackage(packageModel, menuState.sections)
+                            mode = AdventureMode.Builder
+                        },
+                    )
 
-            AdventureMode.Builder -> AdventureBuilderContent(
-                viewModel = builderViewModel,
-                menuSections = menuState.sections,
-                onBack = { mode = AdventureMode.Catalog },
-                onAddFood = { showFoodPicker = true },
-                profile = sessionState.profile,
-            )
+                    AdventureMode.Builder -> AdventureBuilderContent(
+                        viewModel = builderViewModel,
+                        menuSections = menuState.sections,
+                        onBack = { mode = AdventureMode.Catalog },
+                        onAddFood = { showFoodPicker = true },
+                        profile = sessionState.profile,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }
