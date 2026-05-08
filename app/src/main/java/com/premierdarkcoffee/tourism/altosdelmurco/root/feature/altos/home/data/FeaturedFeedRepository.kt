@@ -6,6 +6,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.FeaturedFeedPage
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.FeaturedFeedRepositoriable
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.toFeaturedPostOrNull
+import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollections
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -13,7 +15,6 @@ import kotlinx.coroutines.flow.callbackFlow
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlin.collections.orEmpty
 
 @Singleton
 class FeaturedFeedRepository @Inject constructor(
@@ -65,13 +66,8 @@ class FeaturedFeedRepository @Inject constructor(
     }
 
     private fun baseActiveQuery(): Query = firestore
-        .collection(FEATURED_POSTS_COLLECTION)
+        .collection(FirestoreCollections.FEATURED_POSTS)
         .whereEqualTo("isVisible", true)
         .whereGreaterThan("expiresAt", Timestamp(Date()))
         .orderBy("expiresAt", Query.Direction.DESCENDING)
-
-    private companion object {
-        // This is intentionally "featured_posts" because that is what the iOS app uses.
-        const val FEATURED_POSTS_COLLECTION = "featured_posts"
-    }
 }

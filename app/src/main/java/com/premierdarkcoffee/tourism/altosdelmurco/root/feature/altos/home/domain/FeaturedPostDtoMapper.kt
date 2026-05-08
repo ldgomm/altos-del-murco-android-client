@@ -1,11 +1,9 @@
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.data
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
 
 import com.google.firebase.Timestamp
 import com.google.firebase.firestore.DocumentSnapshot
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.FeaturedPost
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.FeaturedPostCategory
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain.FeaturedPostMedia
 import java.util.Date
+import kotlin.collections.get
 
 internal fun DocumentSnapshot.toFeaturedPostOrNull(): FeaturedPost? {
     val id = id.trim().takeIf { it.isNotEmpty() } ?: return null

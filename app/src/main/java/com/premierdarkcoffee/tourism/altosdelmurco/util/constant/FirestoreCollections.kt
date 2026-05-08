@@ -9,5 +9,5 @@ object FirestoreCollections {
     const val RESTAURANT_ORDERS = "restaurant_orders"
     const val CLIENT_LOYALTY_WALLETS = "client_loyalty_wallets"
     const val LOYALTY_REWARD_TEMPLATES = "loyalty_reward_templates"
-    const val POSTS = "posts"
+    const val FEATURED_POSTS = "featured_posts"
 }
