@@ -8538,7 +8538,7 @@ private enum class BookingsTimelineScope(
     HISTORY(
         title = "Historial",
         shortTitle = "Historial",
-        subtitle = "Reservas pasadas, completadas o canceladas.",
+        subtitle = "Reservas pasadas, pagadas, completadas o canceladas.",
         icon = Icons.Rounded.History,
     ),
     ALL(
@@ -8567,6 +8567,8 @@ private enum class UnifiedReservationStatusFilter(val title: String) {
     PENDING("Pendiente"),
     CONFIRMED("Confirmada"),
     PREPARING("Preparando"),
+    READY_FOR_PAYMENT("Por cobrar"),
+    PAID("Pagada"),
     COMPLETED("Completada"),
     CANCELED("Cancelada");
 
@@ -8576,6 +8578,8 @@ private enum class UnifiedReservationStatusFilter(val title: String) {
             PENDING -> reservation.normalizedStatus == UnifiedReservationStatus.PENDING
             CONFIRMED -> reservation.normalizedStatus == UnifiedReservationStatus.CONFIRMED
             PREPARING -> reservation.normalizedStatus == UnifiedReservationStatus.PREPARING
+            READY_FOR_PAYMENT -> reservation.normalizedStatus == UnifiedReservationStatus.READY_FOR_PAYMENT
+            PAID -> reservation.normalizedStatus == UnifiedReservationStatus.PAID
             COMPLETED -> reservation.normalizedStatus == UnifiedReservationStatus.COMPLETED
             CANCELED -> reservation.normalizedStatus == UnifiedReservationStatus.CANCELED
         }
@@ -8588,7 +8592,9 @@ private enum class UnifiedReservationStatus(
 ) {
     PENDING("Pendiente", Icons.Rounded.HourglassTop),
     CONFIRMED("Confirmada", Icons.Rounded.CheckCircle),
-    PREPARING("Preparando", Icons.Rounded.Fastfood),
+    PREPARING("En cocina", Icons.Rounded.Fastfood),
+    READY_FOR_PAYMENT("Por cobrar", Icons.Rounded.ReceiptLong),
+    PAID("Pagada", Icons.Rounded.DoneAll),
     COMPLETED("Completada", Icons.Rounded.DoneAll),
     CANCELED("Cancelada", Icons.Rounded.Cancel),
 }
@@ -8627,7 +8633,8 @@ private sealed interface UnifiedReservation {
     val searchableText: String
 
     val isTerminal: Boolean
-        get() = normalizedStatus == UnifiedReservationStatus.COMPLETED ||
+        get() = normalizedStatus == UnifiedReservationStatus.PAID ||
+                normalizedStatus == UnifiedReservationStatus.COMPLETED ||
                 normalizedStatus == UnifiedReservationStatus.CANCELED
 
     val isCanceled: Boolean
@@ -8646,20 +8653,21 @@ private sealed interface UnifiedReservation {
     data class RestaurantOrder(
         val order: Order,
     ) : UnifiedReservation {
+        private val effectiveStatus = order.recalculatedAgendaStatus()
+
         override val id: String = "restaurant-${order.id}"
         override val kind: UnifiedReservationKind = UnifiedReservationKind.RESTAURANT
         override val title: String =
-            if (order.isScheduledForLater) "Reserva de comida" else "Pedido restaurante"
+            if (order.isAgendaScheduledForLater) "Reserva de comida" else "Pedido restaurante"
         override val subtitle: String =
-            "${order.totalItems} item(s) • Mesa ${order.tableNumber}"
+            "${order.totalAgendaItems} plato(s) • Mesa ${order.tableNumber.ifBlank { "sin asignar" }}"
         override val clientName: String =
             order.clientName.ifBlank { "Cliente" }
         override val serviceDate: Date = order.scheduledAt
         override val endDate: Date = order.scheduledAt.addMinutes(90)
         override val createdAt: Date = order.createdAt
         override val total: Double = order.totalAmount
-        override val normalizedStatus: UnifiedReservationStatus =
-            order.recalculatedAgendaStatus().toUnifiedStatus()
+        override val normalizedStatus: UnifiedReservationStatus = effectiveStatus.toUnifiedStatus()
 
         override val searchableText: String =
             listOf(
@@ -8686,8 +8694,7 @@ private sealed interface UnifiedReservation {
         override val endDate: Date = booking.endAt
         override val createdAt: Date = booking.createdAt
         override val total: Double = booking.totalAmount
-        override val normalizedStatus: UnifiedReservationStatus =
-            booking.status.toUnifiedStatus()
+        override val normalizedStatus: UnifiedReservationStatus = booking.status.toUnifiedStatus()
 
         override val searchableText: String =
             listOf(
@@ -8931,7 +8938,7 @@ private fun BookingsScreenContent(
                             horizontalAlignment = Alignment.Start,
                         ) {
                             Text(
-                                text = "Aventura en Los Altos",
+                                text = "Agenda Altos",
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = palette.textPrimary,
@@ -8940,7 +8947,7 @@ private fun BookingsScreenContent(
                             )
 
                             Text(
-                                text = "Experiencias, combos y eventos",
+                                text = "Pedidos, comida programada y experiencias",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = palette.textSecondary,
                                 maxLines = 1,
@@ -9527,10 +9534,6 @@ private fun AgendaFilterChip(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Reservation cards                                                           */
-/* -------------------------------------------------------------------------- */
-
 @Composable
 private fun ReservationsGroupHeader(
     group: UnifiedReservationsGroup,
@@ -9714,7 +9717,7 @@ private fun ScheduleBlock(
             Text(
                 text = when (reservation) {
                     is UnifiedReservation.RestaurantOrder ->
-                        if (reservation.order.isScheduledForLater) "Reserva para" else "Pedido para"
+                        if (reservation.order.isAgendaScheduledForLater) "Reserva para" else "Pedido para"
 
                     is UnifiedReservation.ExperienceBooking ->
                         "Visita para"
@@ -9727,7 +9730,7 @@ private fun ScheduleBlock(
             Text(
                 text = when (reservation) {
                     is UnifiedReservation.RestaurantOrder ->
-                        reservation.order.scheduledDateText
+                        reservation.order.scheduledAgendaDateText
 
                     is UnifiedReservation.ExperienceBooking ->
                         "${reservation.booking.startAt.shortDateTime()} - ${reservation.booking.endAt.shortTime()}"
@@ -9754,10 +9757,14 @@ private fun RestaurantOrderPreview(
 ) {
     val palette = LocalBrandPalette.current
     val effectiveStatus = order.recalculatedAgendaStatus()
-    val progress = if (order.totalItems > 0) {
-        order.preparedItemsCount.toFloat() / order.totalItems.toFloat()
-    } else {
-        0f
+    val activeItems = order.activeAgendaItems
+    val activeCount = activeItems.size
+    val deliveredCount = order.deliveredAgendaItems.size
+    val readyCount = order.readyForDeliveryAgendaItems.size
+    val progress = when {
+        effectiveStatus == OrderStatus.PAID -> 1f
+        activeCount > 0 -> deliveredCount.toFloat() / activeCount.toFloat()
+        else -> 0f
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -9775,20 +9782,20 @@ private fun RestaurantOrderPreview(
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "Mesa ${order.tableNumber}",
+                text = "Mesa ${order.tableNumber.ifBlank { "sin asignar" }}",
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textSecondary,
                 fontWeight = FontWeight.SemiBold,
             )
         }
 
-        if (order.requiresReconfirmation || order.wasEditedAfterConfirmation) {
+        if (order.requiresAgendaReconfirmation || order.wasAgendaEditedAfterConfirmation) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (order.requiresReconfirmation) {
+                if (order.requiresAgendaReconfirmation) {
                     WarningBadge(text = "Requiere reconfirmación")
                 }
 
-                if (order.wasEditedAfterConfirmation) {
+                if (order.wasAgendaEditedAfterConfirmation) {
                     WarningBadge(text = "Editado")
                 }
             }
@@ -9796,37 +9803,12 @@ private fun RestaurantOrderPreview(
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             order.items.take(3).forEach { item ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${item.quantity}x",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.width(34.dp),
-                    )
-
-                    Text(
-                        text = item.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = palette.textPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    Text(
-                        text = item.totalPrice.agendaPriceText(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                RestaurantOrderItemLine(item = item)
             }
 
             if (order.items.size > 3) {
                 Text(
-                    text = "+${order.items.size - 3} producto(s) más",
+                    text = "+${order.items.size - 3} plato(s) más",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textTertiary,
                     fontWeight = FontWeight.SemiBold,
@@ -9837,12 +9819,7 @@ private fun RestaurantOrderPreview(
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = when {
-                        order.allItemsCompleted -> "Preparación completa"
-                        order.hasStartedPreparing -> "Preparación iniciada"
-                        effectiveStatus == OrderStatus.CONFIRMED -> "Confirmado"
-                        else -> "Preparación"
-                    },
+                    text = orderProgressText(order),
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                     fontWeight = FontWeight.Bold,
@@ -9851,7 +9828,10 @@ private fun RestaurantOrderPreview(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "${order.preparedItemsCount}/${order.totalItems}",
+                    text = when {
+                        activeCount > 0 -> "$deliveredCount/$activeCount servidos"
+                        else -> "0/0"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                     fontWeight = FontWeight.Bold,
@@ -9868,7 +9848,50 @@ private fun RestaurantOrderPreview(
                 trackColor = palette.stroke.copy(alpha = 0.65f),
                 strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
             )
+
+            if (readyCount > 0) {
+                WarningBadge(text = "$readyCount plato(s) listo(s) para servir")
+            }
         }
+    }
+}
+
+@Composable
+private fun RestaurantOrderItemLine(
+    item: OrderItem,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "1x",
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textSecondary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(34.dp),
+        )
+
+        Text(
+            text = item.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textPrimary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+
+        OrderItemStatusPill(status = item.status)
+
+        Text(
+            text = item.totalAgendaPrice.agendaPriceText(),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textSecondary,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -9944,10 +9967,6 @@ private fun AdventureBookingPreview(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Detail sheet                                                                */
-/* -------------------------------------------------------------------------- */
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReservationDetailSheet(
@@ -10020,17 +10039,12 @@ private fun RestaurantOrderDetailContent(
 ) {
     val palette = LocalBrandPalette.current
     val effectiveStatus = order.recalculatedAgendaStatus()
-    val progress = if (order.totalItems > 0) {
-        order.preparedItemsCount.toFloat() / order.totalItems.toFloat()
-    } else {
-        0f
-    }
 
     DetailHeroCard(
         theme = AppSectionTheme.Restaurant,
         icon = Icons.Rounded.Restaurant,
-        title = if (order.isScheduledForLater) "Reserva de comida" else "Pedido restaurante",
-        subtitle = order.scheduledDateText,
+        title = if (order.isAgendaScheduledForLater) "Reserva de comida" else "Pedido restaurante",
+        subtitle = order.scheduledAgendaDateText,
         status = effectiveStatus.toUnifiedStatus(),
         total = order.totalAmount,
     )
@@ -10040,38 +10054,29 @@ private fun RestaurantOrderDetailContent(
         title = "Horario",
         subtitle = "Resumen de servicio del pedido.",
     ) {
-        DetailRow("Cliente", order.clientName)
-        if (order.isScheduledForLater) {
-            DetailRow("WhatsApp", order.displayWhatsApp)
+        DetailRow("Cliente", order.clientName.ifBlank { "Cliente" })
+        if (order.isAgendaScheduledForLater) {
+            DetailRow("WhatsApp", order.agendaWhatsAppText)
         }
-        DetailRow("Mesa", order.tableNumber)
+        DetailRow("Mesa", order.tableNumber.ifBlank { "sin asignar" })
         DetailRow("Servicio", order.serviceMode.title)
-        DetailRow("Programado", order.scheduledDateText)
+        DetailRow("Programado", order.scheduledAgendaDateText)
         DetailRow("Creado", order.createdAt.shortDateTime())
+        DetailRow("Estado", effectiveStatus.clientTitle)
 
-        if (order.requiresReconfirmation) {
+        if (order.requiresAgendaReconfirmation) {
             WarningBadge(text = "Este pedido requiere reconfirmación")
         }
 
-        if (order.wasEditedAfterConfirmation) {
+        if (order.wasAgendaEditedAfterConfirmation) {
             WarningBadge(text = "Fue editado después de confirmar")
         }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(CircleShape),
-            color = effectiveStatus.statusColor(),
-            trackColor = palette.stroke,
-        )
     }
 
     DetailSection(
         theme = AppSectionTheme.Restaurant,
         title = "Productos",
-        subtitle = "Todo lo incluido en este pedido.",
+        subtitle = "Cada línea es una unidad exacta del pedido.",
     ) {
         order.items.forEach { item ->
             OrderDetailItemCard(item = item)
@@ -10102,7 +10107,7 @@ private fun RestaurantOrderDetailContent(
     DetailSection(
         theme = AppSectionTheme.Restaurant,
         title = "Montos",
-        subtitle = "Resumen económico.",
+        subtitle = if (effectiveStatus == OrderStatus.PAID) "Pagado y cerrado." else "Resumen económico.",
     ) {
         DetailAmountRow("Subtotal", order.subtotal)
 
@@ -10129,11 +10134,6 @@ private fun OrderDetailItemCard(
     item: OrderItem,
 ) {
     val palette = LocalBrandPalette.current
-    val progress = if (item.quantity > 0) {
-        item.safePreparedQuantity.toFloat() / item.quantity.toFloat()
-    } else {
-        0f
-    }
 
     Column(
         modifier = Modifier
@@ -10163,70 +10163,28 @@ private fun OrderDetailItemCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = item.name,
+                    text = "1x ${item.name}",
                     style = MaterialTheme.typography.titleSmall,
                     color = palette.textPrimary,
                     fontWeight = FontWeight.Bold,
                 )
 
                 Text(
-                    text = "${item.quantity} × ${item.unitPrice.agendaPriceText()}",
+                    text = "Unitario: ${item.unitPrice.agendaPriceText()}",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                 )
 
-                Text(
-                    text = "Pendiente: ${item.remainingQuantity}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textTertiary,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                OrderItemStatusPill(status = item.status)
             }
 
             Text(
-                text = item.totalPrice.agendaPriceText(),
+                text = item.totalAgendaPrice.agendaPriceText(),
                 style = MaterialTheme.typography.titleSmall,
                 color = palette.textPrimary,
                 fontWeight = FontWeight.ExtraBold,
             )
         }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Preparado: ${item.safePreparedQuantity}/${item.quantity}",
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textSecondary,
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            StatusMiniText(
-                text = when {
-                    item.isCompleted -> "Completo"
-                    item.isStarted -> "En proceso"
-                    else -> "Pendiente"
-                },
-                color = when {
-                    item.isCompleted -> palette.success
-                    item.isStarted -> palette.warning
-                    else -> palette.textTertiary
-                },
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(7.dp)
-                .clip(CircleShape),
-            color = when {
-                item.isCompleted -> palette.success
-                item.isStarted -> palette.warning
-                else -> palette.textTertiary
-            },
-            trackColor = palette.stroke,
-        )
 
         item.notes?.takeIf { it.isNotBlank() }?.let { notes ->
             Row(
@@ -10424,10 +10382,6 @@ private fun AdventureBookingDetailContent(
         }
     }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Detail components                                                           */
-/* -------------------------------------------------------------------------- */
 
 @Composable
 private fun DetailHeroCard(
@@ -10805,10 +10759,6 @@ private fun DetailNoteCard(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Small shared UI                                                             */
-/* -------------------------------------------------------------------------- */
-
 @Composable
 private fun StatusPill(
     status: UnifiedReservationStatus,
@@ -10839,6 +10789,32 @@ private fun StatusPill(
                 fontWeight = FontWeight.Bold,
             )
         }
+    }
+}
+
+@Composable
+private fun OrderItemStatusPill(status: OrderItemStatus) {
+    val palette = LocalBrandPalette.current
+    val color = when (status) {
+        OrderItemStatus.PENDING -> palette.textSecondary
+        OrderItemStatus.PREPARING -> palette.warning
+        OrderItemStatus.READY_FOR_DELIVERY -> palette.primary
+        OrderItemStatus.DELIVERED -> palette.success
+        OrderItemStatus.CANCELED -> palette.destructive
+    }
+
+    Surface(
+        color = color.copy(alpha = if (LocalBrandDarkTheme.current) 0.18f else 0.12f),
+        shape = CircleShape,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.30f)),
+    ) {
+        Text(
+            text = status.clientTitle,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -10929,19 +10905,6 @@ private fun WarningBadge(
             )
         }
     }
-}
-
-@Composable
-private fun StatusMiniText(
-    text: String,
-    color: Color,
-) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        fontWeight = FontWeight.Bold,
-    )
 }
 
 @Composable
@@ -11072,7 +11035,7 @@ private fun EmptyReservationsState(
                     "Las próximas reservas de comida, aventura o eventos aparecerán aquí."
 
                 selectedScope == BookingsTimelineScope.HISTORY ->
-                    "Tus reservas completadas, pasadas o canceladas aparecerán aquí."
+                    "Tus reservas pagadas, completadas, pasadas o canceladas aparecerán aquí."
 
                 else ->
                     "Cuando hagas pedidos o reserves experiencias, aparecerán aquí."
@@ -11082,10 +11045,6 @@ private fun EmptyReservationsState(
         )
     }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Sorting, grouping and helpers                                               */
-/* -------------------------------------------------------------------------- */
 
 private fun List<UnifiedReservation>.sortedByOption(
     sortOption: BookingsSortOption,
@@ -11163,9 +11122,11 @@ private fun List<UnifiedReservation>.groupedByOption(
 
         BookingsGroupingOption.BY_STATUS -> {
             val order = listOf(
-                UnifiedReservationStatus.PENDING,
-                UnifiedReservationStatus.CONFIRMED,
+                UnifiedReservationStatus.READY_FOR_PAYMENT,
                 UnifiedReservationStatus.PREPARING,
+                UnifiedReservationStatus.CONFIRMED,
+                UnifiedReservationStatus.PENDING,
+                UnifiedReservationStatus.PAID,
                 UnifiedReservationStatus.COMPLETED,
                 UnifiedReservationStatus.CANCELED,
             )
@@ -11205,8 +11166,10 @@ private fun statusSubtitle(status: UnifiedReservationStatus): String {
     return when (status) {
         UnifiedReservationStatus.PENDING -> "Esperando confirmación"
         UnifiedReservationStatus.CONFIRMED -> "Reserva aceptada"
-        UnifiedReservationStatus.PREPARING -> "Pedido en preparación"
-        UnifiedReservationStatus.COMPLETED -> "Reserva finalizada"
+        UnifiedReservationStatus.PREPARING -> "Pedido en cocina"
+        UnifiedReservationStatus.READY_FOR_PAYMENT -> "Servido y pendiente de pago"
+        UnifiedReservationStatus.PAID -> "Pedido pagado"
+        UnifiedReservationStatus.COMPLETED -> "Experiencia finalizada"
         UnifiedReservationStatus.CANCELED -> "Reserva cancelada"
     }
 }
@@ -11216,13 +11179,49 @@ private fun List<UnifiedReservation>.visibleTotal(): Double {
 }
 
 fun Order.recalculatedAgendaStatus(): OrderStatus {
-    return when {
-        status == OrderStatus.CANCELED -> OrderStatus.CANCELED
-        requiresReconfirmation -> OrderStatus.PENDING
-        allItemsCompleted -> OrderStatus.COMPLETED
-        hasStartedPreparing -> OrderStatus.PREPARING
-        status == OrderStatus.CONFIRMED -> OrderStatus.CONFIRMED
-        else -> OrderStatus.PENDING
+    if (status == OrderStatus.PAID) return OrderStatus.PAID
+    if (status == OrderStatus.CANCELED) return OrderStatus.CANCELED
+    if (status == OrderStatus.PENDING) return OrderStatus.PENDING
+
+    val activeItems = items.filter { it.status != OrderItemStatus.CANCELED }
+
+    if (activeItems.isEmpty()) return status
+
+    if (activeItems.all { it.status == OrderItemStatus.DELIVERED }) {
+        return OrderStatus.READY_FOR_PAYMENT
+    }
+
+    if (activeItems.any { item ->
+            item.status == OrderItemStatus.PREPARING ||
+                    item.status == OrderItemStatus.READY_FOR_DELIVERY ||
+                    item.status == OrderItemStatus.DELIVERED
+        }) {
+        return OrderStatus.PREPARING
+    }
+
+    return OrderStatus.CONFIRMED
+}
+
+private fun orderProgressText(order: Order): String {
+    val status = order.recalculatedAgendaStatus()
+
+    return when (status) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> {
+            val active = order.activeAgendaItems.size
+            val delivered = order.deliveredAgendaItems.size
+            val ready = order.readyForDeliveryAgendaItems.size
+
+            when {
+                ready > 0 -> "$ready listo(s) · $delivered/$active servidos"
+                active > 0 -> "$delivered/$active servidos"
+                else -> "En cocina"
+            }
+        }
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
     }
 }
 
@@ -11231,7 +11230,8 @@ private fun OrderStatus.toUnifiedStatus(): UnifiedReservationStatus {
         OrderStatus.PENDING -> UnifiedReservationStatus.PENDING
         OrderStatus.CONFIRMED -> UnifiedReservationStatus.CONFIRMED
         OrderStatus.PREPARING -> UnifiedReservationStatus.PREPARING
-        OrderStatus.COMPLETED -> UnifiedReservationStatus.COMPLETED
+        OrderStatus.READY_FOR_PAYMENT -> UnifiedReservationStatus.READY_FOR_PAYMENT
+        OrderStatus.PAID -> UnifiedReservationStatus.PAID
         OrderStatus.CANCELED -> UnifiedReservationStatus.CANCELED
     }
 }
@@ -11253,6 +11253,8 @@ private fun UnifiedReservationStatus.statusColor(): Color {
         UnifiedReservationStatus.PENDING -> palette.warning
         UnifiedReservationStatus.CONFIRMED -> palette.success
         UnifiedReservationStatus.PREPARING -> Color(0xFF8B5CF6)
+        UnifiedReservationStatus.READY_FOR_PAYMENT -> palette.primary
+        UnifiedReservationStatus.PAID -> palette.success
         UnifiedReservationStatus.COMPLETED -> Color(0xFF3B82F6)
         UnifiedReservationStatus.CANCELED -> palette.destructive
     }
@@ -11262,6 +11264,55 @@ private fun UnifiedReservationStatus.statusColor(): Color {
 private fun OrderStatus.statusColor(): Color {
     return toUnifiedStatus().statusColor()
 }
+
+private val Order.activeAgendaItems: List<OrderItem>
+    get() = items.filter { it.status != OrderItemStatus.CANCELED }
+
+private val Order.readyForDeliveryAgendaItems: List<OrderItem>
+    get() = items.filter { it.status == OrderItemStatus.READY_FOR_DELIVERY }
+
+private val Order.deliveredAgendaItems: List<OrderItem>
+    get() = items.filter { it.status == OrderItemStatus.DELIVERED }
+
+private val Order.totalAgendaItems: Int
+    get() = activeAgendaItems.size
+
+private val Order.requiresAgendaReconfirmation: Boolean
+    get() = lastConfirmedRevision != revision
+
+private val Order.wasAgendaEditedAfterConfirmation: Boolean
+    get() = lastConfirmedRevision?.let { revision > it } ?: false
+
+private val Order.isAgendaScheduledForLater: Boolean
+    get() = serviceMode == OrderServiceMode.SCHEDULED || scheduledAt.time - createdAt.time > 15 * 60 * 1000
+
+private val Order.scheduledAgendaDateText: String
+    get() = scheduledAt.shortDateTime()
+
+private val Order.agendaWhatsAppText: String
+    get() = whatsappNumber.trim().ifEmpty { "Cliente escribirá por WhatsApp" }
+
+private val OrderItem.totalAgendaPrice: Double
+    get() = unitPrice * quantity.coerceAtLeast(1)
+
+private val OrderStatus.clientTitle: String
+    get() = when (this) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> "En cocina"
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
+    }
+
+private val OrderItemStatus.clientTitle: String
+    get() = when (this) {
+        OrderItemStatus.PENDING -> "En espera"
+        OrderItemStatus.PREPARING -> "Preparando"
+        OrderItemStatus.READY_FOR_DELIVERY -> "Listo"
+        OrderItemStatus.DELIVERED -> "Servido"
+        OrderItemStatus.CANCELED -> "Cancelado"
+    }
 
 private fun Date.addMinutes(minutes: Int): Date {
     return Calendar.getInstance().apply {
@@ -11320,9 +11371,6 @@ private fun Date.shortTime(): String {
 private fun Double.agendaPriceText(): String {
     return "$${String.format(Locale.US, "%.2f", this)}"
 }
-
-private val ReservationFoodDraft.isEmpty: Boolean
-    get() = items.isEmpty()
 
 private fun AdventureBookingBlock.unitsText(): String {
     return when (resourceType) {
@@ -14288,29 +14336,33 @@ class ProfileStatsRepository @Inject constructor(
         if (cleanUserId.isEmpty()) return ProfileStats.EMPTY
 
         val orderSnapshot = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("userId", cleanUserId).get().awaitResult()
+            .whereEqualTo("userId", cleanUserId)
+            .get()
+            .awaitResult()
 
         val bookingSnapshot = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("userId", cleanUserId).get().awaitResult()
+            .whereEqualTo("userId", cleanUserId)
+            .get()
+            .awaitResult()
 
         val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanUserId)
 
-        val completedOrders = orderSnapshot.documents.mapNotNull { document ->
-            document.toObject(OrderDto::class.java)?.toDomain()
-        }.filter { order -> order.status == OrderStatus.COMPLETED }
+        val paidOrders = orderSnapshot.documents
+            .mapNotNull { document -> document.toObject(OrderDto::class.java)?.toDomain() }
+            .filter { order -> order.recalculatedStatus() == OrderStatus.PAID }
 
-        val completedBookings = bookingSnapshot.documents.mapNotNull { document ->
-            document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-        }.filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
+        val completedBookings = bookingSnapshot.documents
+            .mapNotNull { document -> document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id) }
+            .filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
 
-        val restaurantSpent = completedOrders.sumOf { it.totalAmount }.roundMoney()
+        val restaurantSpent = paidOrders.sumOf { it.totalAmount }.roundMoney()
         val adventureSpent = completedBookings.sumOf { it.totalAmount }.roundMoney()
         val totalSpent = (restaurantSpent + adventureSpent).roundMoney()
         val computedLevel = LoyaltyLevel.fromTotalSpent(totalSpent)
 
         return ProfileStats(
             points = wallet.points.coerceAtLeast(totalSpent.toInt()),
-            completedOrders = completedOrders.size,
+            completedOrders = paidOrders.size,
             completedBookings = completedBookings.size,
             restaurantSpent = restaurantSpent,
             adventureSpent = adventureSpent,
@@ -14340,32 +14392,40 @@ class ProfileStatsRepository @Inject constructor(
             refreshRequests.tryEmit(Unit)
         }
 
-        val loaderJob: Job = launch {
-            refreshRequests.onStart { emit(Unit) }.debounce(160)
-                .mapLatest { loadStats(cleanUserId) }.catch { error ->
+        val loaderJob = launch {
+            refreshRequests
+                .onStart { emit(Unit) }
+                .debounce(160)
+                .mapLatest { loadStats(cleanUserId) }
+                .catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }.collect { stats ->
+                }
+                .collect { stats ->
                     trySend(stats).isSuccess
                 }
         }
 
         registrations += firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
+            .whereEqualTo("userId", cleanUserId)
+            .addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
         registrations += firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
+            .whereEqualTo("userId", cleanUserId)
+            .addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
         val walletJob =
-            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId).onEach { requestRefresh() }
+            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId)
+                .onEach { requestRefresh() }
                 .catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }.launchIn(this)
+                }
+                .launchIn(this)
 
         awaitClose {
             registrations.forEach { it.remove() }
@@ -14374,7 +14434,6 @@ class ProfileStatsRepository @Inject constructor(
         }
     }
 }
-
 
 private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 
@@ -14639,10 +14698,10 @@ object LoyaltyRewardEngine {
         val eligible = templates
             .filter {
                 it.isActive &&
-                    it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
-                    it.scope.matchesRestaurant() &&
-                    it.isEligible(wallet.currentLevel) &&
-                    !it.isExpired
+                        it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
+                        it.scope.matchesRestaurant() &&
+                        it.isEligible(wallet.currentLevel) &&
+                        !it.isExpired
             }
 
         val stackable = eligible
@@ -14680,10 +14739,10 @@ object LoyaltyRewardEngine {
         val eligible = templates
             .filter {
                 it.isActive &&
-                    it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
-                    it.isEligible(wallet.currentLevel) &&
-                    !it.isExpired &&
-                    templateAppliesInAdventureContext(it)
+                        it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
+                        it.isEligible(wallet.currentLevel) &&
+                        !it.isExpired &&
+                        templateAppliesInAdventureContext(it)
             }
 
         val stackable = eligible
@@ -14778,7 +14837,11 @@ object LoyaltyRewardEngine {
 
         templates.forEach { template ->
             val reward = when (template.rule.type) {
-                LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> applyActivityTemplate(template, workingActivities)
+                LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> applyActivityTemplate(
+                    template,
+                    workingActivities
+                )
+
                 LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
                 LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
                 LoyaltyRewardRuleType.FREE_MENU_ITEM,
@@ -14890,7 +14953,8 @@ object LoyaltyRewardEngine {
                 val freeQuantity = (template.rule.freeQuantity ?: 1).coerceAtLeast(1)
                 val repeatable = template.rule.repeatable ?: true
 
-                val index = lines.indices.firstOrNull { lines[it].menuItemId == targetId } ?: return null
+                val index =
+                    lines.indices.firstOrNull { lines[it].menuItemId == targetId } ?: return null
                 val line = lines[index]
                 val totalUnits = line.remainingRewardableUnits
                 if (totalUnits < buyQuantity) return null
@@ -14906,7 +14970,9 @@ object LoyaltyRewardEngine {
                 if (amount <= 0.0) return null
 
                 lines[index] = line.copy(
-                    remainingRewardableUnits = (line.remainingRewardableUnits - freeUnits).coerceAtLeast(0),
+                    remainingRewardableUnits = (line.remainingRewardableUnits - freeUnits).coerceAtLeast(
+                        0
+                    ),
                 )
 
                 AppliedReward(
@@ -18312,21 +18378,27 @@ data class OrderDto(
     val serviceMode: String? = null,
     val items: List<OrderItemDto> = emptyList(),
     val subtotal: Double = 0.0,
-    val loyaltyDiscountAmount: Double? = null,
-    val appliedRewards: List<AppliedRewardDto>? = null,
+    val loyaltyDiscountAmount: Double? = 0.0,
+    val appliedRewards: List<AppliedRewardDto>? = emptyList(),
     val totalAmount: Double = 0.0,
-    val status: String? = null,
-    val revision: Int? = null,
+    val status: String = OrderStatus.PENDING.rawValue,
+    val revision: Int? = 0,
     val lastConfirmedRevision: Int? = null,
+    val readyForPaymentAt: Timestamp? = null,
+    val paidAt: Timestamp? = null,
+    val paymentMethod: String? = null,
+    val paymentReference: String? = null,
+    val paidByAdminId: String? = null,
 ) {
     constructor(domain: Order) : this(
         id = domain.id,
         userId = domain.userId,
         clientName = domain.clientName,
-        whatsappNumber = domain.whatsappNumber
-            .takeIf { domain.isScheduledForLater }
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() },
+        whatsappNumber = if (domain.isScheduledForLater) {
+            domain.whatsappNumber.trim().takeIf { it.isNotEmpty() }
+        } else {
+            ""
+        },
         tableNumber = domain.tableNumber,
         createdAt = Timestamp(domain.createdAt),
         updatedAt = Timestamp(domain.updatedAt),
@@ -18338,25 +18410,37 @@ data class OrderDto(
         loyaltyDiscountAmount = domain.loyaltyDiscountAmount,
         appliedRewards = domain.appliedRewards.map(::AppliedRewardDto),
         totalAmount = domain.totalAmount,
-        status = domain.status.name.lowercase(),
+        status = domain.status.rawValue,
         revision = domain.revision,
         lastConfirmedRevision = domain.lastConfirmedRevision,
+        readyForPaymentAt = domain.readyForPaymentAt?.let(::Timestamp),
+        paidAt = domain.paidAt?.let(::Timestamp),
+        paymentMethod = domain.paymentMethod,
+        paymentReference = domain.paymentReference,
+        paidByAdminId = domain.paidByAdminId,
     )
 
     fun toDomain(): Order {
         val safeCreatedAt = createdAt.toDate()
         val safeScheduledAt = scheduledAt?.toDate() ?: safeCreatedAt
-        val safeMode = serviceMode?.let(OrderServiceMode::fromRaw)
-            ?: OrderScheduleFormatter.mode(safeCreatedAt, safeScheduledAt)
+        val safeUpdatedAt = updatedAt?.toDate() ?: safeCreatedAt
+        val safeMode = serviceMode?.let(OrderServiceMode::fromRaw) ?: OrderScheduleFormatter.mode(
+            safeCreatedAt,
+            safeScheduledAt
+        )
+
         return Order(
             id = id,
             userId = userId.trim(),
             clientName = clientName,
-            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) whatsappNumber.orEmpty()
-                .trim() else "",
+            whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) {
+                whatsappNumber.orEmpty().trim()
+            } else {
+                ""
+            },
             tableNumber = tableNumber,
             createdAt = safeCreatedAt,
-            updatedAt = updatedAt?.toDate() ?: safeCreatedAt,
+            updatedAt = safeUpdatedAt,
             scheduledAt = safeScheduledAt,
             scheduledDayKey = scheduledDayKey ?: OrderScheduleFormatter.dayKey(safeScheduledAt),
             serviceMode = safeMode,
@@ -18366,8 +18450,13 @@ data class OrderDto(
             appliedRewards = appliedRewards?.map { it.toDomain() } ?: emptyList(),
             totalAmount = totalAmount,
             status = OrderStatus.fromRaw(status),
-            revision = revision ?: 1,
+            revision = revision ?: 0,
             lastConfirmedRevision = lastConfirmedRevision,
+            readyForPaymentAt = readyForPaymentAt?.toDate(),
+            paidAt = paidAt?.toDate(),
+            paymentMethod = paymentMethod,
+            paymentReference = paymentReference,
+            paidByAdminId = paidByAdminId,
         )
     }
 }
@@ -18384,35 +18473,62 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 data class OrderItemDto(
     val id: String = "",
+    val groupId: String = "",
+    val sourceCartItemId: String? = null,
     val menuItemId: String = "",
     val name: String = "",
+    val itemDescription: String? = null,
     val unitPrice: Double = 0.0,
-    val quantity: Int = 0,
-    val preparedQuantity: Int? = 0,
-    val totalPrice: Double? = null,
+    val quantity: Int = 1,
     val notes: String? = null,
+    val status: String = OrderItemStatus.PENDING.rawValue,
+    val createdAt: Timestamp = Timestamp.now(),
+    val preparingAt: Timestamp? = null,
+    val readyForDeliveryAt: Timestamp? = null,
+    val deliveredAt: Timestamp? = null,
+    val canceledAt: Timestamp? = null,
+    val canceledReason: String? = null,
 ) {
     constructor(domain: OrderItem) : this(
         id = domain.id,
+        groupId = domain.groupId,
+        sourceCartItemId = domain.sourceCartItemId,
         menuItemId = domain.menuItemId,
         name = domain.name,
+        itemDescription = domain.itemDescription,
         unitPrice = domain.unitPrice,
-        quantity = domain.quantity,
-        preparedQuantity = domain.preparedQuantity,
-        totalPrice = domain.totalPrice,
+        quantity = 1,
         notes = domain.notes,
+        status = domain.status.rawValue,
+        createdAt = Timestamp(domain.createdAt),
+        preparingAt = domain.preparingAt?.let(::Timestamp),
+        readyForDeliveryAt = domain.readyForDeliveryAt?.let(::Timestamp),
+        deliveredAt = domain.deliveredAt?.let(::Timestamp),
+        canceledAt = domain.canceledAt?.let(::Timestamp),
+        canceledReason = domain.canceledReason,
     )
 
     fun toDomain(): OrderItem = OrderItem(
-        id = id,
-        menuItemId = menuItemId,
-        name = name,
-        unitPrice = unitPrice,
-        quantity = quantity,
-        preparedQuantity = preparedQuantity ?: 0,
-        notes = notes,
+        id = id.ifBlank { UUID.randomUUID().toString() },
+        groupId = groupId.ifBlank { UUID.randomUUID().toString() },
+        sourceCartItemId = sourceCartItemId?.trim()?.takeIf { it.isNotEmpty() },
+        menuItemId = menuItemId.trim(),
+        name = name.trim().ifBlank { "Plato" },
+        itemDescription = itemDescription?.trim()?.takeIf { it.isNotEmpty() },
+        unitPrice = unitPrice.coerceAtLeast(0.0),
+        quantity = 1,
+        notes = notes?.trim()?.takeIf { it.isNotEmpty() },
+        status = OrderItemStatus.fromRaw(status),
+        createdAt = createdAt.toDateOrNow(),
+        preparingAt = preparingAt?.toDate(),
+        readyForDeliveryAt = readyForDeliveryAt?.toDate(),
+        deliveredAt = deliveredAt?.toDate(),
+        canceledAt = canceledAt?.toDate(),
+        canceledReason = canceledReason?.trim()?.takeIf { it.isNotEmpty() },
     )
 }
+
+private fun Timestamp?.toDateOrNow(): Date = this?.toDate() ?: Date()
 
 ```
 
@@ -18454,97 +18570,28 @@ class OrdersRepository @Inject constructor(
         }
     }
 
-    private suspend fun buildTrustedOrder(order: Order): Order {
+    override suspend fun updateOrder(order: Order) {
         val uid = requireCurrentUid()
+        require(order.userId == uid) { "No puedes editar este pedido." }
 
-        val trustedItems = order.items.map { requestedItem ->
-            val menuRef = firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
-                .document(requestedItem.menuItemId)
-
-            val menuDto = menuRef.get().awaitResult().toObject(MenuItemDto::class.java)
-                ?: error("No se encontró ${requestedItem.name}.")
-
-            val menuItem = menuDto.toDomain(menuRef.id)
-            require(menuItem.id.isNotBlank()) { "Producto inválido." }
-
-            OrderItem(
-                menuItemId = menuItem.id,
-                name = menuItem.name,
-                unitPrice = menuItem.finalPrice,
-                quantity = requestedItem.quantity.coerceAtLeast(1),
-                preparedQuantity = 0,
-                notes = requestedItem.notes?.trim()?.takeIf { it.isNotEmpty() },
-            )
-        }
-
-        val preview = loyaltyRewardsRepository.previewRestaurantRewards(
+        val cleanOrder = order.copy(
             userId = uid,
-            items = trustedItems,
-        )
-
-        return order.copy(
-            userId = uid,
-            clientName = order.clientName.trim(),
-            whatsappNumber = if (order.isScheduledForLater) {
-                normalizedOptionalEcuadorWhatsApp(order.whatsappNumber)
-            } else {
-                ""
-            },
-            tableNumber = order.tableNumber.trim().ifBlank {
-                if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
-            },
             updatedAt = Date(),
-        ).withTrustedPricing(
-            trustedItems = trustedItems,
-            appliedRewards = preview.appliedRewards,
-            discount = preview.totalDiscount,
+            items = Order.normalizedItemLines(order.items),
         )
+
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(cleanOrder.id)
+            .set(OrderDto(cleanOrder), SetOptions.merge()).awaitResult()
     }
 
-    private suspend fun submitFutureFoodReservation(order: Order) {
-        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
-            .set(OrderDto(order)).awaitResult()
-    }
+    override suspend fun adminUpdateOrder(order: Order) {
+        val cleanOrder = order.copy(
+            updatedAt = Date(),
+            items = Order.normalizedItemLines(order.items),
+        )
 
-    private suspend fun submitAndConsumeCurrentStock(order: Order) {
-        val quantitiesByMenuItemId = order.items.groupBy { it.menuItemId }
-            .mapValues { (_, items) -> items.sumOf { it.quantity } }.filterValues { it > 0 }
-
-        val menuItemsToProcess: List<Pair<DocumentReference, Int>> =
-            quantitiesByMenuItemId.map { (menuItemId, totalQuantity) ->
-                firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
-                    .document(menuItemId) to totalQuantity
-            }
-
-        firestore.runTransaction { transaction ->
-            val loadedItems = menuItemsToProcess.map { (ref, totalQuantity) ->
-                val snapshot = transaction.get(ref)
-                val dto = requireNotNull(snapshot.toObject(MenuItemDto::class.java)) {
-                    "Missing menu item ${ref.id}."
-                }
-                Triple(ref, dto, totalQuantity)
-            }
-
-            loadedItems.forEach { (ref, dto, totalQuantity) ->
-                require(dto.isAvailable) { "${dto.name} no está disponible." }
-                require(dto.remainingQuantity >= totalQuantity) { "Ya no hay suficiente stock de ${dto.name}." }
-
-                val newRemainingQuantity = dto.remainingQuantity - totalQuantity
-                transaction.update(
-                    ref,
-                    mapOf(
-                        "remainingQuantity" to newRemainingQuantity,
-                        "isAvailable" to (newRemainingQuantity > 0),
-                        "updatedAt" to Timestamp.now(),
-                    ),
-                )
-            }
-
-            val orderRef =
-                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
-            transaction.set(orderRef, OrderDto(order))
-            null
-        }.awaitResult()
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(cleanOrder.id)
+            .set(OrderDto(cleanOrder), SetOptions.merge()).awaitResult()
     }
 
     override fun observeOrders(userId: String): Flow<List<Order>> = callbackFlow {
@@ -18570,9 +18617,7 @@ class OrdersRepository @Inject constructor(
                                 runCatching {
                                     doc.toObject(OrderDto::class.java)?.toDomain()
                                 }.onFailure {
-                                    Log.e(
-                                        "AltosOrders", "Could not decode order ${doc.id}", it
-                                    )
+                                    Log.e("AltosOrders", "Could not decode order ${doc.id}", it)
                                 }.getOrNull()
                             }.sortedWith(
                                 compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time },
@@ -18583,6 +18628,451 @@ class OrdersRepository @Inject constructor(
                 }
 
         awaitClose { registration.remove() }
+    }
+
+    override fun observeTodayOrders(): Flow<List<Order>> = callbackFlow {
+        val calendar = Calendar.getInstance()
+        val now = Date()
+        val start = calendar.apply {
+            time = now
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.time
+
+        val end = Calendar.getInstance().apply {
+            time = start
+            add(Calendar.DAY_OF_YEAR, 1)
+        }.time
+
+        val registration = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
+            .whereGreaterThanOrEqualTo("scheduledAt", Timestamp(start))
+            .whereLessThan("scheduledAt", Timestamp(end)).addSnapshotListener { snapshot, error ->
+                when {
+                    error != null -> close(error)
+                    snapshot == null -> trySend(emptyList()).isSuccess
+                    else -> {
+                        val orders = snapshot.documents.mapNotNull { document ->
+                            runCatching {
+                                document.toObject(OrderDto::class.java)?.toDomain()
+                            }.getOrNull()
+                        }.sortedWith(::operationalSort)
+
+                        trySend(orders).isSuccess
+                    }
+                }
+            }
+
+        awaitClose { registration.remove() }
+    }
+
+    override fun observeOrder(orderId: String): Flow<Order?> = callbackFlow {
+        val cleanId = orderId.trim()
+        if (cleanId.isEmpty()) {
+            trySend(null).isSuccess
+            close()
+            return@callbackFlow
+        }
+
+        val registration =
+            firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(cleanId)
+                .addSnapshotListener { snapshot, error ->
+                    when {
+                        error != null -> close(error)
+                        snapshot == null || !snapshot.exists() -> trySend(null).isSuccess
+                        else -> {
+                            val order = runCatching {
+                                snapshot.toObject(OrderDto::class.java)?.toDomain()
+                            }.getOrNull()
+                            trySend(order).isSuccess
+                        }
+                    }
+                }
+
+        awaitClose { registration.remove() }
+    }
+
+    override suspend fun confirmOrder(orderId: String) {
+        val ref = orderRef(orderId)
+
+        firestore.runTransaction { transaction ->
+            val order = readOrder(ref, transaction)
+            val updated = order.confirming(now = Date())
+
+            transaction.set(ref, OrderDto(updated), SetOptions.merge())
+            null
+        }.awaitResult()
+    }
+
+    override suspend fun cancelOrder(orderId: String, reason: String?) {
+        val uid = auth.currentUser?.uid?.trim().orEmpty()
+        val ref = orderRef(orderId)
+        var releaseUserId: String? = null
+        var releaseReferenceId: String? = null
+
+        firestore.runTransaction { transaction ->
+            val order = readOrder(ref, transaction)
+
+            if (uid.isNotEmpty()) {
+                require(order.userId == uid || isAdminLikeAction()) {
+                    "No puedes cancelar este pedido."
+                }
+            }
+
+            // Client rule: pending only. Admin can still call this repository from admin/kitchen context
+            // if rules allow it, but the Android client UI must only expose pending cancellation.
+            require(order.status == OrderStatus.PENDING || isAdminLikeAction()) {
+                "Este pedido ya está en cocina y no puede cancelarse desde la app."
+            }
+
+            val updated = order.canceling(reason = reason, now = Date())
+
+            if (updated.hasLoyaltyRewards) {
+                releaseUserId = updated.userId
+                releaseReferenceId = updated.id
+            }
+
+            transaction.set(ref, OrderDto(updated), SetOptions.merge())
+            null
+        }.awaitResult()
+
+        if (!releaseUserId.isNullOrBlank() && !releaseReferenceId.isNullOrBlank()) {
+            loyaltyRewardsRepository.releaseRewards(
+                userId = releaseUserId.orEmpty(),
+                referenceId = releaseReferenceId.orEmpty(),
+            )
+        }
+    }
+
+    override suspend fun markItemPreparing(orderId: String, itemId: String) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.PREPARING,
+        ) { item ->
+            require(
+                item.status == OrderItemStatus.PENDING || item.status == OrderItemStatus.PREPARING,
+            ) {
+                "Solo puedes iniciar un plato pendiente."
+            }
+        }
+    }
+
+    override suspend fun markItemReadyForDelivery(orderId: String, itemId: String) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.READY_FOR_DELIVERY,
+        ) { item ->
+            require(
+                item.status == OrderItemStatus.PENDING || item.status == OrderItemStatus.PREPARING || item.status == OrderItemStatus.READY_FOR_DELIVERY,
+            ) {
+                "Solo puedes marcar listo un plato pendiente o en preparación."
+            }
+        }
+    }
+
+    override suspend fun markItemDelivered(orderId: String, itemId: String) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.DELIVERED,
+        ) { item ->
+            require(item.status == OrderItemStatus.READY_FOR_DELIVERY) {
+                "Solo puedes servir un plato que ya está listo."
+            }
+        }
+    }
+
+    override suspend fun markItemCanceled(orderId: String, itemId: String, reason: String?) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.CANCELED,
+            reason = reason,
+        ) { item ->
+            require(item.status != OrderItemStatus.DELIVERED) {
+                "No puedes cancelar un plato ya servido sin flujo de corrección explícito."
+            }
+            require(item.status != OrderItemStatus.CANCELED) {
+                "Este plato ya fue cancelado."
+            }
+        }
+    }
+
+    override suspend fun undoItemReadyForDelivery(orderId: String, itemId: String) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.PREPARING,
+        ) { item ->
+            require(item.status == OrderItemStatus.READY_FOR_DELIVERY) {
+                "Solo puedes deshacer listo desde un plato listo."
+            }
+        }
+    }
+
+    override suspend fun undoItemDelivered(orderId: String, itemId: String) {
+        updateItemStatus(
+            orderId = orderId,
+            itemId = itemId,
+            targetStatus = OrderItemStatus.READY_FOR_DELIVERY,
+        ) { item ->
+            require(item.status == OrderItemStatus.DELIVERED) {
+                "Solo puedes deshacer servido desde un plato servido."
+            }
+        }
+    }
+
+    override suspend fun markOrderPaid(
+        orderId: String,
+        paymentMethod: String?,
+        paymentReference: String?,
+        paidByAdminId: String?,
+    ) {
+        val ref = orderRef(orderId)
+        var paidUserId: String? = null
+        var paidReferenceId: String? = null
+
+        firestore.runTransaction { transaction ->
+            val order = readOrder(ref, transaction)
+
+            require(order.status != OrderStatus.PAID && order.status != OrderStatus.CANCELED) {
+                "El pedido ya está cerrado."
+            }
+
+            val recalculated = order.copy(status = order.recalculatedStatus())
+            require(recalculated.status == OrderStatus.READY_FOR_PAYMENT) {
+                "Todavía faltan platos por servir."
+            }
+
+            val updated = recalculated.markingPaid(
+                paymentMethod = paymentMethod,
+                paymentReference = paymentReference,
+                paidByAdminId = paidByAdminId,
+                now = Date(),
+            )
+
+            paidUserId = updated.userId
+            paidReferenceId = updated.id
+
+            transaction.set(ref, OrderDto(updated), SetOptions.merge())
+            null
+        }.awaitResult()
+
+        if (!paidUserId.isNullOrBlank() && !paidReferenceId.isNullOrBlank()) {
+            loyaltyRewardsRepository.consumeRewards(
+                userId = paidUserId.orEmpty(),
+                referenceId = paidReferenceId.orEmpty(),
+            )
+        }
+    }
+
+    private suspend fun buildTrustedOrder(order: Order): Order {
+        val uid = requireCurrentUid()
+        val requestedItems = Order.normalizedItemLines(order.items)
+
+        val trustedItems = requestedItems.map { requestedItem ->
+            val menuRef = firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+                .document(requestedItem.menuItemId)
+
+            val menuDto = menuRef.get().awaitResult().toObject(MenuItemDto::class.java)
+                ?: error("No se encontró ${requestedItem.name}.")
+
+            val menuItem = menuDto.toDomain(menuRef.id)
+            require(menuItem.id.isNotBlank()) { "Producto inválido." }
+
+            OrderItem(
+                id = requestedItem.id,
+                groupId = requestedItem.groupId,
+                sourceCartItemId = requestedItem.sourceCartItemId,
+                menuItemId = menuItem.id,
+                name = menuItem.name,
+                itemDescription = menuItem.description,
+                unitPrice = menuItem.finalPrice,
+                quantity = 1,
+                notes = requestedItem.notes?.trim()?.takeIf { it.isNotEmpty() },
+                status = OrderItemStatus.PENDING,
+                createdAt = requestedItem.createdAt,
+            )
+        }
+
+        val preview = loyaltyRewardsRepository.previewRestaurantRewards(
+            userId = uid,
+            items = trustedItems,
+        )
+
+        return order.copy(
+            userId = uid,
+            clientName = order.clientName.trim(),
+            whatsappNumber = if (order.isScheduledForLater) {
+                normalizedOptionalEcuadorWhatsApp(order.whatsappNumber)
+            } else {
+                ""
+            },
+            tableNumber = order.tableNumber.trim().ifBlank {
+                if (order.isScheduledForLater) "Por asignar" else error("Completa la mesa.")
+            },
+            status = OrderStatus.PENDING,
+            updatedAt = Date(),
+            readyForPaymentAt = null,
+            paidAt = null,
+            paymentMethod = null,
+            paymentReference = null,
+            paidByAdminId = null,
+        ).withTrustedPricing(
+            trustedItems = trustedItems,
+            appliedRewards = preview.appliedRewards,
+            discount = preview.totalDiscount,
+        )
+    }
+
+    private suspend fun submitFutureFoodReservation(order: Order) {
+        firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            .set(OrderDto(order)).awaitResult()
+    }
+
+    private suspend fun submitAndConsumeCurrentStock(order: Order) {
+        val quantitiesByMenuItemId =
+            order.items.filter { it.status != OrderItemStatus.CANCELED }.groupBy { it.menuItemId }
+                .mapValues { (_, items) -> items.sumOf { it.quantity.coerceAtLeast(1) } }
+                .filterValues { it > 0 }
+
+        val menuItemsToProcess: List<Pair<DocumentReference, Int>> =
+            quantitiesByMenuItemId.map { (menuItemId, totalQuantity) ->
+                firestore.collection(FirestoreCollections.RESTAURANT_MENU_ITEMS)
+                    .document(menuItemId) to totalQuantity
+            }
+
+        firestore.runTransaction { transaction ->
+            val loadedItems = menuItemsToProcess.map { (ref, totalQuantity) ->
+                val snapshot = transaction.get(ref)
+                val dto = requireNotNull(snapshot.toObject(MenuItemDto::class.java)) {
+                    "Missing menu item ${ref.id}."
+                }
+                Triple(ref, dto, totalQuantity)
+            }
+
+            loadedItems.forEach { (ref, dto, totalQuantity) ->
+                require(dto.isAvailable) { "${dto.name} no está disponible." }
+                require(dto.remainingQuantity >= totalQuantity) {
+                    "Ya no hay suficiente stock de ${dto.name}."
+                }
+
+                val newRemainingQuantity = dto.remainingQuantity - totalQuantity
+                transaction.update(
+                    ref,
+                    mapOf(
+                        "remainingQuantity" to newRemainingQuantity,
+                        "isAvailable" to (newRemainingQuantity > 0),
+                        "updatedAt" to Timestamp.now(),
+                    ),
+                )
+            }
+
+            val orderRef =
+                firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(order.id)
+            transaction.set(orderRef, OrderDto(order.copy(status = OrderStatus.PENDING)))
+            null
+        }.awaitResult()
+    }
+
+    private suspend fun updateItemStatus(
+        orderId: String,
+        itemId: String,
+        targetStatus: OrderItemStatus,
+        reason: String? = null,
+        validate: (OrderItem) -> Unit,
+    ) {
+        val ref = orderRef(orderId)
+
+        firestore.runTransaction { transaction ->
+            val order = readOrder(ref, transaction)
+
+            require(order.status != OrderStatus.PAID && order.status != OrderStatus.CANCELED) {
+                "El pedido ya está cerrado."
+            }
+
+            require(order.status != OrderStatus.PENDING) {
+                "Primero confirma el pedido antes de mover platos en cocina."
+            }
+
+            val currentItem =
+                order.items.firstOrNull { it.id == itemId } ?: error("No encontré el plato exacto.")
+
+            validate(currentItem)
+
+            val now = Date()
+            val updated = order.updatingItem(
+                itemId = itemId,
+                now = now,
+            ) { item ->
+                item.updatingStatus(
+                    newStatus = targetStatus,
+                    now = now,
+                    reason = reason,
+                )
+            }
+
+            transaction.set(ref, OrderDto(updated), SetOptions.merge())
+            null
+        }.awaitResult()
+    }
+
+    private fun readOrder(
+        ref: DocumentReference,
+        transaction: com.google.firebase.firestore.Transaction,
+    ): Order {
+        val snapshot = transaction.get(ref)
+        require(snapshot.exists()) { "Pedido no encontrado." }
+
+        return snapshot.toObject(OrderDto::class.java)?.toDomain()
+            ?: error("No se pudo leer el pedido.")
+    }
+
+    private fun orderRef(orderId: String): DocumentReference {
+        val cleanId = orderId.trim()
+        require(cleanId.isNotEmpty()) { "orderId vacío." }
+
+        return firestore.collection(FirestoreCollections.RESTAURANT_ORDERS).document(cleanId)
+    }
+
+    private fun operationalSort(lhs: Order, rhs: Order): Int {
+        val lhsKey = sortKey(lhs)
+        val rhsKey = sortKey(rhs)
+
+        if (lhsKey.rank != rhsKey.rank) return lhsKey.rank - rhsKey.rank
+        return rhsKey.date.compareTo(lhsKey.date)
+    }
+
+    private data class SortKey(
+        val rank: Int,
+        val date: Date,
+    )
+
+    private fun sortKey(order: Order): SortKey {
+        return when {
+            order.hasReadyForDeliveryItems -> SortKey(
+                0, order.newestReadyForDeliveryAt ?: order.updatedAt
+            )
+
+            order.status == OrderStatus.READY_FOR_PAYMENT -> SortKey(
+                1, order.readyForPaymentAt ?: order.updatedAt
+            )
+
+            order.status == OrderStatus.PREPARING -> SortKey(2, order.updatedAt)
+
+            order.status == OrderStatus.CONFIRMED -> SortKey(3, order.updatedAt)
+
+            order.status == OrderStatus.PENDING -> SortKey(4, order.createdAt)
+
+            order.status == OrderStatus.PAID -> SortKey(5, order.paidAt ?: order.updatedAt)
+
+            order.status == OrderStatus.CANCELED -> SortKey(6, order.updatedAt)
+
+            else -> SortKey(9, order.updatedAt)
+        }
     }
 
     private fun normalizedOptionalEcuadorWhatsApp(rawValue: String): String {
@@ -18601,7 +19091,15 @@ class OrdersRepository @Inject constructor(
         return auth.currentUser?.uid?.trim()?.takeIf { it.isNotEmpty() }
             ?: error("Debes iniciar sesión nuevamente para enviar el pedido.")
     }
+
+    /**
+     * Placeholder for shared repository usage by Admin/Kitchen builds.
+     * In the Android client UI, do not expose admin-only operations.
+     */
+    private fun isAdminLikeAction(): Boolean = false
 }
+
+private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 
 ```
 
@@ -18790,39 +19288,120 @@ data class Order(
     val appliedRewards: List<AppliedReward> = emptyList(),
     val totalAmount: Double,
     val status: OrderStatus,
-    val revision: Int,
-    val lastConfirmedRevision: Int?,
+    val revision: Int = 0,
+    val lastConfirmedRevision: Int? = null,
+    val readyForPaymentAt: Date? = null,
+    val paidAt: Date? = null,
+    val paymentMethod: String? = null,
+    val paymentReference: String? = null,
+    val paidByAdminId: String? = null,
 ) {
-    val totalItems: Int = items.sumOf { it.quantity }
-    val preparedItemsCount: Int = items.sumOf { it.safePreparedQuantity }
-    val allItemsCompleted: Boolean = items.isNotEmpty() && items.all { it.isCompleted }
-    val hasStartedPreparing: Boolean = items.any { it.isStarted }
-    val requiresReconfirmation: Boolean = lastConfirmedRevision != revision
-    val wasEditedAfterConfirmation: Boolean = lastConfirmedRevision?.let { revision > it } ?: false
+    val normalizedItems: List<OrderItem>
+        get() = normalizedItemLines(items)
 
-    val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED ||
-            scheduledAt.time - createdAt.time > OrderScheduleFormatter.LATER_THRESHOLD_MS
+    val activeItems: List<OrderItem>
+        get() = items.filter { it.status != OrderItemStatus.CANCELED }
 
-    val shouldConsumeCurrentMenuStock: Boolean =
-        !isScheduledForLater || OrderScheduleFormatter.sameDay(scheduledAt, Date())
+    val readyForDeliveryItems: List<OrderItem>
+        get() = activeItems
+            .filter { it.status == OrderItemStatus.READY_FOR_DELIVERY }
+            .sortedByDescending { it.readyForDeliveryAt?.time ?: it.createdAt.time }
 
-    val scheduledDateText: String get() = OrderScheduleFormatter.displayText(scheduledAt)
+    val deliveredItems: List<OrderItem>
+        get() = activeItems.filter { it.status == OrderItemStatus.DELIVERED }
 
-    val displayWhatsApp: String
-        get() = whatsappNumber.trim().ifEmpty { "Lo escribirá por WhatsApp" }
+    val pendingOrPreparingItems: List<OrderItem>
+        get() = activeItems.filter {
+            it.status == OrderItemStatus.PENDING ||
+                    it.status == OrderItemStatus.PREPARING
+        }
+
+    val hasReadyForDeliveryItems: Boolean
+        get() = readyForDeliveryItems.isNotEmpty()
+
+    val hasLoyaltyRewards: Boolean
+        get() = appliedRewards.isNotEmpty() || loyaltyDiscountAmount > 0.0
+
+    val totalItems: Int
+        get() = activeItems.sumOf { it.quantity.coerceAtLeast(1) }
+
+    val deliveredItemsCount: Int
+        get() = deliveredItems.size
+
+    val progress: Double
+        get() {
+            if (activeItems.isEmpty()) return 0.0
+            return deliveredItems.size.toDouble() / activeItems.size.toDouble()
+        }
+
+    val requiresReconfirmation: Boolean
+        get() = lastConfirmedRevision != revision
+
+    val wasEditedAfterConfirmation: Boolean
+        get() = lastConfirmedRevision?.let { revision > it } ?: false
+
+    val isScheduledForLater: Boolean
+        get() = serviceMode == OrderServiceMode.SCHEDULED ||
+                scheduledAt.time - createdAt.time > OrderScheduleFormatter.LATER_THRESHOLD_MS
+
+    val shouldConsumeCurrentMenuStock: Boolean
+        get() = !isScheduledForLater
+
+    val scheduledDateText: String
+        get() = OrderScheduleFormatter.displayText(scheduledAt)
+
+    val contactDisplayText: String
+        get() = whatsappNumber.trim().ifBlank { "Cliente escribirá por WhatsApp" }
+
+    val newestReadyForDeliveryAt: Date?
+        get() = readyForDeliveryItems.mapNotNull { it.readyForDeliveryAt }.maxByOrNull { it.time }
+
+    val operationalReferenceDate: Date
+        get() = newestReadyForDeliveryAt ?: readyForPaymentAt ?: updatedAt
+
+    fun recalculatedStatus(): OrderStatus {
+        if (status == OrderStatus.PAID) return OrderStatus.PAID
+        if (status == OrderStatus.CANCELED) return OrderStatus.CANCELED
+        if (status == OrderStatus.PENDING) return OrderStatus.PENDING
+
+        val active = items.filter { it.status != OrderItemStatus.CANCELED }
+
+        if (active.isEmpty()) return status
+
+        if (active.all { it.status == OrderItemStatus.DELIVERED }) {
+            return OrderStatus.READY_FOR_PAYMENT
+        }
+
+        if (active.any {
+                it.status == OrderItemStatus.PREPARING ||
+                        it.status == OrderItemStatus.READY_FOR_DELIVERY ||
+                        it.status == OrderItemStatus.DELIVERED
+            }
+        ) {
+            return OrderStatus.PREPARING
+        }
+
+        return OrderStatus.CONFIRMED
+    }
+
+    fun recalculatedAgendaStatus(): OrderStatus = recalculatedStatus()
 
     fun withUserId(uid: String): Order = copy(userId = uid.trim())
+
+    fun withClientId(uid: String): Order = withUserId(uid)
 
     fun withTrustedPricing(
         trustedItems: List<OrderItem>,
         appliedRewards: List<AppliedReward>,
         discount: Double,
     ): Order {
-        val trustedSubtotal = trustedItems.sumOf { it.totalPrice }.roundMoney()
+        val normalized = normalizedItemLines(trustedItems)
+        val trustedSubtotal = normalized.sumOf { it.totalPrice }.roundMoney()
         val safeDiscount = discount.coerceIn(0.0, trustedSubtotal).roundMoney()
 
         return copy(
-            items = trustedItems,
+            updatedAt = Date(),
+            items = normalized,
             subtotal = trustedSubtotal,
             loyaltyDiscountAmount = safeDiscount,
             appliedRewards = appliedRewards,
@@ -18836,14 +19415,130 @@ data class Order(
     ): Order {
         val safeDiscount = discount.coerceIn(0.0, subtotal).roundMoney()
         return copy(
+            updatedAt = Date(),
             loyaltyDiscountAmount = safeDiscount,
             appliedRewards = appliedRewards,
             totalAmount = (subtotal - safeDiscount).coerceAtLeast(0.0).roundMoney(),
         )
     }
-}
 
-private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
+    fun confirming(now: Date = Date()): Order {
+        if (status != OrderStatus.PENDING) return this
+        return copy(
+            status = OrderStatus.CONFIRMED,
+            updatedAt = now,
+            lastConfirmedRevision = revision,
+        )
+    }
+
+    fun updatingItem(
+        itemId: String,
+        now: Date = Date(),
+        transform: (OrderItem) -> OrderItem,
+    ): Order {
+        val updatedItems = items.map { item ->
+            if (item.id == itemId) transform(item) else item
+        }
+
+        val draft = copy(
+            items = updatedItems,
+            updatedAt = now,
+        )
+
+        val nextStatus = draft.recalculatedStatus()
+        val nextReadyForPaymentAt =
+            if (nextStatus == OrderStatus.READY_FOR_PAYMENT && readyForPaymentAt == null) {
+                now
+            } else {
+                readyForPaymentAt
+            }
+
+        return draft.copy(
+            status = nextStatus,
+            readyForPaymentAt = nextReadyForPaymentAt,
+        )
+    }
+
+    fun updatingItems(
+        newItems: List<OrderItem>,
+        subtotal: Double,
+        totalAmount: Double,
+        now: Date = Date(),
+    ): Order {
+        val normalized = normalizedItemLines(newItems)
+        val draft = copy(
+            updatedAt = now,
+            items = normalized,
+            subtotal = subtotal.roundMoney(),
+            totalAmount = totalAmount.roundMoney(),
+            revision = revision + 1,
+        )
+
+        val nextStatus =
+            if (draft.status == OrderStatus.PENDING) OrderStatus.PENDING else draft.recalculatedStatus()
+
+        return draft.copy(status = nextStatus)
+    }
+
+    fun canceling(reason: String? = null, now: Date = Date()): Order {
+        val canceledItems = items.map { item ->
+            if (item.status == OrderItemStatus.CANCELED) {
+                item
+            } else {
+                item.updatingStatus(
+                    newStatus = OrderItemStatus.CANCELED,
+                    now = now,
+                    reason = reason,
+                )
+            }
+        }
+
+        return copy(
+            status = OrderStatus.CANCELED,
+            updatedAt = now,
+            items = canceledItems,
+        )
+    }
+
+    fun markingPaid(
+        paymentMethod: String?,
+        paymentReference: String?,
+        paidByAdminId: String?,
+        now: Date = Date(),
+    ): Order {
+        return copy(
+            status = OrderStatus.PAID,
+            updatedAt = now,
+            paidAt = paidAt ?: now,
+            paymentMethod = paymentMethod?.trim()?.takeIf { it.isNotEmpty() },
+            paymentReference = paymentReference?.trim()?.takeIf { it.isNotEmpty() },
+            paidByAdminId = paidByAdminId?.trim()?.takeIf { it.isNotEmpty() },
+        )
+    }
+
+    companion object {
+        fun normalizedItemLines(source: List<OrderItem>): List<OrderItem> {
+            return source.flatMap { item ->
+                val safeQuantity = item.quantity.coerceAtLeast(1)
+
+                if (safeQuantity == 1) {
+                    listOf(item.copy(quantity = 1))
+                } else {
+                    OrderItem.normalizedUnits(
+                        sourceCartItemId = item.sourceCartItemId,
+                        menuItemId = item.menuItemId,
+                        name = item.name,
+                        itemDescription = item.itemDescription,
+                        unitPrice = item.unitPrice,
+                        quantity = safeQuantity,
+                        notes = item.notes,
+                        createdAt = item.createdAt,
+                    )
+                }
+            }
+        }
+    }
+}
 
 object OrderScheduleFormatter {
     const val LATER_THRESHOLD_MS: Long = 5 * 60 * 1000L
@@ -18878,6 +19573,8 @@ object OrderScheduleFormatter {
     }
 }
 
+private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
+
 ```
 
 ---
@@ -18911,36 +19608,72 @@ data class OrderDraft(
     val hasValidClientName: Boolean = clientName.trim().isNotEmpty()
     val hasValidTableNumber: Boolean = tableNumber.trim().isNotEmpty()
 
-    val normalizedScheduledAt: Date = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
-    val serviceMode: OrderServiceMode = OrderScheduleFormatter.mode(Date(), normalizedScheduledAt)
-    val isScheduledForLater: Boolean = serviceMode == OrderServiceMode.SCHEDULED
-    val canSubmit: Boolean =
-        !isEmpty && hasValidClientName && (hasValidTableNumber || isScheduledForLater)
+    val normalizedScheduledAt: Date
+        get() = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt)
 
-    fun normalizedForSubmit(now: Date = Date()): OrderDraft = copy(
-        userId = userId.trim(),
-        whatsappNumber = if (isScheduledForLater) whatsappNumber.trim() else "",
-        scheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now),
-        updatedAt = now,
-    )
+    val serviceMode: OrderServiceMode
+        get() = OrderScheduleFormatter.mode(
+            createdAt = Date(),
+            scheduledAt = normalizedScheduledAt,
+        )
+
+    val isScheduledForLater: Boolean
+        get() = serviceMode == OrderServiceMode.SCHEDULED
+
+    /**
+     * WhatsApp is intentionally not required here.
+     * If the order is scheduled and the number is empty, UI can submit and then open WhatsApp.
+     */
+    val canSubmit: Boolean
+        get() = !isEmpty &&
+                hasValidClientName &&
+                (hasValidTableNumber || isScheduledForLater)
+
+    fun normalizedForSubmit(now: Date = Date()): OrderDraft {
+        val resolvedScheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now)
+        val resolvedMode = OrderScheduleFormatter.mode(now, resolvedScheduledAt)
+
+        return copy(
+            userId = userId.trim(),
+            clientName = clientName.trim(),
+            tableNumber = tableNumber.trim(),
+            whatsappNumber = if (resolvedMode == OrderServiceMode.SCHEDULED) whatsappNumber.trim() else "",
+            scheduledAt = resolvedScheduledAt,
+            updatedAt = now,
+        )
+    }
 
     fun toOrder(
         orderId: String = UUID.randomUUID().toString(),
         userId: String = this.userId,
         status: OrderStatus = OrderStatus.PENDING,
+        loyaltyDiscountAmount: Double = 0.0,
+        appliedRewards: List<AppliedReward> = emptyList(),
     ): Order {
         val now = Date()
         val safeScheduledAt = OrderScheduleFormatter.sanitizedScheduledAt(scheduledAt, now)
         val safeMode = OrderScheduleFormatter.mode(now, safeScheduledAt)
-        val orderItems = items.map { item ->
-            OrderItem(
+
+        val orderItems = items.flatMap { item ->
+            OrderItem.normalizedUnits(
+                sourceCartItemId = item.id,
                 menuItemId = item.menuItem.id,
                 name = item.menuItem.name,
+                itemDescription = item.menuItem.description,
                 unitPrice = item.unitPrice,
                 quantity = item.safeQuantity,
                 notes = item.notes,
+                createdAt = now,
             )
         }
+
+        val subtotal = orderItems.sumOf { it.totalPrice }.roundMoney()
+        val safeLoyaltyDiscount = loyaltyDiscountAmount
+            .coerceIn(0.0, subtotal)
+            .roundMoney()
+        val totalAmount = (subtotal - safeLoyaltyDiscount)
+            .coerceAtLeast(0.0)
+            .roundMoney()
 
         val cleanTable = tableNumber.trim()
         val cleanWhatsApp = whatsappNumber.trim()
@@ -18950,7 +19683,11 @@ data class OrderDraft(
             userId = userId.trim(),
             clientName = clientName.trim(),
             whatsappNumber = if (safeMode == OrderServiceMode.SCHEDULED) cleanWhatsApp else "",
-            tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) "Por asignar" else cleanTable,
+            tableNumber = if (cleanTable.isEmpty() && safeMode == OrderServiceMode.SCHEDULED) {
+                "Por asignar"
+            } else {
+                cleanTable
+            },
             createdAt = now,
             updatedAt = now,
             scheduledAt = safeScheduledAt,
@@ -18958,17 +19695,22 @@ data class OrderDraft(
             serviceMode = safeMode,
             items = orderItems,
             subtotal = subtotal,
-            loyaltyDiscountAmount = 0.0,
-            appliedRewards = emptyList(),
+            loyaltyDiscountAmount = safeLoyaltyDiscount,
+            appliedRewards = appliedRewards,
             totalAmount = totalAmount,
             status = status,
             revision = revision ?: 0,
             lastConfirmedRevision = lastConfirmedRevision,
+            readyForPaymentAt = null,
+            paidAt = null,
+            paymentMethod = null,
+            paymentReference = null,
+            paidByAdminId = null,
         )
     }
 }
 
-private fun Double.roundMoney(): Double = kotlin.math.round(this * 100.0) / 100.0
+private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
 
 ```
 
@@ -18982,30 +19724,221 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 data class OrderItem(
     val id: String = UUID.randomUUID().toString(),
+    val groupId: String = UUID.randomUUID().toString(),
+    val sourceCartItemId: String? = null,
     val menuItemId: String,
     val name: String,
+    val itemDescription: String? = null,
     val unitPrice: Double,
-    val quantity: Int,
-    val preparedQuantity: Int = 0,
+    val quantity: Int = 1,
     val notes: String? = null,
+    val status: OrderItemStatus = OrderItemStatus.PENDING,
+    val createdAt: Date = Date(),
+    val preparingAt: Date? = null,
+    val readyForDeliveryAt: Date? = null,
+    val deliveredAt: Date? = null,
+    val canceledAt: Date? = null,
+    val canceledReason: String? = null,
 ) {
     init {
-        require(quantity >= 0) { "quantity must be >= 0" }
+        require(menuItemId.trim().isNotEmpty()) { "menuItemId cannot be blank" }
+        require(name.trim().isNotEmpty()) { "name cannot be blank" }
     }
 
-    val safePreparedQuantity: Int = preparedQuantity.coerceIn(0, quantity)
+    val normalizedQuantity: Int
+        get() = 1
 
-    val totalPrice: Double = quantity * unitPrice
+    val safeGroupId: String
+        get() = groupId.trim().ifBlank { UUID.randomUUID().toString() }
 
-    val remainingQuantity: Int = quantity - safePreparedQuantity
+    val totalPrice: Double
+        get() = (unitPrice.coerceAtLeast(0.0) * 1.0).roundMoney()
 
-    val isStarted: Boolean = safePreparedQuantity > 0
+    val isActive: Boolean
+        get() = status.isActive
 
-    val isCompleted: Boolean = safePreparedQuantity == quantity
+    val isStarted: Boolean
+        get() = status.hasStarted
 
-    fun updatingPreparedQuantity(newValue: Int): OrderItem = copy(
-        preparedQuantity = newValue.coerceIn(0, quantity),
+    val isDelivered: Boolean
+        get() = status == OrderItemStatus.DELIVERED
+
+    val displayQuantityText: String
+        get() = "1x"
+
+    val lifecycleDateForSorting: Date
+        get() = readyForDeliveryAt ?: deliveredAt ?: preparingAt ?: createdAt
+
+    fun updatingStatus(
+        newStatus: OrderItemStatus,
+        now: Date = Date(),
+        reason: String? = null,
+    ): OrderItem {
+        val cleanReason = reason?.trim()?.takeIf { it.isNotEmpty() }
+
+        return when (newStatus) {
+            OrderItemStatus.PENDING -> copy(
+                quantity = 1,
+                status = OrderItemStatus.PENDING,
+                preparingAt = null,
+                readyForDeliveryAt = null,
+                deliveredAt = null,
+                canceledAt = null,
+                canceledReason = null,
+            )
+
+            OrderItemStatus.PREPARING -> copy(
+                quantity = 1,
+                status = OrderItemStatus.PREPARING,
+                preparingAt = preparingAt ?: now,
+                readyForDeliveryAt = null,
+                deliveredAt = null,
+                canceledAt = null,
+                canceledReason = null,
+            )
+
+            OrderItemStatus.READY_FOR_DELIVERY -> copy(
+                quantity = 1,
+                status = OrderItemStatus.READY_FOR_DELIVERY,
+                preparingAt = preparingAt ?: now,
+                readyForDeliveryAt = readyForDeliveryAt ?: now,
+                deliveredAt = null,
+                canceledAt = null,
+                canceledReason = null,
+            )
+
+            OrderItemStatus.DELIVERED -> copy(
+                quantity = 1,
+                status = OrderItemStatus.DELIVERED,
+                preparingAt = preparingAt ?: now,
+                readyForDeliveryAt = readyForDeliveryAt ?: now,
+                deliveredAt = deliveredAt ?: now,
+                canceledAt = null,
+                canceledReason = null,
+            )
+
+            OrderItemStatus.CANCELED -> copy(
+                quantity = 1,
+                status = OrderItemStatus.CANCELED,
+                canceledAt = canceledAt ?: now,
+                canceledReason = cleanReason,
+            )
+        }
+    }
+
+    fun replacingCommercialFields(
+        name: String,
+        itemDescription: String?,
+        unitPrice: Double,
+        notes: String?,
+    ): OrderItem = copy(
+        name = name.trim(),
+        itemDescription = itemDescription?.trim()?.takeIf { it.isNotEmpty() },
+        unitPrice = unitPrice.coerceAtLeast(0.0).roundMoney(),
+        quantity = 1,
+        notes = notes?.trim()?.takeIf { it.isNotEmpty() },
     )
+
+    companion object {
+        fun normalizedUnits(
+            sourceCartItemId: String? = null,
+            menuItemId: String,
+            name: String,
+            itemDescription: String? = null,
+            unitPrice: Double,
+            quantity: Int,
+            notes: String? = null,
+            createdAt: Date = Date(),
+        ): List<OrderItem> {
+            val safeQuantity = quantity.coerceAtLeast(1)
+            val groupId = UUID.randomUUID().toString()
+
+            return List(safeQuantity) {
+                OrderItem(
+                    groupId = groupId,
+                    sourceCartItemId = sourceCartItemId?.trim()?.takeIf { it.isNotEmpty() },
+                    menuItemId = menuItemId.trim(),
+                    name = name.trim(),
+                    itemDescription = itemDescription?.trim()?.takeIf { it.isNotEmpty() },
+                    unitPrice = unitPrice.coerceAtLeast(0.0).roundMoney(),
+                    quantity = 1,
+                    notes = notes?.trim()?.takeIf { it.isNotEmpty() },
+                    status = OrderItemStatus.PENDING,
+                    createdAt = createdAt,
+                )
+            }
+        }
+    }
+}
+
+private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/restaurant/domain/OrderItemStatus.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
+
+private fun String.normalizedOrderItemStatusKey(): String =
+    filter(Char::isLetterOrDigit).lowercase()
+
+enum class OrderItemStatus(
+    val rawValue: String,
+    val title: String,
+    val clientTitle: String,
+) {
+    PENDING(
+        rawValue = "pending",
+        title = "Pendiente",
+        clientTitle = "En espera",
+    ),
+    PREPARING(
+        rawValue = "preparing",
+        title = "Preparando",
+        clientTitle = "Preparando",
+    ),
+    READY_FOR_DELIVERY(
+        rawValue = "readyForDelivery",
+        title = "Listo",
+        clientTitle = "Listo",
+    ),
+    DELIVERED(
+        rawValue = "delivered",
+        title = "Servido",
+        clientTitle = "Servido",
+    ),
+    CANCELED(
+        rawValue = "canceled",
+        title = "Cancelado",
+        clientTitle = "Cancelado",
+    );
+
+    val isActive: Boolean
+        get() = this != CANCELED
+
+    val hasStarted: Boolean
+        get() = when (this) {
+            PREPARING,
+            READY_FOR_DELIVERY,
+            DELIVERED -> true
+
+            PENDING,
+            CANCELED -> false
+        }
+
+    companion object {
+        fun fromRaw(rawValue: String?): OrderItemStatus {
+            val key = rawValue?.normalizedOrderItemStatusKey().orEmpty()
+
+            return entries.firstOrNull {
+                it.rawValue.normalizedOrderItemStatusKey() == key ||
+                        it.name.normalizedOrderItemStatusKey() == key
+            } ?: PENDING
+        }
+    }
 }
 
 ```
@@ -19017,17 +19950,60 @@ data class OrderItem(
 ```kotlin
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
-enum class OrderStatus(val title: String) {
-    PENDING("Pending"),
-    CONFIRMED("Confirmed"),
-    PREPARING("Preparing"),
-    COMPLETED("Completed"),
-    CANCELED("Canceled");
+private fun String.normalizedOrderStatusKey(): String =
+    filter(Char::isLetterOrDigit).lowercase()
+
+enum class OrderStatus(
+    val rawValue: String,
+    val title: String,
+    val clientTitle: String,
+) {
+    PENDING(
+        rawValue = "pending",
+        title = "Pendiente",
+        clientTitle = "Pedido enviado",
+    ),
+    CONFIRMED(
+        rawValue = "confirmed",
+        title = "Confirmado",
+        clientTitle = "Pedido confirmado",
+    ),
+    PREPARING(
+        rawValue = "preparing",
+        title = "En cocina",
+        clientTitle = "En cocina",
+    ),
+    READY_FOR_PAYMENT(
+        rawValue = "readyForPayment",
+        title = "Listo para cobrar",
+        clientTitle = "Pedido servido / listo para pagar",
+    ),
+    PAID(
+        rawValue = "paid",
+        title = "Pagado",
+        clientTitle = "Pagado",
+    ),
+    CANCELED(
+        rawValue = "canceled",
+        title = "Cancelado",
+        clientTitle = "Cancelado",
+    );
+
+    val isTerminal: Boolean
+        get() = this == PAID || this == CANCELED
+
+    val canClientCancel: Boolean
+        get() = this == PENDING
 
     companion object {
-        fun fromRaw(rawValue: String?): OrderStatus = entries.firstOrNull {
-            it.name.equals(rawValue, ignoreCase = true)
-        } ?: PENDING
+        fun fromRaw(rawValue: String?): OrderStatus {
+            val key = rawValue?.normalizedOrderStatusKey().orEmpty()
+
+            return entries.firstOrNull {
+                it.rawValue.normalizedOrderStatusKey() == key ||
+                        it.name.normalizedOrderStatusKey() == key
+            } ?: PENDING
+        }
     }
 }
 
@@ -19043,7 +20019,32 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 
 interface OrdersRepositoriable {
     suspend fun submit(order: Order)
+    suspend fun createOrder(order: Order) = submit(order)
+
+    suspend fun updateOrder(order: Order)
+    suspend fun adminUpdateOrder(order: Order)
+
     fun observeOrders(userId: String): Flow<List<Order>>
+    fun observeTodayOrders(): Flow<List<Order>>
+    fun observeOrder(orderId: String): Flow<Order?>
+
+    suspend fun confirmOrder(orderId: String)
+    suspend fun cancelOrder(orderId: String, reason: String? = null)
+
+    suspend fun markItemPreparing(orderId: String, itemId: String)
+    suspend fun markItemReadyForDelivery(orderId: String, itemId: String)
+    suspend fun markItemDelivered(orderId: String, itemId: String)
+    suspend fun markItemCanceled(orderId: String, itemId: String, reason: String? = null)
+
+    suspend fun undoItemReadyForDelivery(orderId: String, itemId: String)
+    suspend fun undoItemDelivered(orderId: String, itemId: String)
+
+    suspend fun markOrderPaid(
+        orderId: String,
+        paymentMethod: String? = null,
+        paymentReference: String? = null,
+        paidByAdminId: String? = null,
+    )
 }
 
 ```
@@ -19056,12 +20057,106 @@ interface OrdersRepositoriable {
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain
 
 
-class ObserveOrdersUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
+class ObserveOrdersUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
     fun execute(userId: String) = repository.observeOrders(userId)
 }
 
-class SubmitOrderUseCase @Inject constructor(private val repository: OrdersRepositoriable) {
+class ObserveTodayOrdersUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    fun execute() = repository.observeTodayOrders()
+}
+
+class ObserveOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    fun execute(orderId: String) = repository.observeOrder(orderId)
+}
+
+class SubmitOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
     suspend fun execute(order: Order) = repository.submit(order)
+}
+
+class UpdateOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(order: Order) = repository.updateOrder(order)
+}
+
+class AdminUpdateOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(order: Order) = repository.adminUpdateOrder(order)
+}
+
+class ConfirmOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String) = repository.confirmOrder(orderId)
+}
+
+class CancelOrderUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, reason: String? = null) =
+        repository.cancelOrder(orderId, reason)
+}
+
+class MarkOrderItemPreparingUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String) =
+        repository.markItemPreparing(orderId, itemId)
+}
+
+class MarkOrderItemReadyForDeliveryUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String) =
+        repository.markItemReadyForDelivery(orderId, itemId)
+}
+
+class MarkOrderItemDeliveredUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String) =
+        repository.markItemDelivered(orderId, itemId)
+}
+
+class MarkOrderItemCanceledUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String, reason: String? = null) =
+        repository.markItemCanceled(orderId, itemId, reason)
+}
+
+class UndoOrderItemReadyForDeliveryUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String) =
+        repository.undoItemReadyForDelivery(orderId, itemId)
+}
+
+class UndoOrderItemDeliveredUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(orderId: String, itemId: String) =
+        repository.undoItemDelivered(orderId, itemId)
+}
+
+class MarkOrderPaidUseCase @Inject constructor(
+    private val repository: OrdersRepositoriable,
+) {
+    suspend fun execute(
+        orderId: String,
+        paymentMethod: String? = null,
+        paymentReference: String? = null,
+        paidByAdminId: String? = null,
+    ) = repository.markOrderPaid(orderId, paymentMethod, paymentReference, paidByAdminId)
 }
 
 class ObserveCartDraftUseCase(
@@ -19233,6 +20328,9 @@ fun RestaurantScreen(
                 onSortSelected = ordersViewModel::setSortOption,
                 onStatusSelected = ordersViewModel::setStatusFilter,
                 onDismissError = ordersViewModel::clearError,
+                onCancelOrder = { order ->
+                    ordersViewModel.cancelOrder(order)
+                },
                 modifier = modifier,
             )
         }
@@ -23859,6 +24957,7 @@ fun OrdersScreen(
     onGroupingSelected: (OrdersGroupingOption) -> Unit,
     onSortSelected: (OrdersSortOption) -> Unit,
     onStatusSelected: (OrderStatus?) -> Unit,
+    onCancelOrder: (Order) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -23899,6 +24998,7 @@ fun OrdersScreen(
                 onGroupingSelected = onGroupingSelected,
                 onSortSelected = onSortSelected,
                 onStatusSelected = onStatusSelected,
+                onCancelOrder = onCancelOrder,
                 onDismissError = onDismissError,
             )
         }
@@ -23912,12 +25012,13 @@ private fun LazyOrdersContent(
     onGroupingSelected: (OrdersGroupingOption) -> Unit,
     onSortSelected: (OrdersSortOption) -> Unit,
     onStatusSelected: (OrderStatus?) -> Unit,
+    onCancelOrder: (Order) -> Unit,
     onDismissError: () -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(RestaurantTheme, darkTheme)
 
-    androidx.compose.foundation.lazy.LazyColumn(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(innerPadding),
@@ -23973,7 +25074,15 @@ private fun LazyOrdersContent(
                     )
                 }
 
-                items(orders, key = { it.id }) { order -> OrderCard(order = order) }
+                items(
+                    items = orders,
+                    key = { it.id },
+                ) { order ->
+                    OrderCard(
+                        order = order,
+                        onCancelOrder = onCancelOrder,
+                    )
+                }
             }
         }
     }
@@ -23994,8 +25103,7 @@ private fun OrdersControlsCard(
         modifier = Modifier
             .fillMaxWidth()
             .appCardStyle(
-                theme = RestaurantTheme,
-                emphasized = true,
+                theme = RestaurantTheme
             ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -24052,7 +25160,7 @@ private fun OrdersControlsCard(
             OrderStatus.entries.forEach { status ->
                 RestaurantFilterChip(
                     selected = state.statusFilter == status,
-                    label = status.title,
+                    label = status.clientTitle,
                     onClick = { onStatusSelected(status) },
                 )
             }
@@ -24190,8 +25298,7 @@ private fun EmptyOrdersCard() {
             modifier = Modifier
                 .fillMaxWidth()
                 .appCardStyle(
-                    theme = RestaurantTheme,
-                    emphasized = true,
+                    theme = RestaurantTheme
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -24219,9 +25326,13 @@ private fun EmptyOrdersCard() {
 }
 
 @Composable
-private fun OrderCard(order: Order) {
+private fun OrderCard(
+    order: Order,
+    onCancelOrder: (Order) -> Unit,
+) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+    val displayStatus = order.recalculatedStatus()
 
     Column(
         modifier = Modifier
@@ -24244,21 +25355,20 @@ private fun OrderCard(order: Order) {
                 )
 
                 Text(
-                    text = "${order.totalItems} producto(s) • Mesa ${order.tableNumber}",
+                    text = "Mesa ${order.tableNumber}",
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
-                if (order.isScheduledForLater) {
-                    Text(
-                        text = "WhatsApp: ${order.displayWhatsApp}",
-                        color = palette.textSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                Text(
+                    text = orderProgressText(order),
+                    color = palette.textPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
 
-            StatusPill(order.status)
+            StatusPill(status = displayStatus)
         }
 
         HorizontalDivider(
@@ -24266,43 +25376,7 @@ private fun OrderCard(order: Order) {
         )
 
         order.items.take(3).forEach { item ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                BrandIconBubble(
-                    theme = RestaurantTheme,
-                    icon = Icons.Rounded.RestaurantMenu,
-                    size = 36.dp,
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = "${item.quantity}x ${item.name}",
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.textPrimary,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-
-                    if (!item.notes.isNullOrBlank()) {
-                        Text(
-                            text = item.notes.orEmpty(),
-                            color = palette.textSecondary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-
-                Text(
-                    text = item.totalPrice.priceLabel(),
-                    fontWeight = FontWeight.Bold,
-                    color = palette.textPrimary,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+            OrderItemRow(item = item)
         }
 
         if (order.items.size > 3) {
@@ -24335,6 +25409,85 @@ private fun OrderCard(order: Order) {
                 color = palette.primary,
             )
         }
+
+        if (displayStatus.canClientCancel) {
+            OutlinedButton(
+                onClick = { onCancelOrder(order) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Cancelar pedido")
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrderItemRow(item: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        BrandIconBubble(
+            theme = RestaurantTheme,
+            icon = Icons.Rounded.RestaurantMenu,
+            size = 36.dp,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "1x ${item.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.textPrimary,
+            )
+
+            if (!item.notes.isNullOrBlank()) {
+                Text(
+                    text = item.notes,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            OrderItemStatusPill(status = item.status)
+        }
+
+        Text(
+            text = item.totalPrice.priceLabel(),
+            fontWeight = FontWeight.Bold,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+private fun orderProgressText(order: Order): String {
+    val status = order.recalculatedStatus()
+
+    return when (status) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> {
+            val active = order.activeItems.size
+            val delivered = order.deliveredItems.size
+            val ready = order.readyForDeliveryItems.size
+
+            when {
+                ready > 0 -> "$ready listo(s) · $delivered/$active servidos"
+                active > 0 -> "$delivered/$active servidos"
+                else -> "En cocina"
+            }
+        }
+
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
     }
 }
 
@@ -24347,7 +25500,8 @@ private fun StatusPill(status: OrderStatus) {
         OrderStatus.PENDING -> palette.warning
         OrderStatus.CONFIRMED -> palette.primary
         OrderStatus.PREPARING -> palette.accent
-        OrderStatus.COMPLETED -> palette.success
+        OrderStatus.READY_FOR_PAYMENT -> palette.secondary
+        OrderStatus.PAID -> palette.success
         OrderStatus.CANCELED -> palette.destructive
     }
 
@@ -24358,7 +25512,7 @@ private fun StatusPill(status: OrderStatus) {
         shadowElevation = 0.dp,
     ) {
         Text(
-            text = status.title,
+            text = status.clientTitle,
             color = color,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -24367,18 +25521,49 @@ private fun StatusPill(status: OrderStatus) {
     }
 }
 
-private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
-    return when (state.grouping) {
-        OrdersGroupingOption.DATE -> state.visibleOrders.groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
-            .map {
-                it.key to it.value.sortedWith(compareBy<Order> { order -> order.scheduledAt.time }.thenBy { order -> order.createdAt.time })
-            }
+@Composable
+private fun OrderItemStatusPill(status: OrderItemStatus) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
 
-        OrdersGroupingOption.STATUS -> state.visibleOrders.groupBy { it.recalculatedAgendaStatus().title }
-            .map { it.key to it.value }
+    val color = when (status) {
+        OrderItemStatus.PENDING -> palette.textSecondary
+        OrderItemStatus.PREPARING -> palette.warning
+        OrderItemStatus.READY_FOR_DELIVERY -> palette.primary
+        OrderItemStatus.DELIVERED -> palette.success
+        OrderItemStatus.CANCELED -> palette.destructive
+    }
+
+    Surface(
+        color = color.copy(alpha = if (darkTheme) 0.18f else 0.12f),
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Text(
+            text = status.clientTitle,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
+private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
+    return when (state.grouping) {
+        OrdersGroupingOption.DATE -> state.visibleOrders
+            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map { (title, orders) ->
+                title to orders.sortedWith(
+                    compareBy<Order> { order -> order.scheduledAt.time }
+                        .thenBy { order -> order.createdAt.time },
+                )
+            }
+
+        OrdersGroupingOption.STATUS -> state.visibleOrders
+            .groupBy { it.recalculatedStatus().clientTitle }
+            .map { (title, orders) -> title to orders }
+    }
+}
 
 private fun Date.shortDateTime(): String {
     return SimpleDateFormat(
@@ -24768,10 +25953,12 @@ class CartViewModel @Inject constructor(
         userId: String,
         draft: OrderDraft,
     ): RewardComputationResult {
-        val previewItems = draft.items.map {
-            OrderItem(
+        val previewItems = draft.items.flatMap {
+            OrderItem.normalizedUnits(
+                sourceCartItemId = it.id,
                 menuItemId = it.menuItem.id,
                 name = it.menuItem.name,
+                itemDescription = it.menuItem.description,
                 unitPrice = it.unitPrice,
                 quantity = it.safeQuantity,
                 notes = it.notes,
@@ -24906,8 +26093,13 @@ class CheckoutViewModel @Inject constructor(
     fun submit(openWhatsAppAfterSubmit: Boolean = false) {
         val rawDraft = _uiState.value.draft
         val cleanUserId = rawDraft.userId.trim().ifEmpty { currentUserId }
+
         val normalizedWhatsApp = runCatching {
-            if (rawDraft.isScheduledForLater) normalizedOptionalEcuadorWhatsApp(rawDraft.whatsappNumber) else ""
+            if (rawDraft.isScheduledForLater) {
+                normalizedOptionalEcuadorWhatsApp(rawDraft.whatsappNumber)
+            } else {
+                ""
+            }
         }.getOrElse { error ->
             _uiState.update {
                 it.copy(errorMessage = error.message ?: "El WhatsApp ingresado no parece válido.")
@@ -24916,9 +26108,9 @@ class CheckoutViewModel @Inject constructor(
         }
 
         val draft = rawDraft.copy(
-                userId = cleanUserId,
-                whatsappNumber = normalizedWhatsApp,
-            ).normalizedForSubmit()
+            userId = cleanUserId,
+            whatsappNumber = normalizedWhatsApp,
+        ).normalizedForSubmit()
 
         if (!draft.canSubmit) {
             _uiState.update {
@@ -24934,26 +26126,27 @@ class CheckoutViewModel @Inject constructor(
         }
 
         if (cleanUserId.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Debes iniciar sesión nuevamente para continuar.") }
+            _uiState.update {
+                it.copy(errorMessage = "Debes iniciar sesión nuevamente para continuar.")
+            }
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update {
+                it.copy(isSubmitting = true, errorMessage = null)
+            }
 
             try {
-                val preview = buildRewardPreview(draft)
-                val finalOrder = draft.toOrder(
-                        orderId = UUID.randomUUID().toString(),
-                        userId = cleanUserId,
-                    ).withLoyalty(
-                        appliedRewards = preview.appliedRewards,
-                        discount = preview.totalDiscount,
-                    )
+                val order = draft.toOrder(
+                    loyaltyDiscountAmount = _uiState.value.discount, //No parameter with name 'loyaltyDiscountAmount' found.
+                    appliedRewards = _uiState.value.rewardPreview.appliedRewards, //No parameter with name 'appliedRewards' found.
+                )
 
-                submitOrderUseCase.execute(finalOrder)
+                submitOrderUseCase.execute(order)
                 clearCartDraftUseCase.execute()
-                _createdOrder.emit(finalOrder)
+
+                _createdOrder.emit(order)
 
                 if (openWhatsAppAfterSubmit) {
                     _openWhatsAppAfterSubmit.tryEmit(Unit)
@@ -24962,13 +26155,9 @@ class CheckoutViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(currentUserId),
-                        ),
+                        errorMessage = null,
                     )
                 }
-            } catch (error: CancellationException) {
-                throw error
             } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
@@ -24978,6 +26167,28 @@ class CheckoutViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private suspend fun buildRewardPreview(
+        userId: String,
+        draft: OrderDraft,
+    ): RewardComputationResult {
+        val previewItems = draft.items.flatMap { cartItem ->
+            OrderItem.normalizedUnits(
+                sourceCartItemId = cartItem.id,
+                menuItemId = cartItem.menuItem.id,
+                name = cartItem.menuItem.name,
+                itemDescription = cartItem.menuItem.description,
+                unitPrice = cartItem.unitPrice,
+                quantity = cartItem.safeQuantity,
+                notes = cartItem.notes,
+            )
+        }
+
+        return loyaltyRewardsRepository.previewRestaurantRewards(
+            userId = userId,
+            items = previewItems,
+        )
     }
 
     private fun saveDraft(draft: OrderDraft) {
@@ -25030,10 +26241,12 @@ class CheckoutViewModel @Inject constructor(
             return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanUserId))
         }
 
-        val previewItems = draft.items.map {
-            OrderItem(
+        val previewItems = draft.items.flatMap {
+            OrderItem.normalizedUnits(
+                sourceCartItemId = it.id,
                 menuItemId = it.menuItem.id,
                 name = it.menuItem.name,
+                itemDescription = it.menuItem.description,
                 unitPrice = it.unitPrice,
                 quantity = it.safeQuantity,
                 notes = it.notes,
@@ -25050,10 +26263,10 @@ class CheckoutViewModel @Inject constructor(
         val digits = rawValue.filter(Char::isDigit)
         if (digits.isEmpty()) return ""
 
-        return when {
-            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
-            digits.length == 12 && digits.startsWith("5939") -> digits
-            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+        return when (digits.length) {
+            10 if digits.startsWith("09") -> "593${digits.drop(1)}"
+            12 if digits.startsWith("5939") -> digits
+            9 if digits.startsWith("9") -> "593$digits"
             else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
         }
     }
@@ -25361,13 +26574,21 @@ data class OrdersUiState(
             } ?: orders
 
             return when (sortOption) {
-                OrdersSortOption.NEAREST_SERVICE -> filtered.sortedWith(compareBy<Order> { it.scheduledAt.time }.thenBy { it.createdAt.time })
+                OrdersSortOption.NEAREST_SERVICE -> filtered.sortedWith(
+                    compareBy<Order> { it.scheduledAt.time }.thenBy { it.createdAt.time },
+                )
 
-                OrdersSortOption.FARTHEST_SERVICE -> filtered.sortedWith(compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time })
+                OrdersSortOption.FARTHEST_SERVICE -> filtered.sortedWith(
+                    compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time },
+                )
 
-                OrdersSortOption.NEWEST_CREATED -> filtered.sortedWith(compareByDescending<Order> { it.createdAt.time }.thenByDescending { it.scheduledAt.time })
+                OrdersSortOption.NEWEST_CREATED -> filtered.sortedWith(
+                    compareByDescending<Order> { it.createdAt.time }.thenByDescending { it.scheduledAt.time },
+                )
 
-                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedWith(compareByDescending<Order> { it.totalAmount }.thenBy { it.scheduledAt.time })
+                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedWith(
+                    compareByDescending<Order> { it.totalAmount }.thenBy { it.scheduledAt.time },
+                )
             }
         }
 }
@@ -25395,6 +26616,7 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 @HiltViewModel
 class OrdersViewModel @Inject constructor(
     private val observeOrdersUseCase: ObserveOrdersUseCase,
+    private val cancelOrderUseCase: CancelOrderUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OrdersUiState())
@@ -25403,7 +26625,7 @@ class OrdersViewModel @Inject constructor(
     private var observeJob: Job? = null
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanUserId = profile.userId
+        val cleanUserId = profile.userId.trim()
         if (cleanUserId == _uiState.value.userId && observeJob != null) return
 
         _uiState.update {
@@ -25429,6 +26651,25 @@ class OrdersViewModel @Inject constructor(
         _uiState.update { it.copy(statusFilter = value) }
     }
 
+    fun cancelOrder(order: Order, reason: String? = null) {
+        if (!order.status.canClientCancel) {
+            _uiState.update {
+                it.copy(errorMessage = "Solo puedes cancelar pedidos pendientes.")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                cancelOrderUseCase.execute(order.id, reason)
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(errorMessage = error.message ?: "No se pudo cancelar el pedido.")
+                }
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
@@ -25449,28 +26690,28 @@ class OrdersViewModel @Inject constructor(
 
         observeJob = viewModelScope.launch {
             observeOrdersUseCase.execute(userId).catch { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = error.message ?: "No se pudieron cargar pedidos.",
-                        )
-                    }
-                }.collectLatest { orders ->
-                    _uiState.update {
-                        it.copy(
-                            orders = orders,
-                            isLoading = false,
-                            errorMessage = null,
-                        )
-                    }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "No se pudieron cargar tus pedidos.",
+                    )
                 }
+            }.collectLatest { orders ->
+                _uiState.update {
+                    it.copy(
+                        orders = orders,
+                        isLoading = false,
+                        errorMessage = null,
+                    )
+                }
+            }
         }
     }
 
     companion object {
-        private val dayFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "EC"))
-
-        fun dateGroupTitle(date: Date): String = dayFormatter.format(date)
+        fun dateGroupTitle(date: Date): String {
+            return SimpleDateFormat("EEE d MMM", Locale("es", "EC")).format(date)
+        }
     }
 }
 
