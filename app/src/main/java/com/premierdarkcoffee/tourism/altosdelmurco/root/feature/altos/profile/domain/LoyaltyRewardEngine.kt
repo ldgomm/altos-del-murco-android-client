@@ -13,10 +13,10 @@ object LoyaltyRewardEngine {
         val eligible = templates
             .filter {
                 it.isActive &&
-                    it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
-                    it.scope.matchesRestaurant() &&
-                    it.isEligible(wallet.currentLevel) &&
-                    !it.isExpired
+                        it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
+                        it.scope.matchesRestaurant() &&
+                        it.isEligible(wallet.currentLevel) &&
+                        !it.isExpired
             }
 
         val stackable = eligible
@@ -54,10 +54,10 @@ object LoyaltyRewardEngine {
         val eligible = templates
             .filter {
                 it.isActive &&
-                    it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
-                    it.isEligible(wallet.currentLevel) &&
-                    !it.isExpired &&
-                    templateAppliesInAdventureContext(it)
+                        it.triggerMode == LoyaltyRewardTriggerMode.AUTOMATIC &&
+                        it.isEligible(wallet.currentLevel) &&
+                        !it.isExpired &&
+                        templateAppliesInAdventureContext(it)
             }
 
         val stackable = eligible
@@ -152,7 +152,11 @@ object LoyaltyRewardEngine {
 
         templates.forEach { template ->
             val reward = when (template.rule.type) {
-                LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> applyActivityTemplate(template, workingActivities)
+                LoyaltyRewardRuleType.ACTIVITY_PERCENTAGE -> applyActivityTemplate(
+                    template,
+                    workingActivities
+                )
+
                 LoyaltyRewardRuleType.MOST_EXPENSIVE_MENU_ITEM_PERCENTAGE,
                 LoyaltyRewardRuleType.SPECIFIC_MENU_ITEM_PERCENTAGE,
                 LoyaltyRewardRuleType.FREE_MENU_ITEM,
@@ -264,7 +268,8 @@ object LoyaltyRewardEngine {
                 val freeQuantity = (template.rule.freeQuantity ?: 1).coerceAtLeast(1)
                 val repeatable = template.rule.repeatable ?: true
 
-                val index = lines.indices.firstOrNull { lines[it].menuItemId == targetId } ?: return null
+                val index =
+                    lines.indices.firstOrNull { lines[it].menuItemId == targetId } ?: return null
                 val line = lines[index]
                 val totalUnits = line.remainingRewardableUnits
                 if (totalUnits < buyQuantity) return null
@@ -280,7 +285,9 @@ object LoyaltyRewardEngine {
                 if (amount <= 0.0) return null
 
                 lines[index] = line.copy(
-                    remainingRewardableUnits = (line.remainingRewardableUnits - freeUnits).coerceAtLeast(0),
+                    remainingRewardableUnits = (line.remainingRewardableUnits - freeUnits).coerceAtLeast(
+                        0
+                    ),
                 )
 
                 AppliedReward(

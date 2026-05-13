@@ -170,6 +170,9 @@ fun RestaurantScreen(
                 onSortSelected = ordersViewModel::setSortOption,
                 onStatusSelected = ordersViewModel::setStatusFilter,
                 onDismissError = ordersViewModel::clearError,
+                onCancelOrder = { order ->
+                    ordersViewModel.cancelOrder(order)
+                },
                 modifier = modifier,
             )
         }

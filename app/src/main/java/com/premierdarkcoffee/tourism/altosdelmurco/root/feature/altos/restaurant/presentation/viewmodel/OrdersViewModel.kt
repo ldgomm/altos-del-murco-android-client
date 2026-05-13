@@ -3,7 +3,9 @@ package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restauran
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.profile.domain.ClientProfile
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.CancelOrderUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.ObserveOrdersUseCase
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -22,6 +24,7 @@ import javax.inject.Inject
 @HiltViewModel
 class OrdersViewModel @Inject constructor(
     private val observeOrdersUseCase: ObserveOrdersUseCase,
+    private val cancelOrderUseCase: CancelOrderUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(OrdersUiState())
@@ -30,7 +33,7 @@ class OrdersViewModel @Inject constructor(
     private var observeJob: Job? = null
 
     fun syncProfile(profile: ClientProfile) {
-        val cleanUserId = profile.userId
+        val cleanUserId = profile.userId.trim()
         if (cleanUserId == _uiState.value.userId && observeJob != null) return
 
         _uiState.update {
@@ -56,6 +59,25 @@ class OrdersViewModel @Inject constructor(
         _uiState.update { it.copy(statusFilter = value) }
     }
 
+    fun cancelOrder(order: Order, reason: String? = null) {
+        if (!order.status.canClientCancel) {
+            _uiState.update {
+                it.copy(errorMessage = "Solo puedes cancelar pedidos pendientes.")
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                cancelOrderUseCase.execute(order.id, reason)
+            } catch (error: Throwable) {
+                _uiState.update {
+                    it.copy(errorMessage = error.message ?: "No se pudo cancelar el pedido.")
+                }
+            }
+        }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
@@ -76,27 +98,27 @@ class OrdersViewModel @Inject constructor(
 
         observeJob = viewModelScope.launch {
             observeOrdersUseCase.execute(userId).catch { error ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = error.message ?: "No se pudieron cargar pedidos.",
-                        )
-                    }
-                }.collectLatest { orders ->
-                    _uiState.update {
-                        it.copy(
-                            orders = orders,
-                            isLoading = false,
-                            errorMessage = null,
-                        )
-                    }
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = error.message ?: "No se pudieron cargar tus pedidos.",
+                    )
                 }
+            }.collectLatest { orders ->
+                _uiState.update {
+                    it.copy(
+                        orders = orders,
+                        isLoading = false,
+                        errorMessage = null,
+                    )
+                }
+            }
         }
     }
 
     companion object {
-        private val dayFormatter = SimpleDateFormat("dd MMM yyyy", Locale("es", "EC"))
-
-        fun dateGroupTitle(date: Date): String = dayFormatter.format(date)
+        fun dateGroupTitle(date: Date): String {
+            return SimpleDateFormat("EEE d MMM", Locale("es", "EC")).format(date)
+        }
     }
 }

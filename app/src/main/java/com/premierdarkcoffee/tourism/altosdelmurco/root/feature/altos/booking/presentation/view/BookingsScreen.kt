@@ -100,12 +100,12 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureDateHelper
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureReservationItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.AdventureResourceType
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.adventure.domain.ReservationFoodItemDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.authentication.domain.SessionState
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.viewmodel.AdventureBookingsViewModel
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItemStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderServiceMode
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel.OrdersViewModel
@@ -144,7 +144,7 @@ private enum class BookingsTimelineScope(
     HISTORY(
         title = "Historial",
         shortTitle = "Historial",
-        subtitle = "Reservas pasadas, completadas o canceladas.",
+        subtitle = "Reservas pasadas, pagadas, completadas o canceladas.",
         icon = Icons.Rounded.History,
     ),
     ALL(
@@ -173,6 +173,8 @@ private enum class UnifiedReservationStatusFilter(val title: String) {
     PENDING("Pendiente"),
     CONFIRMED("Confirmada"),
     PREPARING("Preparando"),
+    READY_FOR_PAYMENT("Por cobrar"),
+    PAID("Pagada"),
     COMPLETED("Completada"),
     CANCELED("Cancelada");
 
@@ -182,6 +184,8 @@ private enum class UnifiedReservationStatusFilter(val title: String) {
             PENDING -> reservation.normalizedStatus == UnifiedReservationStatus.PENDING
             CONFIRMED -> reservation.normalizedStatus == UnifiedReservationStatus.CONFIRMED
             PREPARING -> reservation.normalizedStatus == UnifiedReservationStatus.PREPARING
+            READY_FOR_PAYMENT -> reservation.normalizedStatus == UnifiedReservationStatus.READY_FOR_PAYMENT
+            PAID -> reservation.normalizedStatus == UnifiedReservationStatus.PAID
             COMPLETED -> reservation.normalizedStatus == UnifiedReservationStatus.COMPLETED
             CANCELED -> reservation.normalizedStatus == UnifiedReservationStatus.CANCELED
         }
@@ -194,7 +198,9 @@ private enum class UnifiedReservationStatus(
 ) {
     PENDING("Pendiente", Icons.Rounded.HourglassTop),
     CONFIRMED("Confirmada", Icons.Rounded.CheckCircle),
-    PREPARING("Preparando", Icons.Rounded.Fastfood),
+    PREPARING("En cocina", Icons.Rounded.Fastfood),
+    READY_FOR_PAYMENT("Por cobrar", Icons.Rounded.ReceiptLong),
+    PAID("Pagada", Icons.Rounded.DoneAll),
     COMPLETED("Completada", Icons.Rounded.DoneAll),
     CANCELED("Cancelada", Icons.Rounded.Cancel),
 }
@@ -233,7 +239,8 @@ private sealed interface UnifiedReservation {
     val searchableText: String
 
     val isTerminal: Boolean
-        get() = normalizedStatus == UnifiedReservationStatus.COMPLETED ||
+        get() = normalizedStatus == UnifiedReservationStatus.PAID ||
+                normalizedStatus == UnifiedReservationStatus.COMPLETED ||
                 normalizedStatus == UnifiedReservationStatus.CANCELED
 
     val isCanceled: Boolean
@@ -252,20 +259,21 @@ private sealed interface UnifiedReservation {
     data class RestaurantOrder(
         val order: Order,
     ) : UnifiedReservation {
+        private val effectiveStatus = order.recalculatedAgendaStatus()
+
         override val id: String = "restaurant-${order.id}"
         override val kind: UnifiedReservationKind = UnifiedReservationKind.RESTAURANT
         override val title: String =
-            if (order.isScheduledForLater) "Reserva de comida" else "Pedido restaurante"
+            if (order.isAgendaScheduledForLater) "Reserva de comida" else "Pedido restaurante"
         override val subtitle: String =
-            "${order.totalItems} item(s) • Mesa ${order.tableNumber}"
+            "${order.totalAgendaItems} plato(s) • Mesa ${order.tableNumber.ifBlank { "sin asignar" }}"
         override val clientName: String =
             order.clientName.ifBlank { "Cliente" }
         override val serviceDate: Date = order.scheduledAt
         override val endDate: Date = order.scheduledAt.addMinutes(90)
         override val createdAt: Date = order.createdAt
         override val total: Double = order.totalAmount
-        override val normalizedStatus: UnifiedReservationStatus =
-            order.recalculatedAgendaStatus().toUnifiedStatus()
+        override val normalizedStatus: UnifiedReservationStatus = effectiveStatus.toUnifiedStatus()
 
         override val searchableText: String =
             listOf(
@@ -292,8 +300,7 @@ private sealed interface UnifiedReservation {
         override val endDate: Date = booking.endAt
         override val createdAt: Date = booking.createdAt
         override val total: Double = booking.totalAmount
-        override val normalizedStatus: UnifiedReservationStatus =
-            booking.status.toUnifiedStatus()
+        override val normalizedStatus: UnifiedReservationStatus = booking.status.toUnifiedStatus()
 
         override val searchableText: String =
             listOf(
@@ -537,7 +544,7 @@ private fun BookingsScreenContent(
                             horizontalAlignment = Alignment.Start,
                         ) {
                             Text(
-                                text = "Aventura en Los Altos",
+                                text = "Agenda Altos",
                                 style = MaterialTheme.typography.headlineSmall,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = palette.textPrimary,
@@ -546,7 +553,7 @@ private fun BookingsScreenContent(
                             )
 
                             Text(
-                                text = "Experiencias, combos y eventos",
+                                text = "Pedidos, comida programada y experiencias",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = palette.textSecondary,
                                 maxLines = 1,
@@ -1133,10 +1140,6 @@ private fun AgendaFilterChip(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Reservation cards                                                           */
-/* -------------------------------------------------------------------------- */
-
 @Composable
 private fun ReservationsGroupHeader(
     group: UnifiedReservationsGroup,
@@ -1320,7 +1323,7 @@ private fun ScheduleBlock(
             Text(
                 text = when (reservation) {
                     is UnifiedReservation.RestaurantOrder ->
-                        if (reservation.order.isScheduledForLater) "Reserva para" else "Pedido para"
+                        if (reservation.order.isAgendaScheduledForLater) "Reserva para" else "Pedido para"
 
                     is UnifiedReservation.ExperienceBooking ->
                         "Visita para"
@@ -1333,7 +1336,7 @@ private fun ScheduleBlock(
             Text(
                 text = when (reservation) {
                     is UnifiedReservation.RestaurantOrder ->
-                        reservation.order.scheduledDateText
+                        reservation.order.scheduledAgendaDateText
 
                     is UnifiedReservation.ExperienceBooking ->
                         "${reservation.booking.startAt.shortDateTime()} - ${reservation.booking.endAt.shortTime()}"
@@ -1360,10 +1363,14 @@ private fun RestaurantOrderPreview(
 ) {
     val palette = LocalBrandPalette.current
     val effectiveStatus = order.recalculatedAgendaStatus()
-    val progress = if (order.totalItems > 0) {
-        order.preparedItemsCount.toFloat() / order.totalItems.toFloat()
-    } else {
-        0f
+    val activeItems = order.activeAgendaItems
+    val activeCount = activeItems.size
+    val deliveredCount = order.deliveredAgendaItems.size
+    val readyCount = order.readyForDeliveryAgendaItems.size
+    val progress = when {
+        effectiveStatus == OrderStatus.PAID -> 1f
+        activeCount > 0 -> deliveredCount.toFloat() / activeCount.toFloat()
+        else -> 0f
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1381,20 +1388,20 @@ private fun RestaurantOrderPreview(
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "Mesa ${order.tableNumber}",
+                text = "Mesa ${order.tableNumber.ifBlank { "sin asignar" }}",
                 style = MaterialTheme.typography.labelMedium,
                 color = palette.textSecondary,
                 fontWeight = FontWeight.SemiBold,
             )
         }
 
-        if (order.requiresReconfirmation || order.wasEditedAfterConfirmation) {
+        if (order.requiresAgendaReconfirmation || order.wasAgendaEditedAfterConfirmation) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (order.requiresReconfirmation) {
+                if (order.requiresAgendaReconfirmation) {
                     WarningBadge(text = "Requiere reconfirmación")
                 }
 
-                if (order.wasEditedAfterConfirmation) {
+                if (order.wasAgendaEditedAfterConfirmation) {
                     WarningBadge(text = "Editado")
                 }
             }
@@ -1402,37 +1409,12 @@ private fun RestaurantOrderPreview(
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             order.items.take(3).forEach { item ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${item.quantity}x",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.width(34.dp),
-                    )
-
-                    Text(
-                        text = item.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = palette.textPrimary,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-
-                    Text(
-                        text = item.totalPrice.agendaPriceText(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = palette.textSecondary,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                RestaurantOrderItemLine(item = item)
             }
 
             if (order.items.size > 3) {
                 Text(
-                    text = "+${order.items.size - 3} producto(s) más",
+                    text = "+${order.items.size - 3} plato(s) más",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textTertiary,
                     fontWeight = FontWeight.SemiBold,
@@ -1443,12 +1425,7 @@ private fun RestaurantOrderPreview(
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = when {
-                        order.allItemsCompleted -> "Preparación completa"
-                        order.hasStartedPreparing -> "Preparación iniciada"
-                        effectiveStatus == OrderStatus.CONFIRMED -> "Confirmado"
-                        else -> "Preparación"
-                    },
+                    text = orderProgressText(order),
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                     fontWeight = FontWeight.Bold,
@@ -1457,7 +1434,10 @@ private fun RestaurantOrderPreview(
                 Spacer(modifier = Modifier.weight(1f))
 
                 Text(
-                    text = "${order.preparedItemsCount}/${order.totalItems}",
+                    text = when {
+                        activeCount > 0 -> "$deliveredCount/$activeCount servidos"
+                        else -> "0/0"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                     fontWeight = FontWeight.Bold,
@@ -1474,7 +1454,50 @@ private fun RestaurantOrderPreview(
                 trackColor = palette.stroke.copy(alpha = 0.65f),
                 strokeCap = ProgressIndicatorDefaults.LinearStrokeCap,
             )
+
+            if (readyCount > 0) {
+                WarningBadge(text = "$readyCount plato(s) listo(s) para servir")
+            }
         }
+    }
+}
+
+@Composable
+private fun RestaurantOrderItemLine(
+    item: OrderItem,
+) {
+    val palette = LocalBrandPalette.current
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "1x",
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textSecondary,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.width(34.dp),
+        )
+
+        Text(
+            text = item.name,
+            style = MaterialTheme.typography.bodyMedium,
+            color = palette.textPrimary,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+
+        OrderItemStatusPill(status = item.status)
+
+        Text(
+            text = item.totalAgendaPrice.agendaPriceText(),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.textSecondary,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
@@ -1550,10 +1573,6 @@ private fun AdventureBookingPreview(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Detail sheet                                                                */
-/* -------------------------------------------------------------------------- */
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ReservationDetailSheet(
@@ -1626,17 +1645,12 @@ private fun RestaurantOrderDetailContent(
 ) {
     val palette = LocalBrandPalette.current
     val effectiveStatus = order.recalculatedAgendaStatus()
-    val progress = if (order.totalItems > 0) {
-        order.preparedItemsCount.toFloat() / order.totalItems.toFloat()
-    } else {
-        0f
-    }
 
     DetailHeroCard(
         theme = AppSectionTheme.Restaurant,
         icon = Icons.Rounded.Restaurant,
-        title = if (order.isScheduledForLater) "Reserva de comida" else "Pedido restaurante",
-        subtitle = order.scheduledDateText,
+        title = if (order.isAgendaScheduledForLater) "Reserva de comida" else "Pedido restaurante",
+        subtitle = order.scheduledAgendaDateText,
         status = effectiveStatus.toUnifiedStatus(),
         total = order.totalAmount,
     )
@@ -1646,38 +1660,29 @@ private fun RestaurantOrderDetailContent(
         title = "Horario",
         subtitle = "Resumen de servicio del pedido.",
     ) {
-        DetailRow("Cliente", order.clientName)
-        if (order.isScheduledForLater) {
-            DetailRow("WhatsApp", order.displayWhatsApp)
+        DetailRow("Cliente", order.clientName.ifBlank { "Cliente" })
+        if (order.isAgendaScheduledForLater) {
+            DetailRow("WhatsApp", order.agendaWhatsAppText)
         }
-        DetailRow("Mesa", order.tableNumber)
+        DetailRow("Mesa", order.tableNumber.ifBlank { "sin asignar" })
         DetailRow("Servicio", order.serviceMode.title)
-        DetailRow("Programado", order.scheduledDateText)
+        DetailRow("Programado", order.scheduledAgendaDateText)
         DetailRow("Creado", order.createdAt.shortDateTime())
+        DetailRow("Estado", effectiveStatus.clientTitle)
 
-        if (order.requiresReconfirmation) {
+        if (order.requiresAgendaReconfirmation) {
             WarningBadge(text = "Este pedido requiere reconfirmación")
         }
 
-        if (order.wasEditedAfterConfirmation) {
+        if (order.wasAgendaEditedAfterConfirmation) {
             WarningBadge(text = "Fue editado después de confirmar")
         }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(CircleShape),
-            color = effectiveStatus.statusColor(),
-            trackColor = palette.stroke,
-        )
     }
 
     DetailSection(
         theme = AppSectionTheme.Restaurant,
         title = "Productos",
-        subtitle = "Todo lo incluido en este pedido.",
+        subtitle = "Cada línea es una unidad exacta del pedido.",
     ) {
         order.items.forEach { item ->
             OrderDetailItemCard(item = item)
@@ -1708,7 +1713,7 @@ private fun RestaurantOrderDetailContent(
     DetailSection(
         theme = AppSectionTheme.Restaurant,
         title = "Montos",
-        subtitle = "Resumen económico.",
+        subtitle = if (effectiveStatus == OrderStatus.PAID) "Pagado y cerrado." else "Resumen económico.",
     ) {
         DetailAmountRow("Subtotal", order.subtotal)
 
@@ -1735,11 +1740,6 @@ private fun OrderDetailItemCard(
     item: OrderItem,
 ) {
     val palette = LocalBrandPalette.current
-    val progress = if (item.quantity > 0) {
-        item.safePreparedQuantity.toFloat() / item.quantity.toFloat()
-    } else {
-        0f
-    }
 
     Column(
         modifier = Modifier
@@ -1769,70 +1769,28 @@ private fun OrderDetailItemCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = item.name,
+                    text = "1x ${item.name}",
                     style = MaterialTheme.typography.titleSmall,
                     color = palette.textPrimary,
                     fontWeight = FontWeight.Bold,
                 )
 
                 Text(
-                    text = "${item.quantity} × ${item.unitPrice.agendaPriceText()}",
+                    text = "Unitario: ${item.unitPrice.agendaPriceText()}",
                     style = MaterialTheme.typography.labelMedium,
                     color = palette.textSecondary,
                 )
 
-                Text(
-                    text = "Pendiente: ${item.remainingQuantity}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = palette.textTertiary,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                OrderItemStatusPill(status = item.status)
             }
 
             Text(
-                text = item.totalPrice.agendaPriceText(),
+                text = item.totalAgendaPrice.agendaPriceText(),
                 style = MaterialTheme.typography.titleSmall,
                 color = palette.textPrimary,
                 fontWeight = FontWeight.ExtraBold,
             )
         }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = "Preparado: ${item.safePreparedQuantity}/${item.quantity}",
-                style = MaterialTheme.typography.labelMedium,
-                color = palette.textSecondary,
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            StatusMiniText(
-                text = when {
-                    item.isCompleted -> "Completo"
-                    item.isStarted -> "En proceso"
-                    else -> "Pendiente"
-                },
-                color = when {
-                    item.isCompleted -> palette.success
-                    item.isStarted -> palette.warning
-                    else -> palette.textTertiary
-                },
-            )
-        }
-
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(7.dp)
-                .clip(CircleShape),
-            color = when {
-                item.isCompleted -> palette.success
-                item.isStarted -> palette.warning
-                else -> palette.textTertiary
-            },
-            trackColor = palette.stroke,
-        )
 
         item.notes?.takeIf { it.isNotBlank() }?.let { notes ->
             Row(
@@ -2030,10 +1988,6 @@ private fun AdventureBookingDetailContent(
         }
     }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Detail components                                                           */
-/* -------------------------------------------------------------------------- */
 
 @Composable
 private fun DetailHeroCard(
@@ -2411,10 +2365,6 @@ private fun DetailNoteCard(
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* Small shared UI                                                             */
-/* -------------------------------------------------------------------------- */
-
 @Composable
 private fun StatusPill(
     status: UnifiedReservationStatus,
@@ -2445,6 +2395,32 @@ private fun StatusPill(
                 fontWeight = FontWeight.Bold,
             )
         }
+    }
+}
+
+@Composable
+private fun OrderItemStatusPill(status: OrderItemStatus) {
+    val palette = LocalBrandPalette.current
+    val color = when (status) {
+        OrderItemStatus.PENDING -> palette.textSecondary
+        OrderItemStatus.PREPARING -> palette.warning
+        OrderItemStatus.READY_FOR_DELIVERY -> palette.primary
+        OrderItemStatus.DELIVERED -> palette.success
+        OrderItemStatus.CANCELED -> palette.destructive
+    }
+
+    Surface(
+        color = color.copy(alpha = if (LocalBrandDarkTheme.current) 0.18f else 0.12f),
+        shape = CircleShape,
+        border = BorderStroke(1.dp, color.copy(alpha = 0.30f)),
+    ) {
+        Text(
+            text = status.clientTitle,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
@@ -2535,19 +2511,6 @@ private fun WarningBadge(
             )
         }
     }
-}
-
-@Composable
-private fun StatusMiniText(
-    text: String,
-    color: Color,
-) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.labelMedium,
-        color = color,
-        fontWeight = FontWeight.Bold,
-    )
 }
 
 @Composable
@@ -2678,7 +2641,7 @@ private fun EmptyReservationsState(
                     "Las próximas reservas de comida, aventura o eventos aparecerán aquí."
 
                 selectedScope == BookingsTimelineScope.HISTORY ->
-                    "Tus reservas completadas, pasadas o canceladas aparecerán aquí."
+                    "Tus reservas pagadas, completadas, pasadas o canceladas aparecerán aquí."
 
                 else ->
                     "Cuando hagas pedidos o reserves experiencias, aparecerán aquí."
@@ -2688,10 +2651,6 @@ private fun EmptyReservationsState(
         )
     }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Sorting, grouping and helpers                                               */
-/* -------------------------------------------------------------------------- */
 
 private fun List<UnifiedReservation>.sortedByOption(
     sortOption: BookingsSortOption,
@@ -2769,9 +2728,11 @@ private fun List<UnifiedReservation>.groupedByOption(
 
         BookingsGroupingOption.BY_STATUS -> {
             val order = listOf(
-                UnifiedReservationStatus.PENDING,
-                UnifiedReservationStatus.CONFIRMED,
+                UnifiedReservationStatus.READY_FOR_PAYMENT,
                 UnifiedReservationStatus.PREPARING,
+                UnifiedReservationStatus.CONFIRMED,
+                UnifiedReservationStatus.PENDING,
+                UnifiedReservationStatus.PAID,
                 UnifiedReservationStatus.COMPLETED,
                 UnifiedReservationStatus.CANCELED,
             )
@@ -2811,8 +2772,10 @@ private fun statusSubtitle(status: UnifiedReservationStatus): String {
     return when (status) {
         UnifiedReservationStatus.PENDING -> "Esperando confirmación"
         UnifiedReservationStatus.CONFIRMED -> "Reserva aceptada"
-        UnifiedReservationStatus.PREPARING -> "Pedido en preparación"
-        UnifiedReservationStatus.COMPLETED -> "Reserva finalizada"
+        UnifiedReservationStatus.PREPARING -> "Pedido en cocina"
+        UnifiedReservationStatus.READY_FOR_PAYMENT -> "Servido y pendiente de pago"
+        UnifiedReservationStatus.PAID -> "Pedido pagado"
+        UnifiedReservationStatus.COMPLETED -> "Experiencia finalizada"
         UnifiedReservationStatus.CANCELED -> "Reserva cancelada"
     }
 }
@@ -2822,13 +2785,49 @@ private fun List<UnifiedReservation>.visibleTotal(): Double {
 }
 
 fun Order.recalculatedAgendaStatus(): OrderStatus {
-    return when {
-        status == OrderStatus.CANCELED -> OrderStatus.CANCELED
-        requiresReconfirmation -> OrderStatus.PENDING
-        allItemsCompleted -> OrderStatus.COMPLETED
-        hasStartedPreparing -> OrderStatus.PREPARING
-        status == OrderStatus.CONFIRMED -> OrderStatus.CONFIRMED
-        else -> OrderStatus.PENDING
+    if (status == OrderStatus.PAID) return OrderStatus.PAID
+    if (status == OrderStatus.CANCELED) return OrderStatus.CANCELED
+    if (status == OrderStatus.PENDING) return OrderStatus.PENDING
+
+    val activeItems = items.filter { it.status != OrderItemStatus.CANCELED }
+
+    if (activeItems.isEmpty()) return status
+
+    if (activeItems.all { it.status == OrderItemStatus.DELIVERED }) {
+        return OrderStatus.READY_FOR_PAYMENT
+    }
+
+    if (activeItems.any { item ->
+            item.status == OrderItemStatus.PREPARING ||
+                    item.status == OrderItemStatus.READY_FOR_DELIVERY ||
+                    item.status == OrderItemStatus.DELIVERED
+        }) {
+        return OrderStatus.PREPARING
+    }
+
+    return OrderStatus.CONFIRMED
+}
+
+private fun orderProgressText(order: Order): String {
+    val status = order.recalculatedAgendaStatus()
+
+    return when (status) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> {
+            val active = order.activeAgendaItems.size
+            val delivered = order.deliveredAgendaItems.size
+            val ready = order.readyForDeliveryAgendaItems.size
+
+            when {
+                ready > 0 -> "$ready listo(s) · $delivered/$active servidos"
+                active > 0 -> "$delivered/$active servidos"
+                else -> "En cocina"
+            }
+        }
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
     }
 }
 
@@ -2837,7 +2836,8 @@ private fun OrderStatus.toUnifiedStatus(): UnifiedReservationStatus {
         OrderStatus.PENDING -> UnifiedReservationStatus.PENDING
         OrderStatus.CONFIRMED -> UnifiedReservationStatus.CONFIRMED
         OrderStatus.PREPARING -> UnifiedReservationStatus.PREPARING
-        OrderStatus.COMPLETED -> UnifiedReservationStatus.COMPLETED
+        OrderStatus.READY_FOR_PAYMENT -> UnifiedReservationStatus.READY_FOR_PAYMENT
+        OrderStatus.PAID -> UnifiedReservationStatus.PAID
         OrderStatus.CANCELED -> UnifiedReservationStatus.CANCELED
     }
 }
@@ -2859,6 +2859,8 @@ private fun UnifiedReservationStatus.statusColor(): Color {
         UnifiedReservationStatus.PENDING -> palette.warning
         UnifiedReservationStatus.CONFIRMED -> palette.success
         UnifiedReservationStatus.PREPARING -> Color(0xFF8B5CF6)
+        UnifiedReservationStatus.READY_FOR_PAYMENT -> palette.primary
+        UnifiedReservationStatus.PAID -> palette.success
         UnifiedReservationStatus.COMPLETED -> Color(0xFF3B82F6)
         UnifiedReservationStatus.CANCELED -> palette.destructive
     }
@@ -2868,6 +2870,55 @@ private fun UnifiedReservationStatus.statusColor(): Color {
 private fun OrderStatus.statusColor(): Color {
     return toUnifiedStatus().statusColor()
 }
+
+private val Order.activeAgendaItems: List<OrderItem>
+    get() = items.filter { it.status != OrderItemStatus.CANCELED }
+
+private val Order.readyForDeliveryAgendaItems: List<OrderItem>
+    get() = items.filter { it.status == OrderItemStatus.READY_FOR_DELIVERY }
+
+private val Order.deliveredAgendaItems: List<OrderItem>
+    get() = items.filter { it.status == OrderItemStatus.DELIVERED }
+
+private val Order.totalAgendaItems: Int
+    get() = activeAgendaItems.size
+
+private val Order.requiresAgendaReconfirmation: Boolean
+    get() = lastConfirmedRevision != revision
+
+private val Order.wasAgendaEditedAfterConfirmation: Boolean
+    get() = lastConfirmedRevision?.let { revision > it } ?: false
+
+private val Order.isAgendaScheduledForLater: Boolean
+    get() = serviceMode == OrderServiceMode.SCHEDULED || scheduledAt.time - createdAt.time > 15 * 60 * 1000
+
+private val Order.scheduledAgendaDateText: String
+    get() = scheduledAt.shortDateTime()
+
+private val Order.agendaWhatsAppText: String
+    get() = whatsappNumber.trim().ifEmpty { "Cliente escribirá por WhatsApp" }
+
+private val OrderItem.totalAgendaPrice: Double
+    get() = unitPrice * quantity.coerceAtLeast(1)
+
+private val OrderStatus.clientTitle: String
+    get() = when (this) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> "En cocina"
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
+    }
+
+private val OrderItemStatus.clientTitle: String
+    get() = when (this) {
+        OrderItemStatus.PENDING -> "En espera"
+        OrderItemStatus.PREPARING -> "Preparando"
+        OrderItemStatus.READY_FOR_DELIVERY -> "Listo"
+        OrderItemStatus.DELIVERED -> "Servido"
+        OrderItemStatus.CANCELED -> "Cancelado"
+    }
 
 private fun Date.addMinutes(minutes: Int): Date {
     return Calendar.getInstance().apply {
@@ -2926,9 +2977,6 @@ private fun Date.shortTime(): String {
 private fun Double.agendaPriceText(): String {
     return "$${String.format(Locale.US, "%.2f", this)}"
 }
-
-private val ReservationFoodDraft.isEmpty: Boolean
-    get() = items.isEmpty()
 
 private fun AdventureBookingBlock.unitsText(): String {
     return when (resourceType) {

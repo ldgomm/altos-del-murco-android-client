@@ -11781,25 +11781,35 @@ class FeaturedFeedRepository @Inject constructor(
     }
 
     private fun baseActiveQuery(): Query = firestore
-        .collection(FEATURED_POSTS_COLLECTION)
+        .collection(FirestoreCollections.FEATURED_POSTS)
         .whereEqualTo("isVisible", true)
         .whereGreaterThan("expiresAt", Timestamp(Date()))
         .orderBy("expiresAt", Query.Direction.DESCENDING)
-
-    private companion object {
-        // This is intentionally "featured_posts" because that is what the iOS app uses.
-        const val FEATURED_POSTS_COLLECTION = "featured_posts"
-    }
 }
 
 ```
 
 ---
 
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/data/FeaturedPostDtoMapper.kt
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/FeaturedFeedRepositoriable.kt
 
 ```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.data
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
+
+
+interface FeaturedFeedRepositoriable {
+    fun observeLatest(limit: Int): kotlinx.coroutines.flow.Flow<FeaturedFeedPage>
+    suspend fun fetchNextPage(limit: Int, after: DocumentSnapshot?): FeaturedFeedPage
+}
+
+```
+
+---
+
+# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/FeaturedPostDtoMapper.kt
+
+```kotlin
+package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
 
 
 internal fun DocumentSnapshot.toFeaturedPostOrNull(): FeaturedPost? {
@@ -11886,21 +11896,6 @@ private fun Map<*, *>.doubleValueOrNull(field: String): Double? = when (val valu
     is Int -> value.toDouble()
     is Number -> value.toDouble()
     else -> null
-}
-
-```
-
----
-
-# app/src/main/java/com/premierdarkcoffee/tourism/altosdelmurco/root/feature/altos/home/domain/FeaturedFeedRepositoriable.kt
-
-```kotlin
-package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.home.domain
-
-
-interface FeaturedFeedRepositoriable {
-    fun observeLatest(limit: Int): kotlinx.coroutines.flow.Flow<FeaturedFeedPage>
-    suspend fun fetchNextPage(limit: Int, after: DocumentSnapshot?): FeaturedFeedPage
 }
 
 ```
@@ -25862,7 +25857,7 @@ object FirestoreCollections {
     const val RESTAURANT_ORDERS = "restaurant_orders"
     const val CLIENT_LOYALTY_WALLETS = "client_loyalty_wallets"
     const val LOYALTY_REWARD_TEMPLATES = "loyalty_reward_templates"
-    const val POSTS = "posts"
+    const val FEATURED_POSTS = "featured_posts"
 }
 
 ```

@@ -1,6 +1,5 @@
 package com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.viewmodel
 
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view.recalculatedAgendaStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 
@@ -20,13 +19,21 @@ data class OrdersUiState(
             } ?: orders
 
             return when (sortOption) {
-                OrdersSortOption.NEAREST_SERVICE -> filtered.sortedWith(compareBy<Order> { it.scheduledAt.time }.thenBy { it.createdAt.time })
+                OrdersSortOption.NEAREST_SERVICE -> filtered.sortedWith(
+                    compareBy<Order> { it.scheduledAt.time }.thenBy { it.createdAt.time },
+                )
 
-                OrdersSortOption.FARTHEST_SERVICE -> filtered.sortedWith(compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time })
+                OrdersSortOption.FARTHEST_SERVICE -> filtered.sortedWith(
+                    compareByDescending<Order> { it.scheduledAt.time }.thenByDescending { it.createdAt.time },
+                )
 
-                OrdersSortOption.NEWEST_CREATED -> filtered.sortedWith(compareByDescending<Order> { it.createdAt.time }.thenByDescending { it.scheduledAt.time })
+                OrdersSortOption.NEWEST_CREATED -> filtered.sortedWith(
+                    compareByDescending<Order> { it.createdAt.time }.thenByDescending { it.scheduledAt.time },
+                )
 
-                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedWith(compareByDescending<Order> { it.totalAmount }.thenBy { it.scheduledAt.time })
+                OrdersSortOption.HIGHEST_TOTAL -> filtered.sortedWith(
+                    compareByDescending<Order> { it.totalAmount }.thenBy { it.scheduledAt.time },
+                )
             }
         }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -47,8 +49,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.booking.presentation.view.recalculatedAgendaStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.Order
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItemStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.cart.ErrorCardInline
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.presentation.view.menu.priceLabel
@@ -77,6 +79,7 @@ fun OrdersScreen(
     onGroupingSelected: (OrdersGroupingOption) -> Unit,
     onSortSelected: (OrdersSortOption) -> Unit,
     onStatusSelected: (OrderStatus?) -> Unit,
+    onCancelOrder: (Order) -> Unit,
     onDismissError: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -117,6 +120,7 @@ fun OrdersScreen(
                 onGroupingSelected = onGroupingSelected,
                 onSortSelected = onSortSelected,
                 onStatusSelected = onStatusSelected,
+                onCancelOrder = onCancelOrder,
                 onDismissError = onDismissError,
             )
         }
@@ -130,12 +134,13 @@ private fun LazyOrdersContent(
     onGroupingSelected: (OrdersGroupingOption) -> Unit,
     onSortSelected: (OrdersSortOption) -> Unit,
     onStatusSelected: (OrderStatus?) -> Unit,
+    onCancelOrder: (Order) -> Unit,
     onDismissError: () -> Unit,
 ) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(RestaurantTheme, darkTheme)
 
-    androidx.compose.foundation.lazy.LazyColumn(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(innerPadding),
@@ -191,7 +196,15 @@ private fun LazyOrdersContent(
                     )
                 }
 
-                items(orders, key = { it.id }) { order -> OrderCard(order = order) }
+                items(
+                    items = orders,
+                    key = { it.id },
+                ) { order ->
+                    OrderCard(
+                        order = order,
+                        onCancelOrder = onCancelOrder,
+                    )
+                }
             }
         }
     }
@@ -212,8 +225,7 @@ private fun OrdersControlsCard(
         modifier = Modifier
             .fillMaxWidth()
             .appCardStyle(
-                theme = RestaurantTheme,
-                emphasized = true,
+                theme = RestaurantTheme
             ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -270,7 +282,7 @@ private fun OrdersControlsCard(
             OrderStatus.entries.forEach { status ->
                 RestaurantFilterChip(
                     selected = state.statusFilter == status,
-                    label = status.title,
+                    label = status.clientTitle,
                     onClick = { onStatusSelected(status) },
                 )
             }
@@ -408,8 +420,7 @@ private fun EmptyOrdersCard() {
             modifier = Modifier
                 .fillMaxWidth()
                 .appCardStyle(
-                    theme = RestaurantTheme,
-                    emphasized = true,
+                    theme = RestaurantTheme
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -437,9 +448,13 @@ private fun EmptyOrdersCard() {
 }
 
 @Composable
-private fun OrderCard(order: Order) {
+private fun OrderCard(
+    order: Order,
+    onCancelOrder: (Order) -> Unit,
+) {
     val darkTheme = LocalBrandDarkTheme.current
     val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+    val displayStatus = order.recalculatedStatus()
 
     Column(
         modifier = Modifier
@@ -462,21 +477,20 @@ private fun OrderCard(order: Order) {
                 )
 
                 Text(
-                    text = "${order.totalItems} producto(s) • Mesa ${order.tableNumber}",
+                    text = "Mesa ${order.tableNumber}",
                     color = palette.textSecondary,
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
-                if (order.isScheduledForLater) {
-                    Text(
-                        text = "WhatsApp: ${order.displayWhatsApp}",
-                        color = palette.textSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+                Text(
+                    text = orderProgressText(order),
+                    color = palette.textPrimary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
 
-            StatusPill(order.status)
+            StatusPill(status = displayStatus)
         }
 
         HorizontalDivider(
@@ -484,43 +498,7 @@ private fun OrderCard(order: Order) {
         )
 
         order.items.take(3).forEach { item ->
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top,
-            ) {
-                BrandIconBubble(
-                    theme = RestaurantTheme,
-                    icon = Icons.Rounded.RestaurantMenu,
-                    size = 36.dp,
-                )
-
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    Text(
-                        text = "${item.quantity}x ${item.name}",
-                        fontWeight = FontWeight.SemiBold,
-                        color = palette.textPrimary,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-
-                    if (!item.notes.isNullOrBlank()) {
-                        Text(
-                            text = item.notes.orEmpty(),
-                            color = palette.textSecondary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-
-                Text(
-                    text = item.totalPrice.priceLabel(),
-                    fontWeight = FontWeight.Bold,
-                    color = palette.textPrimary,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
+            OrderItemRow(item = item)
         }
 
         if (order.items.size > 3) {
@@ -553,6 +531,85 @@ private fun OrderCard(order: Order) {
                 color = palette.primary,
             )
         }
+
+        if (displayStatus.canClientCancel) {
+            OutlinedButton(
+                onClick = { onCancelOrder(order) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Cancelar pedido")
+            }
+        }
+    }
+}
+
+@Composable
+private fun OrderItemRow(item: com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        BrandIconBubble(
+            theme = RestaurantTheme,
+            icon = Icons.Rounded.RestaurantMenu,
+            size = 36.dp,
+        )
+
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "1x ${item.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = palette.textPrimary,
+            )
+
+            if (!item.notes.isNullOrBlank()) {
+                Text(
+                    text = item.notes,
+                    color = palette.textSecondary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            OrderItemStatusPill(status = item.status)
+        }
+
+        Text(
+            text = item.totalPrice.priceLabel(),
+            fontWeight = FontWeight.Bold,
+            color = palette.textPrimary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+private fun orderProgressText(order: Order): String {
+    val status = order.recalculatedStatus()
+
+    return when (status) {
+        OrderStatus.PENDING -> "Pedido enviado"
+        OrderStatus.CONFIRMED -> "Pedido confirmado"
+        OrderStatus.PREPARING -> {
+            val active = order.activeItems.size
+            val delivered = order.deliveredItems.size
+            val ready = order.readyForDeliveryItems.size
+
+            when {
+                ready > 0 -> "$ready listo(s) · $delivered/$active servidos"
+                active > 0 -> "$delivered/$active servidos"
+                else -> "En cocina"
+            }
+        }
+
+        OrderStatus.READY_FOR_PAYMENT -> "Pedido servido / listo para pagar"
+        OrderStatus.PAID -> "Pagado"
+        OrderStatus.CANCELED -> "Cancelado"
     }
 }
 
@@ -565,7 +622,8 @@ private fun StatusPill(status: OrderStatus) {
         OrderStatus.PENDING -> palette.warning
         OrderStatus.CONFIRMED -> palette.primary
         OrderStatus.PREPARING -> palette.accent
-        OrderStatus.COMPLETED -> palette.success
+        OrderStatus.READY_FOR_PAYMENT -> palette.secondary
+        OrderStatus.PAID -> palette.success
         OrderStatus.CANCELED -> palette.destructive
     }
 
@@ -576,7 +634,7 @@ private fun StatusPill(status: OrderStatus) {
         shadowElevation = 0.dp,
     ) {
         Text(
-            text = status.title,
+            text = status.clientTitle,
             color = color,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -585,18 +643,49 @@ private fun StatusPill(status: OrderStatus) {
     }
 }
 
-private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
-    return when (state.grouping) {
-        OrdersGroupingOption.DATE -> state.visibleOrders.groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
-            .map {
-                it.key to it.value.sortedWith(compareBy<Order> { order -> order.scheduledAt.time }.thenBy { order -> order.createdAt.time })
-            }
+@Composable
+private fun OrderItemStatusPill(status: OrderItemStatus) {
+    val darkTheme = LocalBrandDarkTheme.current
+    val palette = AppTheme.palette(RestaurantTheme, darkTheme)
 
-        OrdersGroupingOption.STATUS -> state.visibleOrders.groupBy { it.recalculatedAgendaStatus().title }
-            .map { it.key to it.value }
+    val color = when (status) {
+        OrderItemStatus.PENDING -> palette.textSecondary
+        OrderItemStatus.PREPARING -> palette.warning
+        OrderItemStatus.READY_FOR_DELIVERY -> palette.primary
+        OrderItemStatus.DELIVERED -> palette.success
+        OrderItemStatus.CANCELED -> palette.destructive
+    }
+
+    Surface(
+        color = color.copy(alpha = if (darkTheme) 0.18f else 0.12f),
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Text(
+            text = status.clientTitle,
+            color = color,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        )
     }
 }
 
+private fun groupOrders(state: OrdersUiState): List<Pair<String, List<Order>>> {
+    return when (state.grouping) {
+        OrdersGroupingOption.DATE -> state.visibleOrders
+            .groupBy { OrdersViewModel.dateGroupTitle(it.scheduledAt) }
+            .map { (title, orders) ->
+                title to orders.sortedWith(
+                    compareBy<Order> { order -> order.scheduledAt.time }
+                        .thenBy { order -> order.createdAt.time },
+                )
+            }
+
+        OrdersGroupingOption.STATUS -> state.visibleOrders
+            .groupBy { it.recalculatedStatus().clientTitle }
+            .map { (title, orders) -> title to orders }
+    }
+}
 
 private fun Date.shortDateTime(): String {
     return SimpleDateFormat(

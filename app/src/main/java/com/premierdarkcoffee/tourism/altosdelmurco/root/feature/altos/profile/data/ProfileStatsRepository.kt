@@ -14,7 +14,6 @@ import com.premierdarkcoffee.tourism.altosdelmurco.util.constant.FirestoreCollec
 import com.premierdarkcoffee.tourism.altosdelmurco.util.database.awaitResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -42,29 +41,33 @@ class ProfileStatsRepository @Inject constructor(
         if (cleanUserId.isEmpty()) return ProfileStats.EMPTY
 
         val orderSnapshot = firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("userId", cleanUserId).get().awaitResult()
+            .whereEqualTo("userId", cleanUserId)
+            .get()
+            .awaitResult()
 
         val bookingSnapshot = firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("userId", cleanUserId).get().awaitResult()
+            .whereEqualTo("userId", cleanUserId)
+            .get()
+            .awaitResult()
 
         val wallet = loyaltyRewardsRepository.loadWalletSnapshot(cleanUserId)
 
-        val completedOrders = orderSnapshot.documents.mapNotNull { document ->
-            document.toObject(OrderDto::class.java)?.toDomain()
-        }.filter { order -> order.status == OrderStatus.COMPLETED }
+        val paidOrders = orderSnapshot.documents
+            .mapNotNull { document -> document.toObject(OrderDto::class.java)?.toDomain() }
+            .filter { order -> order.recalculatedStatus() == OrderStatus.PAID }
 
-        val completedBookings = bookingSnapshot.documents.mapNotNull { document ->
-            document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id)
-        }.filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
+        val completedBookings = bookingSnapshot.documents
+            .mapNotNull { document -> document.toObject(AdventureBookingDto::class.java)?.toDomain(document.id) }
+            .filter { booking -> booking.status == AdventureBookingStatus.COMPLETED }
 
-        val restaurantSpent = completedOrders.sumOf { it.totalAmount }.roundMoney()
+        val restaurantSpent = paidOrders.sumOf { it.totalAmount }.roundMoney()
         val adventureSpent = completedBookings.sumOf { it.totalAmount }.roundMoney()
         val totalSpent = (restaurantSpent + adventureSpent).roundMoney()
         val computedLevel = LoyaltyLevel.fromTotalSpent(totalSpent)
 
         return ProfileStats(
             points = wallet.points.coerceAtLeast(totalSpent.toInt()),
-            completedOrders = completedOrders.size,
+            completedOrders = paidOrders.size,
             completedBookings = completedBookings.size,
             restaurantSpent = restaurantSpent,
             adventureSpent = adventureSpent,
@@ -94,32 +97,40 @@ class ProfileStatsRepository @Inject constructor(
             refreshRequests.tryEmit(Unit)
         }
 
-        val loaderJob: Job = launch {
-            refreshRequests.onStart { emit(Unit) }.debounce(160)
-                .mapLatest { loadStats(cleanUserId) }.catch { error ->
+        val loaderJob = launch {
+            refreshRequests
+                .onStart { emit(Unit) }
+                .debounce(160)
+                .mapLatest { loadStats(cleanUserId) }
+                .catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }.collect { stats ->
+                }
+                .collect { stats ->
                     trySend(stats).isSuccess
                 }
         }
 
         registrations += firestore.collection(FirestoreCollections.RESTAURANT_ORDERS)
-            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
+            .whereEqualTo("userId", cleanUserId)
+            .addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
         registrations += firestore.collection(FirestoreCollections.ADVENTURE_BOOKINGS)
-            .whereEqualTo("userId", cleanUserId).addSnapshotListener { _, error ->
+            .whereEqualTo("userId", cleanUserId)
+            .addSnapshotListener { _, error ->
                 if (error != null) close(error) else requestRefresh()
             }
 
         val walletJob =
-            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId).onEach { requestRefresh() }
+            loyaltyRewardsRepository.observeWalletSnapshot(cleanUserId)
+                .onEach { requestRefresh() }
                 .catch { error ->
                     if (error is CancellationException) throw error
                     close(error)
-                }.launchIn(this)
+                }
+                .launchIn(this)
 
         awaitClose {
             registrations.forEach { it.remove() }
@@ -128,6 +139,5 @@ class ProfileStatsRepository @Inject constructor(
         }
     }
 }
-
 
 private fun Double.roundMoney(): Double = round(this * 100.0) / 100.0

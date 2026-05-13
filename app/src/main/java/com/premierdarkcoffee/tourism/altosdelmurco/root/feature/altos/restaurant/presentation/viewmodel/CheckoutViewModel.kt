@@ -12,6 +12,7 @@ import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderDraft
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderItem
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderScheduleFormatter
+import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.OrderStatus
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SaveCartDraftUseCase
 import com.premierdarkcoffee.tourism.altosdelmurco.root.feature.altos.restaurant.domain.SubmitOrderUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -26,7 +27,6 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.Date
-import java.util.UUID
 import javax.inject.Inject
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -112,8 +112,13 @@ class CheckoutViewModel @Inject constructor(
     fun submit(openWhatsAppAfterSubmit: Boolean = false) {
         val rawDraft = _uiState.value.draft
         val cleanUserId = rawDraft.userId.trim().ifEmpty { currentUserId }
+
         val normalizedWhatsApp = runCatching {
-            if (rawDraft.isScheduledForLater) normalizedOptionalEcuadorWhatsApp(rawDraft.whatsappNumber) else ""
+            if (rawDraft.isScheduledForLater) {
+                normalizedOptionalEcuadorWhatsApp(rawDraft.whatsappNumber)
+            } else {
+                ""
+            }
         }.getOrElse { error ->
             _uiState.update {
                 it.copy(errorMessage = error.message ?: "El WhatsApp ingresado no parece válido.")
@@ -122,9 +127,9 @@ class CheckoutViewModel @Inject constructor(
         }
 
         val draft = rawDraft.copy(
-                userId = cleanUserId,
-                whatsappNumber = normalizedWhatsApp,
-            ).normalizedForSubmit()
+            userId = cleanUserId,
+            whatsappNumber = normalizedWhatsApp,
+        ).normalizedForSubmit()
 
         if (!draft.canSubmit) {
             _uiState.update {
@@ -140,26 +145,27 @@ class CheckoutViewModel @Inject constructor(
         }
 
         if (cleanUserId.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Debes iniciar sesión nuevamente para continuar.") }
+            _uiState.update {
+                it.copy(errorMessage = "Debes iniciar sesión nuevamente para continuar.")
+            }
             return
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
+            _uiState.update {
+                it.copy(isSubmitting = true, errorMessage = null)
+            }
 
             try {
-                val preview = buildRewardPreview(draft)
-                val finalOrder = draft.toOrder(
-                        orderId = UUID.randomUUID().toString(),
-                        userId = cleanUserId,
-                    ).withLoyalty(
-                        appliedRewards = preview.appliedRewards,
-                        discount = preview.totalDiscount,
-                    )
+                val order = draft.toOrder(
+                    loyaltyDiscountAmount = _uiState.value.discount, //No parameter with name 'loyaltyDiscountAmount' found.
+                    appliedRewards = _uiState.value.rewardPreview.appliedRewards, //No parameter with name 'appliedRewards' found.
+                )
 
-                submitOrderUseCase.execute(finalOrder)
+                submitOrderUseCase.execute(order)
                 clearCartDraftUseCase.execute()
-                _createdOrder.emit(finalOrder)
+
+                _createdOrder.emit(order)
 
                 if (openWhatsAppAfterSubmit) {
                     _openWhatsAppAfterSubmit.tryEmit(Unit)
@@ -168,13 +174,9 @@ class CheckoutViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        rewardPreview = RewardComputationResult.empty(
-                            RewardWalletSnapshot.empty(currentUserId),
-                        ),
+                        errorMessage = null,
                     )
                 }
-            } catch (error: CancellationException) {
-                throw error
             } catch (error: Throwable) {
                 _uiState.update {
                     it.copy(
@@ -184,6 +186,28 @@ class CheckoutViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    private suspend fun buildRewardPreview(
+        userId: String,
+        draft: OrderDraft,
+    ): RewardComputationResult {
+        val previewItems = draft.items.flatMap { cartItem ->
+            OrderItem.normalizedUnits(
+                sourceCartItemId = cartItem.id,
+                menuItemId = cartItem.menuItem.id,
+                name = cartItem.menuItem.name,
+                itemDescription = cartItem.menuItem.description,
+                unitPrice = cartItem.unitPrice,
+                quantity = cartItem.safeQuantity,
+                notes = cartItem.notes,
+            )
+        }
+
+        return loyaltyRewardsRepository.previewRestaurantRewards(
+            userId = userId,
+            items = previewItems,
+        )
     }
 
     private fun saveDraft(draft: OrderDraft) {
@@ -236,10 +260,12 @@ class CheckoutViewModel @Inject constructor(
             return RewardComputationResult.empty(RewardWalletSnapshot.empty(cleanUserId))
         }
 
-        val previewItems = draft.items.map {
-            OrderItem(
+        val previewItems = draft.items.flatMap {
+            OrderItem.normalizedUnits(
+                sourceCartItemId = it.id,
                 menuItemId = it.menuItem.id,
                 name = it.menuItem.name,
+                itemDescription = it.menuItem.description,
                 unitPrice = it.unitPrice,
                 quantity = it.safeQuantity,
                 notes = it.notes,
@@ -256,10 +282,10 @@ class CheckoutViewModel @Inject constructor(
         val digits = rawValue.filter(Char::isDigit)
         if (digits.isEmpty()) return ""
 
-        return when {
-            digits.length == 10 && digits.startsWith("09") -> "593${digits.drop(1)}"
-            digits.length == 12 && digits.startsWith("5939") -> digits
-            digits.length == 9 && digits.startsWith("9") -> "593$digits"
+        return when (digits.length) {
+            10 if digits.startsWith("09") -> "593${digits.drop(1)}"
+            12 if digits.startsWith("5939") -> digits
+            9 if digits.startsWith("9") -> "593$digits"
             else -> error("El WhatsApp ingresado no parece válido. Corrígelo o déjalo vacío para escribirnos después por WhatsApp.")
         }
     }

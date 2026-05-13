@@ -314,10 +314,12 @@ class CartViewModel @Inject constructor(
         userId: String,
         draft: OrderDraft,
     ): RewardComputationResult {
-        val previewItems = draft.items.map {
-            OrderItem(
+        val previewItems = draft.items.flatMap {
+            OrderItem.normalizedUnits(
+                sourceCartItemId = it.id,
                 menuItemId = it.menuItem.id,
                 name = it.menuItem.name,
+                itemDescription = it.menuItem.description,
                 unitPrice = it.unitPrice,
                 quantity = it.safeQuantity,
                 notes = it.notes,
